@@ -1,3 +1,4 @@
+<<<<<<< HEAD
     MIT License
 
     Copyright (c) Microsoft Corporation.
@@ -19,3 +20,6 @@
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
+=======
+Please see https://openjdk.java.net/legal/gplv2+ce.html
+>>>>>>> 76693e9... Update LICENSE
