@@ -5,3 +5,5 @@ JDK Enhancement Proposals and/or patches if we don't have an author space at Ope
 Files will be held here on a temporary basis.
 
 The [LICENSE](LICENSE) matches that of the OpenJDK project.
+
+Our [Code of Conduct](CODE_OF_CONDUCT.md).
