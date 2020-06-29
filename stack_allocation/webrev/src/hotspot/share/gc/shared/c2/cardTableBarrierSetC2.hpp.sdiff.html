@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="cardTableBarrierSetC2.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../cardTable.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 9  * This code is distributed in the hope that it will be useful, but WITHOUT
+10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+12  * version 2 for more details (a copy is included in the LICENSE file that
+13  * accompanied this code).
+14  *
+15  * You should have received a copy of the GNU General Public License version
+16  * 2 along with this work; if not, write to the Free Software Foundation,
+17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+18  *
+19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+20  * or visit www.oracle.com if you need additional information or have any
+21  * questions.
+22  *
+23  */
+24 
+25 #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+26 #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+27 
+28 #include &quot;gc/shared/c2/modRefBarrierSetC2.hpp&quot;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+29 
+30 class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+31 protected:
+32   virtual void post_barrier(GraphKit* kit,
+33                             Node* ctl,
+34                             Node* store,
+35                             Node* obj,
+36                             Node* adr,
+37                             uint adr_idx,
+38                             Node* val,
+39                             BasicType bt,
+40                             bool use_precise) const;
+41 
+42   Node* byte_map_base_node(GraphKit* kit) const;
+43 
+44 public:
+45   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+46   virtual bool is_gc_barrier_node(Node* node) const;
+47   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+48   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
+
+
+49 
+50   bool use_ReduceInitialCardMarks() const;
+
+
+
+
+
+
+
+51 };
+52 
+53 #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 9  * This code is distributed in the hope that it will be useful, but WITHOUT
+10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+12  * version 2 for more details (a copy is included in the LICENSE file that
+13  * accompanied this code).
+14  *
+15  * You should have received a copy of the GNU General Public License version
+16  * 2 along with this work; if not, write to the Free Software Foundation,
+17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+18  *
+19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+20  * or visit www.oracle.com if you need additional information or have any
+21  * questions.
+22  *
+23  */
+24 
+25 #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+26 #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+27 
+28 #include &quot;gc/shared/c2/modRefBarrierSetC2.hpp&quot;
+<span class="line-added">29 #include &quot;utilities/growableArray.hpp&quot;</span>
+<span class="line-added">30 </span>
+<span class="line-added">31 class CastP2XNode;</span>
+<span class="line-added">32 </span>
+<span class="line-added">33 class BarrierSetC2State : public ResourceObj {</span>
+<span class="line-added">34 private:</span>
+<span class="line-added">35   GrowableArray&lt;CastP2XNode*&gt;* _enqueue_barriers;</span>
+<span class="line-added">36 </span>
+<span class="line-added">37 public:</span>
+<span class="line-added">38   BarrierSetC2State(Arena* comp_arena);</span>
+<span class="line-added">39 </span>
+<span class="line-added">40   int enqueue_barriers_count() const;</span>
+<span class="line-added">41   CastP2XNode* enqueue_barrier(int idx) const;</span>
+<span class="line-added">42   void add_enqueue_barrier(CastP2XNode* n);</span>
+<span class="line-added">43   void remove_enqueue_barrier(CastP2XNode* n);</span>
+<span class="line-added">44   bool is_a_barrier(CastP2XNode* n);</span>
+<span class="line-added">45 };</span>
+<span class="line-added">46 </span>
+47 
+48 class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+49 protected:
+50   virtual void post_barrier(GraphKit* kit,
+51                             Node* ctl,
+52                             Node* store,
+53                             Node* obj,
+54                             Node* adr,
+55                             uint adr_idx,
+56                             Node* val,
+57                             BasicType bt,
+58                             bool use_precise) const;
+59 
+60   Node* byte_map_base_node(GraphKit* kit) const;
+61 
+62 public:
+63   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+64   virtual bool is_gc_barrier_node(Node* node) const;
+65   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+66   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
+<span class="line-added">67   virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN&amp; igvn) const;</span>
+<span class="line-added">68   virtual Node* step_over_gc_barrier(Node* c) const;</span>
+69 
+70   bool use_ReduceInitialCardMarks() const;
+<span class="line-added">71 </span>
+<span class="line-added">72   BarrierSetC2State* state() const;</span>
+<span class="line-added">73 </span>
+<span class="line-added">74   virtual void register_potential_barrier_node(Node* node) const;</span>
+<span class="line-added">75   virtual void unregister_potential_barrier_node(Node* node) const;</span>
+<span class="line-added">76   virtual bool expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const;</span>
+<span class="line-added">77   virtual void* create_barrier_state(Arena* comp_arena) const;</span>
+78 };
+79 
+80 #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="cardTableBarrierSetC2.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../cardTable.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

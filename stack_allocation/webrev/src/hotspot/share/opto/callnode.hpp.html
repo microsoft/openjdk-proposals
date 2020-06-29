@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/opto/callnode.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+   1 /*
+   2  * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+   3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+   4  *
+   5  * This code is free software; you can redistribute it and/or modify it
+   6  * under the terms of the GNU General Public License version 2 only, as
+   7  * published by the Free Software Foundation.
+   8  *
+   9  * This code is distributed in the hope that it will be useful, but WITHOUT
+  10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  12  * version 2 for more details (a copy is included in the LICENSE file that
+  13  * accompanied this code).
+  14  *
+  15  * You should have received a copy of the GNU General Public License version
+  16  * 2 along with this work; if not, write to the Free Software Foundation,
+  17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  18  *
+  19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  20  * or visit www.oracle.com if you need additional information or have any
+  21  * questions.
+  22  *
+  23  */
+  24 
+  25 #ifndef SHARE_OPTO_CALLNODE_HPP
+  26 #define SHARE_OPTO_CALLNODE_HPP
+  27 
+  28 #include &quot;opto/connode.hpp&quot;
+  29 #include &quot;opto/mulnode.hpp&quot;
+  30 #include &quot;opto/multnode.hpp&quot;
+  31 #include &quot;opto/opcodes.hpp&quot;
+  32 #include &quot;opto/phaseX.hpp&quot;
+  33 #include &quot;opto/replacednodes.hpp&quot;
+  34 #include &quot;opto/type.hpp&quot;
+  35 
+  36 // Portions of code courtesy of Clifford Click
+  37 
+  38 // Optimization - Graph Style
+  39 
+  40 class Chaitin;
+  41 class NamedCounter;
+  42 class MultiNode;
+  43 class  SafePointNode;
+  44 class   CallNode;
+  45 class     CallJavaNode;
+  46 class       CallStaticJavaNode;
+  47 class       CallDynamicJavaNode;
+  48 class     CallRuntimeNode;
+  49 class       CallLeafNode;
+  50 class         CallLeafNoFPNode;
+  51 class     AllocateNode;
+  52 class       AllocateArrayNode;
+  53 class     BoxLockNode;
+  54 class     LockNode;
+  55 class     UnlockNode;
+  56 class JVMState;
+  57 class OopMap;
+  58 class State;
+  59 class StartNode;
+  60 class MachCallNode;
+  61 class FastLockNode;
+  62 
+  63 //------------------------------StartNode--------------------------------------
+  64 // The method start node
+  65 class StartNode : public MultiNode {
+  66   virtual bool cmp( const Node &amp;n ) const;
+  67   virtual uint size_of() const; // Size is bigger
+  68 public:
+  69   const TypeTuple *_domain;
+  70   StartNode( Node *root, const TypeTuple *domain ) : MultiNode(2), _domain(domain) {
+  71     init_class_id(Class_Start);
+  72     init_req(0,this);
+  73     init_req(1,root);
+  74   }
+  75   virtual int Opcode() const;
+  76   virtual bool pinned() const { return true; };
+  77   virtual const Type *bottom_type() const;
+  78   virtual const TypePtr *adr_type() const { return TypePtr::BOTTOM; }
+  79   virtual const Type* Value(PhaseGVN* phase) const;
+  80   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+  81   virtual void  calling_convention( BasicType* sig_bt, VMRegPair *parm_reg, uint length ) const;
+  82   virtual const RegMask &amp;in_RegMask(uint) const;
+  83   virtual Node *match( const ProjNode *proj, const Matcher *m );
+  84   virtual uint ideal_reg() const { return 0; }
+  85 #ifndef PRODUCT
+  86   virtual void  dump_spec(outputStream *st) const;
+  87   virtual void  dump_compact_spec(outputStream *st) const;
+  88 #endif
+  89 };
+  90 
+  91 //------------------------------StartOSRNode-----------------------------------
+  92 // The method start node for on stack replacement code
+  93 class StartOSRNode : public StartNode {
+  94 public:
+  95   StartOSRNode( Node *root, const TypeTuple *domain ) : StartNode(root, domain) {}
+  96   virtual int   Opcode() const;
+  97   static  const TypeTuple *osr_domain();
+  98 };
+  99 
+ 100 
+ 101 //------------------------------ParmNode---------------------------------------
+ 102 // Incoming parameters
+ 103 class ParmNode : public ProjNode {
+ 104   static const char * const names[TypeFunc::Parms+1];
+ 105 public:
+ 106   ParmNode( StartNode *src, uint con ) : ProjNode(src,con) {
+ 107     init_class_id(Class_Parm);
+ 108   }
+ 109   virtual int Opcode() const;
+ 110   virtual bool  is_CFG() const { return (_con == TypeFunc::Control); }
+ 111   virtual uint ideal_reg() const;
+ 112 #ifndef PRODUCT
+ 113   virtual void dump_spec(outputStream *st) const;
+ 114   virtual void dump_compact_spec(outputStream *st) const;
+ 115   virtual void related(GrowableArray&lt;Node*&gt; *in_rel, GrowableArray&lt;Node*&gt; *out_rel, bool compact) const;
+ 116 #endif
+ 117 };
+ 118 
+ 119 
+ 120 //------------------------------ReturnNode-------------------------------------
+ 121 // Return from subroutine node
+ 122 class ReturnNode : public Node {
+ 123 public:
+ 124   ReturnNode( uint edges, Node *cntrl, Node *i_o, Node *memory, Node *retadr, Node *frameptr );
+ 125   virtual int Opcode() const;
+ 126   virtual bool  is_CFG() const { return true; }
+ 127   virtual uint hash() const { return NO_HASH; }  // CFG nodes do not hash
+ 128   virtual bool depends_only_on_test() const { return false; }
+ 129   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+ 130   virtual const Type* Value(PhaseGVN* phase) const;
+ 131   virtual uint ideal_reg() const { return NotAMachineReg; }
+ 132   virtual uint match_edge(uint idx) const;
+ 133 #ifndef PRODUCT
+ 134   virtual void dump_req(outputStream *st = tty) const;
+ 135 #endif
+ 136 };
+ 137 
+ 138 
+ 139 //------------------------------RethrowNode------------------------------------
+ 140 // Rethrow of exception at call site.  Ends a procedure before rethrowing;
+ 141 // ends the current basic block like a ReturnNode.  Restores registers and
+ 142 // unwinds stack.  Rethrow happens in the caller&#39;s method.
+ 143 class RethrowNode : public Node {
+ 144  public:
+ 145   RethrowNode( Node *cntrl, Node *i_o, Node *memory, Node *frameptr, Node *ret_adr, Node *exception );
+ 146   virtual int Opcode() const;
+ 147   virtual bool  is_CFG() const { return true; }
+ 148   virtual uint hash() const { return NO_HASH; }  // CFG nodes do not hash
+ 149   virtual bool depends_only_on_test() const { return false; }
+ 150   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+ 151   virtual const Type* Value(PhaseGVN* phase) const;
+ 152   virtual uint match_edge(uint idx) const;
+ 153   virtual uint ideal_reg() const { return NotAMachineReg; }
+ 154 #ifndef PRODUCT
+ 155   virtual void dump_req(outputStream *st = tty) const;
+ 156 #endif
+ 157 };
+ 158 
+ 159 
+ 160 //------------------------------TailCallNode-----------------------------------
+ 161 // Pop stack frame and jump indirect
+ 162 class TailCallNode : public ReturnNode {
+ 163 public:
+ 164   TailCallNode( Node *cntrl, Node *i_o, Node *memory, Node *frameptr, Node *retadr, Node *target, Node *moop )
+ 165     : ReturnNode( TypeFunc::Parms+2, cntrl, i_o, memory, frameptr, retadr ) {
+ 166     init_req(TypeFunc::Parms, target);
+ 167     init_req(TypeFunc::Parms+1, moop);
+ 168   }
+ 169 
+ 170   virtual int Opcode() const;
+ 171   virtual uint match_edge(uint idx) const;
+ 172 };
+ 173 
+ 174 //------------------------------TailJumpNode-----------------------------------
+ 175 // Pop stack frame and jump indirect
+ 176 class TailJumpNode : public ReturnNode {
+ 177 public:
+ 178   TailJumpNode( Node *cntrl, Node *i_o, Node *memory, Node *frameptr, Node *target, Node *ex_oop)
+ 179     : ReturnNode(TypeFunc::Parms+2, cntrl, i_o, memory, frameptr, Compile::current()-&gt;top()) {
+ 180     init_req(TypeFunc::Parms, target);
+ 181     init_req(TypeFunc::Parms+1, ex_oop);
+ 182   }
+ 183 
+ 184   virtual int Opcode() const;
+ 185   virtual uint match_edge(uint idx) const;
+ 186 };
+ 187 
+ 188 //-------------------------------JVMState-------------------------------------
+ 189 // A linked list of JVMState nodes captures the whole interpreter state,
+ 190 // plus GC roots, for all active calls at some call site in this compilation
+ 191 // unit.  (If there is no inlining, then the list has exactly one link.)
+ 192 // This provides a way to map the optimized program back into the interpreter,
+ 193 // or to let the GC mark the stack.
+ 194 class JVMState : public ResourceObj {
+ 195   friend class VMStructs;
+ 196 public:
+ 197   typedef enum {
+ 198     Reexecute_Undefined = -1, // not defined -- will be translated into false later
+ 199     Reexecute_False     =  0, // false       -- do not reexecute
+ 200     Reexecute_True      =  1  // true        -- reexecute the bytecode
+ 201   } ReexecuteState; //Reexecute State
+ 202 
+ 203 private:
+ 204   JVMState*         _caller;    // List pointer for forming scope chains
+ 205   uint              _depth;     // One more than caller depth, or one.
+ 206   uint              _locoff;    // Offset to locals in input edge mapping
+ 207   uint              _stkoff;    // Offset to stack in input edge mapping
+ 208   uint              _monoff;    // Offset to monitors in input edge mapping
+ 209   uint              _scloff;    // Offset to fields of scalar objs in input edge mapping
+ 210   uint              _endoff;    // Offset to end of input edge mapping
+ 211   uint              _sp;        // Jave Expression Stack Pointer for this state
+ 212   int               _bci;       // Byte Code Index of this JVM point
+ 213   ReexecuteState    _reexecute; // Whether this bytecode need to be re-executed
+ 214   ciMethod*         _method;    // Method Pointer
+ 215   SafePointNode*    _map;       // Map node associated with this scope
+ 216 public:
+ 217   friend class Compile;
+ 218   friend class PreserveReexecuteState;
+ 219 
+ 220   // Because JVMState objects live over the entire lifetime of the
+ 221   // Compile object, they are allocated into the comp_arena, which
+ 222   // does not get resource marked or reset during the compile process
+ 223   void *operator new( size_t x, Compile* C ) throw() { return C-&gt;comp_arena()-&gt;Amalloc(x); }
+ 224   void operator delete( void * ) { } // fast deallocation
+ 225 
+ 226   // Create a new JVMState, ready for abstract interpretation.
+ 227   JVMState(ciMethod* method, JVMState* caller);
+ 228   JVMState(int stack_size);  // root state; has a null method
+ 229 
+ 230   // Access functions for the JVM
+ 231   // ... --|--- loc ---|--- stk ---|--- arg ---|--- mon ---|--- scl ---|
+ 232   //       \ locoff    \ stkoff    \ argoff    \ monoff    \ scloff    \ endoff
+ 233   uint              locoff() const { return _locoff; }
+ 234   uint              stkoff() const { return _stkoff; }
+ 235   uint              argoff() const { return _stkoff + _sp; }
+ 236   uint              monoff() const { return _monoff; }
+ 237   uint              scloff() const { return _scloff; }
+ 238   uint              endoff() const { return _endoff; }
+ 239   uint              oopoff() const { return debug_end(); }
+ 240 
+ 241   int            loc_size() const { return stkoff() - locoff(); }
+ 242   int            stk_size() const { return monoff() - stkoff(); }
+ 243   int            mon_size() const { return scloff() - monoff(); }
+ 244   int            scl_size() const { return endoff() - scloff(); }
+ 245 
+ 246   bool        is_loc(uint i) const { return locoff() &lt;= i &amp;&amp; i &lt; stkoff(); }
+ 247   bool        is_stk(uint i) const { return stkoff() &lt;= i &amp;&amp; i &lt; monoff(); }
+ 248   bool        is_mon(uint i) const { return monoff() &lt;= i &amp;&amp; i &lt; scloff(); }
+ 249   bool        is_scl(uint i) const { return scloff() &lt;= i &amp;&amp; i &lt; endoff(); }
+ 250 
+ 251   uint                      sp() const { return _sp; }
+ 252   int                      bci() const { return _bci; }
+ 253   bool        should_reexecute() const { return _reexecute==Reexecute_True; }
+ 254   bool  is_reexecute_undefined() const { return _reexecute==Reexecute_Undefined; }
+ 255   bool              has_method() const { return _method != NULL; }
+ 256   ciMethod*             method() const { assert(has_method(), &quot;&quot;); return _method; }
+ 257   JVMState*             caller() const { return _caller; }
+ 258   SafePointNode*           map() const { return _map; }
+ 259   uint                   depth() const { return _depth; }
+ 260   uint             debug_start() const; // returns locoff of root caller
+ 261   uint               debug_end() const; // returns endoff of self
+ 262   uint              debug_size() const {
+ 263     return loc_size() + sp() + mon_size() + scl_size();
+ 264   }
+ 265   uint        debug_depth()  const; // returns sum of debug_size values at all depths
+ 266 
+ 267   // Returns the JVM state at the desired depth (1 == root).
+ 268   JVMState* of_depth(int d) const;
+ 269 
+ 270   // Tells if two JVM states have the same call chain (depth, methods, &amp; bcis).
+ 271   bool same_calls_as(const JVMState* that) const;
+ 272 
+ 273   // Monitors (monitors are stored as (boxNode, objNode) pairs
+ 274   enum { logMonitorEdges = 1 };
+ 275   int  nof_monitors()              const { return mon_size() &gt;&gt; logMonitorEdges; }
+ 276   int  monitor_depth()             const { return nof_monitors() + (caller() ? caller()-&gt;monitor_depth() : 0); }
+ 277   int  monitor_box_offset(int idx) const { return monoff() + (idx &lt;&lt; logMonitorEdges) + 0; }
+ 278   int  monitor_obj_offset(int idx) const { return monoff() + (idx &lt;&lt; logMonitorEdges) + 1; }
+ 279   bool is_monitor_box(uint off)    const {
+ 280     assert(is_mon(off), &quot;should be called only for monitor edge&quot;);
+ 281     return (0 == bitfield(off - monoff(), 0, logMonitorEdges));
+ 282   }
+ 283   bool is_monitor_use(uint off)    const { return (is_mon(off)
+ 284                                                    &amp;&amp; is_monitor_box(off))
+ 285                                              || (caller() &amp;&amp; caller()-&gt;is_monitor_use(off)); }
+ 286 
+ 287   // Initialization functions for the JVM
+ 288   void              set_locoff(uint off) { _locoff = off; }
+ 289   void              set_stkoff(uint off) { _stkoff = off; }
+ 290   void              set_monoff(uint off) { _monoff = off; }
+ 291   void              set_scloff(uint off) { _scloff = off; }
+ 292   void              set_endoff(uint off) { _endoff = off; }
+ 293   void              set_offsets(uint off) {
+ 294     _locoff = _stkoff = _monoff = _scloff = _endoff = off;
+ 295   }
+ 296   void              set_map(SafePointNode *map) { _map = map; }
+ 297   void              set_sp(uint sp) { _sp = sp; }
+ 298                     // _reexecute is initialized to &quot;undefined&quot; for a new bci
+ 299   void              set_bci(int bci) {if(_bci != bci)_reexecute=Reexecute_Undefined; _bci = bci; }
+ 300   void              set_should_reexecute(bool reexec) {_reexecute = reexec ? Reexecute_True : Reexecute_False;}
+ 301 
+ 302   // Miscellaneous utility functions
+ 303   JVMState* clone_deep(Compile* C) const;    // recursively clones caller chain
+ 304   JVMState* clone_shallow(Compile* C) const; // retains uncloned caller
+ 305   void      set_map_deep(SafePointNode *map);// reset map for all callers
+ 306   void      adapt_position(int delta);       // Adapt offsets in in-array after adding an edge.
+ 307   int       interpreter_frame_size() const;
+ 308 
+ 309 #ifndef PRODUCT
+ 310   void      format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) const;
+ 311   void      dump_spec(outputStream *st) const;
+ 312   void      dump_on(outputStream* st) const;
+ 313   void      dump() const {
+ 314     dump_on(tty);
+ 315   }
+ 316 #endif
+ 317 };
+ 318 
+ 319 //------------------------------SafePointNode----------------------------------
+ 320 // A SafePointNode is a subclass of a MultiNode for convenience (and
+ 321 // potential code sharing) only - conceptually it is independent of
+ 322 // the Node semantics.
+ 323 class SafePointNode : public MultiNode {
+ 324   virtual bool           cmp( const Node &amp;n ) const;
+ 325   virtual uint           size_of() const;       // Size is bigger
+ 326 
+ 327 public:
+ 328   SafePointNode(uint edges, JVMState* jvms,
+ 329                 // A plain safepoint advertises no memory effects (NULL):
+ 330                 const TypePtr* adr_type = NULL)
+ 331     : MultiNode( edges ),
+ 332       _oop_map(NULL),
+ 333       _jvms(jvms),
+ 334       _adr_type(adr_type)
+ 335   {
+ 336     init_class_id(Class_SafePoint);
+ 337   }
+ 338 
+ 339   OopMap*         _oop_map;   // Array of OopMap info (8-bit char) for GC
+ 340   JVMState* const _jvms;      // Pointer to list of JVM State objects
+ 341   const TypePtr*  _adr_type;  // What type of memory does this node produce?
+ 342   ReplacedNodes   _replaced_nodes; // During parsing: list of pair of nodes from calls to GraphKit::replace_in_map()
+ 343 
+ 344   // Many calls take *all* of memory as input,
+ 345   // but some produce a limited subset of that memory as output.
+ 346   // The adr_type reports the call&#39;s behavior as a store, not a load.
+ 347 
+ 348   virtual JVMState* jvms() const { return _jvms; }
+ 349   void set_jvms(JVMState* s) {
+ 350     *(JVMState**)&amp;_jvms = s;  // override const attribute in the accessor
+ 351   }
+ 352   OopMap *oop_map() const { return _oop_map; }
+ 353   void set_oop_map(OopMap *om) { _oop_map = om; }
+ 354 
+ 355  private:
+ 356   void verify_input(JVMState* jvms, uint idx) const {
+ 357     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 358     Node* n = in(idx);
+ 359     assert((!n-&gt;bottom_type()-&gt;isa_long() &amp;&amp; !n-&gt;bottom_type()-&gt;isa_double()) ||
+ 360            in(idx + 1)-&gt;is_top(), &quot;2nd half of long/double&quot;);
+ 361   }
+ 362 
+ 363  public:
+ 364   // Functionality from old debug nodes which has changed
+ 365   Node *local(JVMState* jvms, uint idx) const {
+ 366     verify_input(jvms, jvms-&gt;locoff() + idx);
+ 367     return in(jvms-&gt;locoff() + idx);
+ 368   }
+ 369   Node *stack(JVMState* jvms, uint idx) const {
+ 370     verify_input(jvms, jvms-&gt;stkoff() + idx);
+ 371     return in(jvms-&gt;stkoff() + idx);
+ 372   }
+ 373   Node *argument(JVMState* jvms, uint idx) const {
+ 374     verify_input(jvms, jvms-&gt;argoff() + idx);
+ 375     return in(jvms-&gt;argoff() + idx);
+ 376   }
+ 377   Node *monitor_box(JVMState* jvms, uint idx) const {
+ 378     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 379     return in(jvms-&gt;monitor_box_offset(idx));
+ 380   }
+ 381   Node *monitor_obj(JVMState* jvms, uint idx) const {
+ 382     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 383     return in(jvms-&gt;monitor_obj_offset(idx));
+ 384   }
+ 385 
+ 386   void  set_local(JVMState* jvms, uint idx, Node *c);
+ 387 
+ 388   void  set_stack(JVMState* jvms, uint idx, Node *c) {
+ 389     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 390     set_req(jvms-&gt;stkoff() + idx, c);
+ 391   }
+ 392   void  set_argument(JVMState* jvms, uint idx, Node *c) {
+ 393     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 394     set_req(jvms-&gt;argoff() + idx, c);
+ 395   }
+ 396   void ensure_stack(JVMState* jvms, uint stk_size) {
+ 397     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 398     int grow_by = (int)stk_size - (int)jvms-&gt;stk_size();
+ 399     if (grow_by &gt; 0)  grow_stack(jvms, grow_by);
+ 400   }
+ 401   void grow_stack(JVMState* jvms, uint grow_by);
+ 402   // Handle monitor stack
+ 403   void push_monitor( const FastLockNode *lock );
+ 404   void pop_monitor ();
+ 405   Node *peek_monitor_box() const;
+ 406   Node *peek_monitor_obj() const;
+ 407 
+ 408   // Access functions for the JVM
+ 409   Node *control  () const { return in(TypeFunc::Control  ); }
+ 410   Node *i_o      () const { return in(TypeFunc::I_O      ); }
+ 411   Node *memory   () const { return in(TypeFunc::Memory   ); }
+ 412   Node *returnadr() const { return in(TypeFunc::ReturnAdr); }
+ 413   Node *frameptr () const { return in(TypeFunc::FramePtr ); }
+ 414 
+ 415   void set_control  ( Node *c ) { set_req(TypeFunc::Control,c); }
+ 416   void set_i_o      ( Node *c ) { set_req(TypeFunc::I_O    ,c); }
+ 417   void set_memory   ( Node *c ) { set_req(TypeFunc::Memory ,c); }
+ 418 
+ 419   MergeMemNode* merged_memory() const {
+ 420     return in(TypeFunc::Memory)-&gt;as_MergeMem();
+ 421   }
+ 422 
+ 423   // The parser marks useless maps as dead when it&#39;s done with them:
+ 424   bool is_killed() { return in(TypeFunc::Control) == NULL; }
+ 425 
+ 426   // Exception states bubbling out of subgraphs such as inlined calls
+ 427   // are recorded here.  (There might be more than one, hence the &quot;next&quot;.)
+ 428   // This feature is used only for safepoints which serve as &quot;maps&quot;
+ 429   // for JVM states during parsing, intrinsic expansion, etc.
+ 430   SafePointNode*         next_exception() const;
+ 431   void               set_next_exception(SafePointNode* n);
+ 432   bool                   has_exceptions() const { return next_exception() != NULL; }
+ 433 
+ 434   // Helper methods to operate on replaced nodes
+ 435   ReplacedNodes replaced_nodes() const {
+ 436     return _replaced_nodes;
+ 437   }
+ 438 
+ 439   void set_replaced_nodes(ReplacedNodes replaced_nodes) {
+ 440     _replaced_nodes = replaced_nodes;
+ 441   }
+ 442 
+ 443   void clone_replaced_nodes() {
+ 444     _replaced_nodes.clone();
+ 445   }
+ 446   void record_replaced_node(Node* initial, Node* improved) {
+ 447     _replaced_nodes.record(initial, improved);
+ 448   }
+ 449   void transfer_replaced_nodes_from(SafePointNode* sfpt, uint idx = 0) {
+ 450     _replaced_nodes.transfer_from(sfpt-&gt;_replaced_nodes, idx);
+ 451   }
+ 452   void delete_replaced_nodes() {
+ 453     _replaced_nodes.reset();
+ 454   }
+ 455   void apply_replaced_nodes(uint idx) {
+ 456     _replaced_nodes.apply(this, idx);
+ 457   }
+ 458   void merge_replaced_nodes_with(SafePointNode* sfpt) {
+ 459     _replaced_nodes.merge_with(sfpt-&gt;_replaced_nodes);
+ 460   }
+ 461   bool has_replaced_nodes() const {
+ 462     return !_replaced_nodes.is_empty();
+ 463   }
+ 464 
+ 465   void disconnect_from_root(PhaseIterGVN *igvn);
+ 466 
+ 467   // Standard Node stuff
+ 468   virtual int            Opcode() const;
+ 469   virtual bool           pinned() const { return true; }
+ 470   virtual const Type*    Value(PhaseGVN* phase) const;
+ 471   virtual const Type    *bottom_type() const { return Type::CONTROL; }
+ 472   virtual const TypePtr *adr_type() const { return _adr_type; }
+ 473   virtual Node          *Ideal(PhaseGVN *phase, bool can_reshape);
+ 474   virtual Node*          Identity(PhaseGVN* phase);
+ 475   virtual uint           ideal_reg() const { return 0; }
+ 476   virtual const RegMask &amp;in_RegMask(uint) const;
+ 477   virtual const RegMask &amp;out_RegMask() const;
+ 478   virtual uint           match_edge(uint idx) const;
+ 479 
+ 480   static  bool           needs_polling_address_input();
+ 481 
+ 482 #ifndef PRODUCT
+ 483   virtual void           dump_spec(outputStream *st) const;
+ 484   virtual void           related(GrowableArray&lt;Node*&gt; *in_rel, GrowableArray&lt;Node*&gt; *out_rel, bool compact) const;
+ 485 #endif
+ 486 };
+ 487 
+ 488 //------------------------------SafePointScalarObjectNode----------------------
+ 489 // A SafePointScalarObjectNode represents the state of a scalarized object
+ 490 // at a safepoint.
+ 491 
+ 492 class SafePointScalarObjectNode: public TypeNode {
+ 493   uint _first_index; // First input edge relative index of a SafePoint node where
+ 494                      // states of the scalarized object fields are collected.
+ 495                      // It is relative to the last (youngest) jvms-&gt;_scloff.
+ 496   uint _n_fields;    // Number of non-static fields of the scalarized object.
+ 497   bool _is_stack_allocated;
+ 498   DEBUG_ONLY(AllocateNode* _alloc;)
+ 499 
+ 500   virtual uint hash() const ; // { return NO_HASH; }
+ 501   virtual bool cmp( const Node &amp;n ) const;
+ 502 
+ 503   uint first_index() const { return _first_index; }
+ 504 
+ 505 public:
+ 506   SafePointScalarObjectNode(const TypeOopPtr* tp,
+ 507 #ifdef ASSERT
+ 508                             AllocateNode* alloc,
+ 509 #endif
+ 510                             uint first_index, uint n_fields);
+ 511   virtual int Opcode() const;
+ 512   virtual uint           ideal_reg() const;
+ 513   virtual const RegMask &amp;in_RegMask(uint) const;
+ 514   virtual const RegMask &amp;out_RegMask() const;
+ 515   virtual uint           match_edge(uint idx) const;
+ 516 
+ 517   uint first_index(JVMState* jvms) const {
+ 518     assert(jvms != NULL, &quot;missed JVMS&quot;);
+ 519     return jvms-&gt;scloff() + _first_index;
+ 520   }
+ 521   uint n_fields()    const { return _n_fields; }
+ 522 
+ 523   void set_stack_allocated(bool v) { _is_stack_allocated = true; }
+ 524   bool stack_allocated() { return _is_stack_allocated; }
+ 525 
+ 526 #ifdef ASSERT
+ 527   AllocateNode* alloc() const { return _alloc; }
+ 528 #endif
+ 529 
+ 530   virtual uint size_of() const { return sizeof(*this); }
+ 531 
+ 532   // Assumes that &quot;this&quot; is an argument to a safepoint node &quot;s&quot;, and that
+ 533   // &quot;new_call&quot; is being created to correspond to &quot;s&quot;.  But the difference
+ 534   // between the start index of the jvmstates of &quot;new_call&quot; and &quot;s&quot; is
+ 535   // &quot;jvms_adj&quot;.  Produce and return a SafePointScalarObjectNode that
+ 536   // corresponds appropriately to &quot;this&quot; in &quot;new_call&quot;.  Assumes that
+ 537   // &quot;sosn_map&quot; is a map, specific to the translation of &quot;s&quot; to &quot;new_call&quot;,
+ 538   // mapping old SafePointScalarObjectNodes to new, to avoid multiple copies.
+ 539   SafePointScalarObjectNode* clone(Dict* sosn_map) const;
+ 540 
+ 541 #ifndef PRODUCT
+ 542   virtual void              dump_spec(outputStream *st) const;
+ 543 #endif
+ 544 };
+ 545 
+ 546 
+ 547 // Simple container for the outgoing projections of a call.  Useful
+ 548 // for serious surgery on calls.
+ 549 class CallProjections : public StackObj {
+ 550 public:
+ 551   Node* fallthrough_proj;
+ 552   Node* fallthrough_catchproj;
+ 553   Node* fallthrough_memproj;
+ 554   Node* fallthrough_ioproj;
+ 555   Node* catchall_catchproj;
+ 556   Node* catchall_memproj;
+ 557   Node* catchall_ioproj;
+ 558   Node* resproj;
+ 559   Node* exobj;
+ 560 };
+ 561 
+ 562 class CallGenerator;
+ 563 
+ 564 //------------------------------CallNode---------------------------------------
+ 565 // Call nodes now subsume the function of debug nodes at callsites, so they
+ 566 // contain the functionality of a full scope chain of debug nodes.
+ 567 class CallNode : public SafePointNode {
+ 568   friend class VMStructs;
+ 569 
+ 570 protected:
+ 571   bool may_modify_arraycopy_helper(const TypeOopPtr* dest_t, const TypeOopPtr *t_oop, PhaseTransform *phase);
+ 572 
+ 573 public:
+ 574   const TypeFunc *_tf;        // Function type
+ 575   address      _entry_point;  // Address of method being called
+ 576   float        _cnt;          // Estimate of number of times called
+ 577   CallGenerator* _generator;  // corresponding CallGenerator for some late inline calls
+ 578   const char *_name;           // Printable name, if _method is NULL
+ 579 
+ 580   CallNode(const TypeFunc* tf, address addr, const TypePtr* adr_type)
+ 581     : SafePointNode(tf-&gt;domain()-&gt;cnt(), NULL, adr_type),
+ 582       _tf(tf),
+ 583       _entry_point(addr),
+ 584       _cnt(COUNT_UNKNOWN),
+ 585       _generator(NULL),
+ 586       _name(NULL)
+ 587   {
+ 588     init_class_id(Class_Call);
+ 589   }
+ 590 
+ 591   const TypeFunc* tf()         const { return _tf; }
+ 592   const address  entry_point() const { return _entry_point; }
+ 593   const float    cnt()         const { return _cnt; }
+ 594   CallGenerator* generator()   const { return _generator; }
+ 595 
+ 596   void set_tf(const TypeFunc* tf)       { _tf = tf; }
+ 597   void set_entry_point(address p)       { _entry_point = p; }
+ 598   void set_cnt(float c)                 { _cnt = c; }
+ 599   void set_generator(CallGenerator* cg) { _generator = cg; }
+ 600 
+ 601   virtual const Type *bottom_type() const;
+ 602   virtual const Type* Value(PhaseGVN* phase) const;
+ 603   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+ 604   virtual Node* Identity(PhaseGVN* phase) { return this; }
+ 605   virtual bool        cmp( const Node &amp;n ) const;
+ 606   virtual uint        size_of() const = 0;
+ 607   virtual void        calling_convention( BasicType* sig_bt, VMRegPair *parm_regs, uint argcnt ) const;
+ 608   virtual Node       *match( const ProjNode *proj, const Matcher *m );
+ 609   virtual uint        ideal_reg() const { return NotAMachineReg; }
+ 610   // Are we guaranteed that this node is a safepoint?  Not true for leaf calls and
+ 611   // for some macro nodes whose expansion does not have a safepoint on the fast path.
+ 612   virtual bool        guaranteed_safepoint()  { return true; }
+ 613   // For macro nodes, the JVMState gets modified during expansion. If calls
+ 614   // use MachConstantBase, it gets modified during matching. So when cloning
+ 615   // the node the JVMState must be cloned. Default is not to clone.
+ 616   virtual void clone_jvms(Compile* C) {
+ 617     if (C-&gt;needs_clone_jvms() &amp;&amp; jvms() != NULL) {
+ 618       set_jvms(jvms()-&gt;clone_deep(C));
+ 619       jvms()-&gt;set_map_deep(this);
+ 620     }
+ 621   }
+ 622 
+ 623   // Returns true if the call may modify n
+ 624   virtual bool        may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase);
+ 625   // Does this node have a use of n other than in debug information?
+ 626   bool                has_non_debug_use(Node *n);
+ 627   // Returns the unique CheckCastPP of a call
+ 628   // or result projection is there are several CheckCastPP
+ 629   // or returns NULL if there is no one.
+ 630   Node *result_cast();
+ 631   // Does this node returns pointer?
+ 632   bool returns_pointer() const {
+ 633     const TypeTuple *r = tf()-&gt;range();
+ 634     return (r-&gt;cnt() &gt; TypeFunc::Parms &amp;&amp;
+ 635             r-&gt;field_at(TypeFunc::Parms)-&gt;isa_ptr());
+ 636   }
+ 637 
+ 638   // Collect all the interesting edges from a call for use in
+ 639   // replacing the call by something else.  Used by macro expansion
+ 640   // and the late inlining support.
+ 641   void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+ 642 
+ 643   virtual uint match_edge(uint idx) const;
+ 644 
+ 645   bool is_call_to_arraycopystub() const;
+ 646   bool is_call_to_osr_migration_end() const;
+ 647 
+ 648 #ifndef PRODUCT
+ 649   virtual void        dump_req(outputStream *st = tty) const;
+ 650   virtual void        dump_spec(outputStream *st) const;
+ 651 #endif
+ 652 };
+ 653 
+ 654 
+ 655 //------------------------------CallJavaNode-----------------------------------
+ 656 // Make a static or dynamic subroutine call node using Java calling
+ 657 // convention.  (The &quot;Java&quot; calling convention is the compiler&#39;s calling
+ 658 // convention, as opposed to the interpreter&#39;s or that of native C.)
+ 659 class CallJavaNode : public CallNode {
+ 660   friend class VMStructs;
+ 661 protected:
+ 662   virtual bool cmp( const Node &amp;n ) const;
+ 663   virtual uint size_of() const; // Size is bigger
+ 664 
+ 665   bool    _optimized_virtual;
+ 666   bool    _method_handle_invoke;
+ 667   bool    _override_symbolic_info; // Override symbolic call site info from bytecode
+ 668   ciMethod* _method;               // Method being direct called
+ 669 public:
+ 670   const int       _bci;         // Byte Code Index of call byte code
+ 671   CallJavaNode(const TypeFunc* tf , address addr, ciMethod* method, int bci)
+ 672     : CallNode(tf, addr, TypePtr::BOTTOM),
+ 673       _optimized_virtual(false),
+ 674       _method_handle_invoke(false),
+ 675       _override_symbolic_info(false),
+ 676       _method(method), _bci(bci)
+ 677   {
+ 678     init_class_id(Class_CallJava);
+ 679   }
+ 680 
+ 681   virtual int   Opcode() const;
+ 682   ciMethod* method() const                 { return _method; }
+ 683   void  set_method(ciMethod *m)            { _method = m; }
+ 684   void  set_optimized_virtual(bool f)      { _optimized_virtual = f; }
+ 685   bool  is_optimized_virtual() const       { return _optimized_virtual; }
+ 686   void  set_method_handle_invoke(bool f)   { _method_handle_invoke = f; }
+ 687   bool  is_method_handle_invoke() const    { return _method_handle_invoke; }
+ 688   void  set_override_symbolic_info(bool f) { _override_symbolic_info = f; }
+ 689   bool  override_symbolic_info() const     { return _override_symbolic_info; }
+ 690 
+ 691   DEBUG_ONLY( bool validate_symbolic_info() const; )
+ 692 
+ 693 #ifndef PRODUCT
+ 694   virtual void  dump_spec(outputStream *st) const;
+ 695   virtual void  dump_compact_spec(outputStream *st) const;
+ 696 #endif
+ 697 };
+ 698 
+ 699 //------------------------------CallStaticJavaNode-----------------------------
+ 700 // Make a direct subroutine call using Java calling convention (for static
+ 701 // calls and optimized virtual calls, plus calls to wrappers for run-time
+ 702 // routines); generates static stub.
+ 703 class CallStaticJavaNode : public CallJavaNode {
+ 704   virtual bool cmp( const Node &amp;n ) const;
+ 705   virtual uint size_of() const; // Size is bigger
+ 706 public:
+ 707   CallStaticJavaNode(Compile* C, const TypeFunc* tf, address addr, ciMethod* method, int bci)
+ 708     : CallJavaNode(tf, addr, method, bci) {
+ 709     init_class_id(Class_CallStaticJava);
+ 710     if (C-&gt;eliminate_boxing() &amp;&amp; (method != NULL) &amp;&amp; method-&gt;is_boxing_method()) {
+ 711       init_flags(Flag_is_macro);
+ 712       C-&gt;add_macro_node(this);
+ 713     }
+ 714     _is_scalar_replaceable = false;
+ 715     _is_non_escaping = false;
+ 716   }
+ 717   CallStaticJavaNode(const TypeFunc* tf, address addr, const char* name, int bci,
+ 718                      const TypePtr* adr_type)
+ 719     : CallJavaNode(tf, addr, NULL, bci) {
+ 720     init_class_id(Class_CallStaticJava);
+ 721     // This node calls a runtime stub, which often has narrow memory effects.
+ 722     _adr_type = adr_type;
+ 723     _is_scalar_replaceable = false;
+ 724     _is_non_escaping = false;
+ 725     _name = name;
+ 726   }
+ 727 
+ 728   // Result of Escape Analysis
+ 729   bool _is_scalar_replaceable;
+ 730   bool _is_non_escaping;
+ 731 
+ 732   // If this is an uncommon trap, return the request code, else zero.
+ 733   int uncommon_trap_request() const;
+ 734   static int extract_uncommon_trap_request(const Node* call);
+ 735 
+ 736   bool is_boxing_method() const {
+ 737     return is_macro() &amp;&amp; (method() != NULL) &amp;&amp; method()-&gt;is_boxing_method();
+ 738   }
+ 739   // Later inlining modifies the JVMState, so we need to clone it
+ 740   // when the call node is cloned (because it is macro node).
+ 741   virtual void  clone_jvms(Compile* C) {
+ 742     if ((jvms() != NULL) &amp;&amp; is_boxing_method()) {
+ 743       set_jvms(jvms()-&gt;clone_deep(C));
+ 744       jvms()-&gt;set_map_deep(this);
+ 745     }
+ 746   }
+ 747 
+ 748   virtual int         Opcode() const;
+ 749 #ifndef PRODUCT
+ 750   virtual void        dump_spec(outputStream *st) const;
+ 751   virtual void        dump_compact_spec(outputStream *st) const;
+ 752 #endif
+ 753 };
+ 754 
+ 755 //------------------------------CallDynamicJavaNode----------------------------
+ 756 // Make a dispatched call using Java calling convention.
+ 757 class CallDynamicJavaNode : public CallJavaNode {
+ 758   virtual bool cmp( const Node &amp;n ) const;
+ 759   virtual uint size_of() const; // Size is bigger
+ 760 public:
+ 761   CallDynamicJavaNode( const TypeFunc *tf , address addr, ciMethod* method, int vtable_index, int bci ) : CallJavaNode(tf,addr,method,bci), _vtable_index(vtable_index) {
+ 762     init_class_id(Class_CallDynamicJava);
+ 763   }
+ 764 
+ 765   int _vtable_index;
+ 766   virtual int   Opcode() const;
+ 767 #ifndef PRODUCT
+ 768   virtual void  dump_spec(outputStream *st) const;
+ 769 #endif
+ 770 };
+ 771 
+ 772 //------------------------------CallRuntimeNode--------------------------------
+ 773 // Make a direct subroutine call node into compiled C++ code.
+ 774 class CallRuntimeNode : public CallNode {
+ 775   virtual bool cmp( const Node &amp;n ) const;
+ 776   virtual uint size_of() const; // Size is bigger
+ 777 public:
+ 778   CallRuntimeNode(const TypeFunc* tf, address addr, const char* name,
+ 779                   const TypePtr* adr_type)
+ 780     : CallNode(tf, addr, adr_type)
+ 781   {
+ 782     init_class_id(Class_CallRuntime);
+ 783     _name = name;
+ 784   }
+ 785 
+ 786   virtual int   Opcode() const;
+ 787   virtual void  calling_convention( BasicType* sig_bt, VMRegPair *parm_regs, uint argcnt ) const;
+ 788 
+ 789 #ifndef PRODUCT
+ 790   virtual void  dump_spec(outputStream *st) const;
+ 791 #endif
+ 792 };
+ 793 
+ 794 //------------------------------CallLeafNode-----------------------------------
+ 795 // Make a direct subroutine call node into compiled C++ code, without
+ 796 // safepoints
+ 797 class CallLeafNode : public CallRuntimeNode {
+ 798 public:
+ 799   CallLeafNode(const TypeFunc* tf, address addr, const char* name,
+ 800                const TypePtr* adr_type)
+ 801     : CallRuntimeNode(tf, addr, name, adr_type)
+ 802   {
+ 803     init_class_id(Class_CallLeaf);
+ 804   }
+ 805   virtual int   Opcode() const;
+ 806   virtual bool        guaranteed_safepoint()  { return false; }
+ 807 #ifndef PRODUCT
+ 808   virtual void  dump_spec(outputStream *st) const;
+ 809 #endif
+ 810 };
+ 811 
+ 812 //------------------------------CallLeafNoFPNode-------------------------------
+ 813 // CallLeafNode, not using floating point or using it in the same manner as
+ 814 // the generated code
+ 815 class CallLeafNoFPNode : public CallLeafNode {
+ 816 public:
+ 817   CallLeafNoFPNode(const TypeFunc* tf, address addr, const char* name,
+ 818                    const TypePtr* adr_type)
+ 819     : CallLeafNode(tf, addr, name, adr_type)
+ 820   {
+ 821   }
+ 822   virtual int   Opcode() const;
+ 823 };
+ 824 
+ 825 
+ 826 //------------------------------Allocate---------------------------------------
+ 827 // High-level memory allocation
+ 828 //
+ 829 //  AllocateNode and AllocateArrayNode are subclasses of CallNode because they will
+ 830 //  get expanded into a code sequence containing a call.  Unlike other CallNodes,
+ 831 //  they have 2 memory projections and 2 i_o projections (which are distinguished by
+ 832 //  the _is_io_use flag in the projection.)  This is needed when expanding the node in
+ 833 //  order to differentiate the uses of the projection on the normal control path from
+ 834 //  those on the exception return path.
+ 835 //
+ 836 class AllocateNode : public CallNode {
+ 837 public:
+ 838   enum {
+ 839     // Output:
+ 840     RawAddress  = TypeFunc::Parms,    // the newly-allocated raw address
+ 841     // Inputs:
+ 842     AllocSize   = TypeFunc::Parms,    // size (in bytes) of the new object
+ 843     KlassNode,                        // type (maybe dynamic) of the obj.
+ 844     InitialTest,                      // slow-path test (may be constant)
+ 845     ALength,                          // array length (or TOP if none)
+ 846     ParmLimit
+ 847   };
+ 848 
+ 849   // Maximum object size considered for stack allocation
+ 850   static const int StackAllocSizeLimit = 0x100;
+ 851 
+ 852   static const TypeFunc* alloc_type(const Type* t) {
+ 853     const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+ 854     fields[AllocSize]   = TypeInt::POS;
+ 855     fields[KlassNode]   = TypeInstPtr::NOTNULL;
+ 856     fields[InitialTest] = TypeInt::BOOL;
+ 857     fields[ALength]     = t;  // length (can be a bad length)
+ 858 
+ 859     const TypeTuple *domain = TypeTuple::make(ParmLimit, fields);
+ 860 
+ 861     // create result type (range)
+ 862     fields = TypeTuple::fields(1);
+ 863     fields[TypeFunc::Parms+0] = TypeRawPtr::NOTNULL; // Returned oop
+ 864 
+ 865     const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+1, fields);
+ 866 
+ 867     return TypeFunc::make(domain, range);
+ 868   }
+ 869 
+ 870   // Result of Escape Analysis
+ 871   bool _is_scalar_replaceable;
+ 872   bool _is_non_escaping;
+ 873   bool _is_stack_allocateable;
+ 874   bool _is_referenced_stack_allocation;
+ 875   // True when MemBar for new is redundant with MemBar at initialzer exit
+ 876   bool _is_allocation_MemBar_redundant;
+ 877 
+ 878   virtual uint size_of() const; // Size is bigger
+ 879   AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+ 880                Node *size, Node *klass_node, Node *initial_test);
+ 881   // Expansion modifies the JVMState, so we need to clone it
+ 882   virtual void  clone_jvms(Compile* C) {
+ 883     if (jvms() != NULL) {
+ 884       set_jvms(jvms()-&gt;clone_deep(C));
+ 885       jvms()-&gt;set_map_deep(this);
+ 886     }
+ 887   }
+ 888   virtual int Opcode() const;
+ 889   virtual uint ideal_reg() const { return Op_RegP; }
+ 890   virtual bool        guaranteed_safepoint()  { return false; }
+ 891 
+ 892   // allocations do not modify their arguments
+ 893   virtual bool        may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) { return false;}
+ 894 
+ 895   // Pattern-match a possible usage of AllocateNode.
+ 896   // Return null if no allocation is recognized.
+ 897   // The operand is the pointer produced by the (possible) allocation.
+ 898   // It must be a projection of the Allocate or its subsequent CastPP.
+ 899   // (Note:  This function is defined in file graphKit.cpp, near
+ 900   // GraphKit::new_instance/new_array, whose output it recognizes.)
+ 901   // The &#39;ptr&#39; may not have an offset unless the &#39;offset&#39; argument is given.
+ 902   static AllocateNode* Ideal_allocation(Node* ptr, PhaseTransform* phase);
+ 903 
+ 904   // Fancy version which uses AddPNode::Ideal_base_and_offset to strip
+ 905   // an offset, which is reported back to the caller.
+ 906   // (Note:  AllocateNode::Ideal_allocation is defined in graphKit.cpp.)
+ 907   static AllocateNode* Ideal_allocation(Node* ptr, PhaseTransform* phase,
+ 908                                         intptr_t&amp; offset);
+ 909 
+ 910   // Dig the klass operand out of a (possible) allocation site.
+ 911   static Node* Ideal_klass(Node* ptr, PhaseTransform* phase) {
+ 912     AllocateNode* allo = Ideal_allocation(ptr, phase);
+ 913     return (allo == NULL) ? NULL : allo-&gt;in(KlassNode);
+ 914   }
+ 915 
+ 916   // Conservatively small estimate of offset of first non-header byte.
+ 917   int minimum_header_size() {
+ 918     return is_AllocateArray() ? arrayOopDesc::base_offset_in_bytes(T_BYTE) :
+ 919                                 instanceOopDesc::base_offset_in_bytes();
+ 920   }
+ 921 
+ 922   // Return the corresponding initialization barrier (or null if none).
+ 923   // Walks out edges to find it...
+ 924   // (Note: Both InitializeNode::allocation and AllocateNode::initialization
+ 925   // are defined in graphKit.cpp, which sets up the bidirectional relation.)
+ 926   InitializeNode* initialization();
+ 927 
+ 928   // Convenience for initialization-&gt;maybe_set_complete(phase)
+ 929   bool maybe_set_complete(PhaseGVN* phase);
+ 930 
+ 931   // Return true if allocation doesn&#39;t escape thread, its escape state
+ 932   // needs be noEscape or ArgEscape. InitializeNode._does_not_escape
+ 933   // is true when its allocation&#39;s escape state is noEscape or
+ 934   // ArgEscape. In case allocation&#39;s InitializeNode is NULL, check
+ 935   // AlllocateNode._is_non_escaping flag.
+ 936   // AlllocateNode._is_non_escaping is true when its escape state is
+ 937   // noEscape.
+ 938   bool does_not_escape_thread() {
+ 939     InitializeNode* init = NULL;
+ 940     return _is_non_escaping || (((init = initialization()) != NULL) &amp;&amp; init-&gt;does_not_escape());
+ 941   }
+ 942 
+ 943   // If object doesn&#39;t escape in &lt;.init&gt; method and there is memory barrier
+ 944   // inserted at exit of its &lt;.init&gt;, memory barrier for new is not necessary.
+ 945   // Inovke this method when MemBar at exit of initializer and post-dominate
+ 946   // allocation node.
+ 947   void compute_MemBar_redundancy(ciMethod* initializer);
+ 948   bool is_allocation_MemBar_redundant() { return _is_allocation_MemBar_redundant; }
+ 949 
+ 950   Node* make_ideal_mark(PhaseGVN *phase, Node* obj, Node* control, Node* mem);
+ 951 };
+ 952 
+ 953 //------------------------------AllocateArray---------------------------------
+ 954 //
+ 955 // High-level array allocation
+ 956 //
+ 957 class AllocateArrayNode : public AllocateNode {
+ 958 public:
+ 959   AllocateArrayNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+ 960                     Node* size, Node* klass_node, Node* initial_test,
+ 961                     Node* count_val
+ 962                     )
+ 963     : AllocateNode(C, atype, ctrl, mem, abio, size, klass_node,
+ 964                    initial_test)
+ 965   {
+ 966     init_class_id(Class_AllocateArray);
+ 967     set_req(AllocateNode::ALength,        count_val);
+ 968   }
+ 969   virtual int Opcode() const;
+ 970   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+ 971 
+ 972   // Dig the length operand out of a array allocation site.
+ 973   Node* Ideal_length() {
+ 974     return in(AllocateNode::ALength);
+ 975   }
+ 976 
+ 977   // Dig the length operand out of a array allocation site and narrow the
+ 978   // type with a CastII, if necesssary
+ 979   Node* make_ideal_length(const TypeOopPtr* ary_type, PhaseTransform *phase, bool can_create = true);
+ 980 
+ 981   // Pattern-match a possible usage of AllocateArrayNode.
+ 982   // Return null if no allocation is recognized.
+ 983   static AllocateArrayNode* Ideal_array_allocation(Node* ptr, PhaseTransform* phase) {
+ 984     AllocateNode* allo = Ideal_allocation(ptr, phase);
+ 985     return (allo == NULL || !allo-&gt;is_AllocateArray())
+ 986            ? NULL : allo-&gt;as_AllocateArray();
+ 987   }
+ 988 };
+ 989 
+ 990 //------------------------------AbstractLockNode-----------------------------------
+ 991 class AbstractLockNode: public CallNode {
+ 992 private:
+ 993   enum {
+ 994     Regular = 0,  // Normal lock
+ 995     NonEscObj,    // Lock is used for non escaping object
+ 996     Coarsened,    // Lock was coarsened
+ 997     Nested        // Nested lock
+ 998   } _kind;
+ 999 #ifndef PRODUCT
+1000   NamedCounter* _counter;
+1001   static const char* _kind_names[Nested+1];
+1002 #endif
+1003 
+1004 protected:
+1005   // helper functions for lock elimination
+1006   //
+1007 
+1008   bool find_matching_unlock(const Node* ctrl, LockNode* lock,
+1009                             GrowableArray&lt;AbstractLockNode*&gt; &amp;lock_ops);
+1010   bool find_lock_and_unlock_through_if(Node* node, LockNode* lock,
+1011                                        GrowableArray&lt;AbstractLockNode*&gt; &amp;lock_ops);
+1012   bool find_unlocks_for_region(const RegionNode* region, LockNode* lock,
+1013                                GrowableArray&lt;AbstractLockNode*&gt; &amp;lock_ops);
+1014   LockNode *find_matching_lock(UnlockNode* unlock);
+1015 
+1016   // Update the counter to indicate that this lock was eliminated.
+1017   void set_eliminated_lock_counter() PRODUCT_RETURN;
+1018 
+1019 public:
+1020   AbstractLockNode(const TypeFunc *tf)
+1021     : CallNode(tf, NULL, TypeRawPtr::BOTTOM),
+1022       _kind(Regular)
+1023   {
+1024 #ifndef PRODUCT
+1025     _counter = NULL;
+1026 #endif
+1027   }
+1028   virtual int Opcode() const = 0;
+1029   Node *   obj_node() const       {return in(TypeFunc::Parms + 0); }
+1030   Node *   box_node() const       {return in(TypeFunc::Parms + 1); }
+1031   Node *   fastlock_node() const  {return in(TypeFunc::Parms + 2); }
+1032   void     set_box_node(Node* box) { set_req(TypeFunc::Parms + 1, box); }
+1033 
+1034   const Type *sub(const Type *t1, const Type *t2) const { return TypeInt::CC;}
+1035 
+1036   virtual uint size_of() const { return sizeof(*this); }
+1037 
+1038   bool is_eliminated()  const { return (_kind != Regular); }
+1039   bool is_non_esc_obj() const { return (_kind == NonEscObj); }
+1040   bool is_coarsened()   const { return (_kind == Coarsened); }
+1041   bool is_nested()      const { return (_kind == Nested); }
+1042 
+1043   const char * kind_as_string() const;
+1044   void log_lock_optimization(Compile* c, const char * tag) const;
+1045 
+1046   void set_non_esc_obj() { _kind = NonEscObj; set_eliminated_lock_counter(); }
+1047   void set_coarsened()   { _kind = Coarsened; set_eliminated_lock_counter(); }
+1048   void set_nested()      { _kind = Nested; set_eliminated_lock_counter(); }
+1049 
+1050   // locking does not modify its arguments
+1051   virtual bool may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase){ return false;}
+1052 
+1053 #ifndef PRODUCT
+1054   void create_lock_counter(JVMState* s);
+1055   NamedCounter* counter() const { return _counter; }
+1056   virtual void dump_spec(outputStream* st) const;
+1057   virtual void dump_compact_spec(outputStream* st) const;
+1058   virtual void related(GrowableArray&lt;Node*&gt; *in_rel, GrowableArray&lt;Node*&gt; *out_rel, bool compact) const;
+1059 #endif
+1060 };
+1061 
+1062 //------------------------------Lock---------------------------------------
+1063 // High-level lock operation
+1064 //
+1065 // This is a subclass of CallNode because it is a macro node which gets expanded
+1066 // into a code sequence containing a call.  This node takes 3 &quot;parameters&quot;:
+1067 //    0  -  object to lock
+1068 //    1 -   a BoxLockNode
+1069 //    2 -   a FastLockNode
+1070 //
+1071 class LockNode : public AbstractLockNode {
+1072 public:
+1073 
+1074   static const TypeFunc *lock_type() {
+1075     // create input type (domain)
+1076     const Type **fields = TypeTuple::fields(3);
+1077     fields[TypeFunc::Parms+0] = TypeInstPtr::NOTNULL;  // Object to be Locked
+1078     fields[TypeFunc::Parms+1] = TypeRawPtr::BOTTOM;    // Address of stack location for lock
+1079     fields[TypeFunc::Parms+2] = TypeInt::BOOL;         // FastLock
+1080     const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+3,fields);
+1081 
+1082     // create result type (range)
+1083     fields = TypeTuple::fields(0);
+1084 
+1085     const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+0,fields);
+1086 
+1087     return TypeFunc::make(domain,range);
+1088   }
+1089 
+1090   virtual int Opcode() const;
+1091   virtual uint size_of() const; // Size is bigger
+1092   LockNode(Compile* C, const TypeFunc *tf) : AbstractLockNode( tf ) {
+1093     init_class_id(Class_Lock);
+1094     init_flags(Flag_is_macro);
+1095     C-&gt;add_macro_node(this);
+1096   }
+1097   virtual bool        guaranteed_safepoint()  { return false; }
+1098 
+1099   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+1100   // Expansion modifies the JVMState, so we need to clone it
+1101   virtual void  clone_jvms(Compile* C) {
+1102     if (jvms() != NULL) {
+1103       set_jvms(jvms()-&gt;clone_deep(C));
+1104       jvms()-&gt;set_map_deep(this);
+1105     }
+1106   }
+1107 
+1108   bool is_nested_lock_region(); // Is this Lock nested?
+1109   bool is_nested_lock_region(Compile * c); // Why isn&#39;t this Lock nested?
+1110 };
+1111 
+1112 //------------------------------Unlock---------------------------------------
+1113 // High-level unlock operation
+1114 class UnlockNode : public AbstractLockNode {
+1115 private:
+1116 #ifdef ASSERT
+1117   JVMState* const _dbg_jvms;      // Pointer to list of JVM State objects
+1118 #endif
+1119 public:
+1120   virtual int Opcode() const;
+1121   virtual uint size_of() const; // Size is bigger
+1122   UnlockNode(Compile* C, const TypeFunc *tf) : AbstractLockNode( tf )
+1123 #ifdef ASSERT
+1124     , _dbg_jvms(NULL)
+1125 #endif
+1126   {
+1127     init_class_id(Class_Unlock);
+1128     init_flags(Flag_is_macro);
+1129     C-&gt;add_macro_node(this);
+1130   }
+1131   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+1132   // unlock is never a safepoint
+1133   virtual bool        guaranteed_safepoint()  { return false; }
+1134 #ifdef ASSERT
+1135   void set_dbg_jvms(JVMState* s) {
+1136     *(JVMState**)&amp;_dbg_jvms = s;  // override const attribute in the accessor
+1137   }
+1138   JVMState* dbg_jvms() const { return _dbg_jvms; }
+1139 #else
+1140   JVMState* dbg_jvms() const { return NULL; }
+1141 #endif
+1142 };
+1143 #endif // SHARE_OPTO_CALLNODE_HPP
+    </pre>
+  </body>
+</html>

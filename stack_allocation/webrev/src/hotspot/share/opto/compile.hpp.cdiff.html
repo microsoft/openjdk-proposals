@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/opto/compile.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compile.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="escape.cpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/compile.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 257,11 ***</span>
+  
+    // Control of this compilation.
+    int                   _max_inline_size;       // Max inline size for this compilation
+    int                   _freq_inline_size;      // Max hot method inline size for this compilation
+    int                   _fixed_slots;           // count of frame slots not allocated by the register
+<span class="line-modified">!                                                 // allocator i.e. locks, original deopt pc, etc.</span>
+    uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+  
+    int                   _major_progress;        // Count of something big happening
+    bool                  _inlining_progress;     // progress doing incremental inlining?
+    bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+<span class="line-new-header">--- 257,11 ---</span>
+  
+    // Control of this compilation.
+    int                   _max_inline_size;       // Max inline size for this compilation
+    int                   _freq_inline_size;      // Max hot method inline size for this compilation
+    int                   _fixed_slots;           // count of frame slots not allocated by the register
+<span class="line-modified">!                                                 // allocator i.e. locks, original deopt pc, stack allocated objects, etc.</span>
+    uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+  
+    int                   _major_progress;        // Count of something big happening
+    bool                  _inlining_progress;     // progress doing incremental inlining?
+    bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 298,10 ***</span>
+<span class="line-new-header">--- 298,14 ---</span>
+    // JSR 292
+    bool                  _has_method_handle_invokes; // True if this method has MethodHandle invokes.
+    RTMState              _rtm_state;             // State of Restricted Transactional Memory usage
+    int                   _loop_opts_cnt;         // loop opts round
+    bool                  _clinit_barrier_on_entry; // True if clinit barrier is needed on nmethod entry
+<span class="line-added">+   int                   _stack_allocated_slots; // count of frame slots potentially taken by stack allocated objects.</span>
+<span class="line-added">+                                                 // Going over the limit disables stack allocation of objects pointing</span>
+<span class="line-added">+                                                 // to other stack allocated objects.</span>
+<span class="line-added">+   bool                  _fail_stack_allocation_with_references;</span>
+  
+    // Compilation environment.
+    Arena                 _comp_arena;            // Arena with lifetime equivalent to Compile
+    void*                 _barrier_set_state;     // Potential GC barrier state for Compile
+    ciEnv*                _env;                   // CI interface
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 504,11 ***</span>
+    /** Do boxing elimination. */
+    bool              eliminate_boxing() const    { return _eliminate_boxing; }
+    /** Do aggressive boxing elimination. */
+    bool              aggressive_unboxing() const { return _eliminate_boxing &amp;&amp; AggressiveUnboxing; }
+    bool              save_argument_registers() const { return _save_argument_registers; }
+<span class="line-modified">! </span>
+  
+    // Other fixed compilation parameters.
+    ciMethod*         method() const              { return _method; }
+    int               entry_bci() const           { return _entry_bci; }
+    bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+<span class="line-new-header">--- 508,12 ---</span>
+    /** Do boxing elimination. */
+    bool              eliminate_boxing() const    { return _eliminate_boxing; }
+    /** Do aggressive boxing elimination. */
+    bool              aggressive_unboxing() const { return _eliminate_boxing &amp;&amp; AggressiveUnboxing; }
+    bool              save_argument_registers() const { return _save_argument_registers; }
+<span class="line-modified">!   /** Do stack allocation */</span>
+<span class="line-added">+   bool              do_stack_allocation() const { return UseStackAllocation || _directive-&gt;UseStackAllocationOption; }</span>
+  
+    // Other fixed compilation parameters.
+    ciMethod*         method() const              { return _method; }
+    int               entry_bci() const           { return _entry_bci; }
+    bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 590,10 ***</span>
+<span class="line-new-header">--- 595,14 ---</span>
+    bool          profile_rtm() const              { return _rtm_state == ProfileRTM; }
+    uint              max_node_limit() const       { return (uint)_max_node_limit; }
+    void          set_max_node_limit(uint n)       { _max_node_limit = n; }
+    bool              clinit_barrier_on_entry()       { return _clinit_barrier_on_entry; }
+    void          set_clinit_barrier_on_entry(bool z) { _clinit_barrier_on_entry = z; }
+<span class="line-added">+   int               stack_allocated_slots() const { assert(_stack_allocated_slots &gt;= 0, &quot;&quot;); return _stack_allocated_slots; }</span>
+<span class="line-added">+   void          set_stack_allocated_slots(int n)  { _stack_allocated_slots = n; }</span>
+<span class="line-added">+   bool               fail_stack_allocation_with_references() const { return _fail_stack_allocation_with_references; }</span>
+<span class="line-added">+   void          set_fail_stack_allocation_with_references(bool b)  { _fail_stack_allocation_with_references = b; }</span>
+  
+    // check the CompilerOracle for special behaviours for this compile
+    bool          method_has_option(const char * option) {
+      return method() != NULL &amp;&amp; method()-&gt;has_option(option);
+    }
+</pre>
+<center><a href="compile.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="escape.cpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

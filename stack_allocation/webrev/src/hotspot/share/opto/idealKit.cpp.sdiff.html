@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/idealKit.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="escape.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/idealKit.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 47   _var_ct = 0;
+ 48   _cvstate = NULL;
+ 49   // We can go memory state free or else we need the entire memory state
+ 50   assert(_initial_memory == NULL || _initial_memory-&gt;Opcode() == Op_MergeMem, &quot;memory must be pre-split&quot;);
+ 51   assert(!_gvn.is_IterGVN(), &quot;IdealKit can&#39;t be used during Optimize phase&quot;);
+ 52   int init_size = 5;
+ 53   _pending_cvstates = new (C-&gt;node_arena()) GrowableArray&lt;Node*&gt;(C-&gt;node_arena(), init_size, 0, 0);
+ 54   DEBUG_ONLY(_state = new (C-&gt;node_arena()) GrowableArray&lt;int&gt;(C-&gt;node_arena(), init_size, 0, 0));
+ 55   if (!has_declarations) {
+ 56      declarations_done();
+ 57   }
+ 58 }
+ 59 
+ 60 //----------------------------sync_kit-----------------------------------------
+ 61 void IdealKit::sync_kit(GraphKit* gkit) {
+ 62   set_all_memory(gkit-&gt;merged_memory());
+ 63   set_i_o(gkit-&gt;i_o());
+ 64   set_ctrl(gkit-&gt;control());
+ 65 }
+ 66 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 67 //-------------------------------if_then-------------------------------------
+ 68 // Create:  if(left relop right)
+ 69 //          /  \
+ 70 //   iffalse    iftrue
+ 71 // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+ 72 void IdealKit::if_then(Node* left, BoolTest::mask relop,
+ 73                        Node* right, float prob, float cnt, bool push_new_state) {
+ 74   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);
+ 75   Node* bol;
+ 76   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {
+ 77     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {
+ 78       bol = Bool(CmpI(left, right), relop);
+ 79     } else {
+ 80       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);
+ 81       bol = Bool(CmpL(left, right), relop);
+ 82     }
+ 83 
+ 84   } else {
+ 85     bol = Bool(CmpP(left, right), relop);
+ 86   }
+
+
+
+
+
+
+
+ 87   // Delay gvn.tranform on if-nodes until construction is finished
+ 88   // to prevent a constant bool input from discarding a control output.
+ 89   IfNode* iff = delay_transform(new IfNode(ctrl(), bol, prob, cnt))-&gt;as_If();
+ 90   Node* then  = IfTrue(iff);
+ 91   Node* elsen = IfFalse(iff);
+ 92   Node* else_cvstate = copy_cvstate();
+ 93   else_cvstate-&gt;set_req(TypeFunc::Control, elsen);
+ 94   _pending_cvstates-&gt;push(else_cvstate);
+ 95   DEBUG_ONLY(if (push_new_state) _state-&gt;push(IfThenS));
+ 96   set_ctrl(then);
+ 97 }
+ 98 
+ 99 //-------------------------------else_-------------------------------------
+100 // Pop the else cvstate off the stack, and push the (current) then cvstate.
+101 // The else cvstate becomes the current cvstate.
+102 void IdealKit::else_() {
+103   assert(state() == IfThenS, &quot;bad state for new Else&quot;);
+104   Node* else_cvstate = _pending_cvstates-&gt;pop();
+105   DEBUG_ONLY(_state-&gt;pop());
+106   // save current (then) cvstate for later use at endif
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 47   _var_ct = 0;
+ 48   _cvstate = NULL;
+ 49   // We can go memory state free or else we need the entire memory state
+ 50   assert(_initial_memory == NULL || _initial_memory-&gt;Opcode() == Op_MergeMem, &quot;memory must be pre-split&quot;);
+ 51   assert(!_gvn.is_IterGVN(), &quot;IdealKit can&#39;t be used during Optimize phase&quot;);
+ 52   int init_size = 5;
+ 53   _pending_cvstates = new (C-&gt;node_arena()) GrowableArray&lt;Node*&gt;(C-&gt;node_arena(), init_size, 0, 0);
+ 54   DEBUG_ONLY(_state = new (C-&gt;node_arena()) GrowableArray&lt;int&gt;(C-&gt;node_arena(), init_size, 0, 0));
+ 55   if (!has_declarations) {
+ 56      declarations_done();
+ 57   }
+ 58 }
+ 59 
+ 60 //----------------------------sync_kit-----------------------------------------
+ 61 void IdealKit::sync_kit(GraphKit* gkit) {
+ 62   set_all_memory(gkit-&gt;merged_memory());
+ 63   set_i_o(gkit-&gt;i_o());
+ 64   set_ctrl(gkit-&gt;control());
+ 65 }
+ 66 
+<span class="line-added"> 67 //-------------------------------uif_then-------------------------------------</span>
+<span class="line-added"> 68 // Create: unsigned if(left relop right)</span>
+<span class="line-added"> 69 //          /  \</span>
+<span class="line-added"> 70 //   iffalse    iftrue</span>
+<span class="line-added"> 71 // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.</span>
+<span class="line-added"> 72 void IdealKit::uif_then(Node* left, BoolTest::mask relop,</span>
+<span class="line-added"> 73                        Node* right, float prob, float cnt, bool push_new_state) {</span>
+<span class="line-added"> 74   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);</span>
+<span class="line-added"> 75   Node* bol;</span>
+<span class="line-added"> 76   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {</span>
+<span class="line-added"> 77     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {</span>
+<span class="line-added"> 78       bol = Bool(CmpU(left, right), relop);</span>
+<span class="line-added"> 79     } else {</span>
+<span class="line-added"> 80       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);</span>
+<span class="line-added"> 81       bol = Bool(CmpUL(left, right), relop);</span>
+<span class="line-added"> 82     }</span>
+<span class="line-added"> 83 </span>
+<span class="line-added"> 84   } else {</span>
+<span class="line-added"> 85     bol = Bool(CmpP(left, right), relop);</span>
+<span class="line-added"> 86   }</span>
+<span class="line-added"> 87 </span>
+<span class="line-added"> 88   if_then_common(bol, prob, cnt, push_new_state);</span>
+<span class="line-added"> 89 }</span>
+<span class="line-added"> 90 </span>
+ 91 //-------------------------------if_then-------------------------------------
+ 92 // Create:  if(left relop right)
+ 93 //          /  \
+ 94 //   iffalse    iftrue
+ 95 // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+ 96 void IdealKit::if_then(Node* left, BoolTest::mask relop,
+ 97                        Node* right, float prob, float cnt, bool push_new_state) {
+ 98   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);
+ 99   Node* bol;
+100   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {
+101     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {
+102       bol = Bool(CmpI(left, right), relop);
+103     } else {
+104       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);
+105       bol = Bool(CmpL(left, right), relop);
+106     }
+107 
+108   } else {
+109     bol = Bool(CmpP(left, right), relop);
+110   }
+<span class="line-added">111 </span>
+<span class="line-added">112   if_then_common(bol, prob, cnt, push_new_state);</span>
+<span class="line-added">113 }</span>
+<span class="line-added">114 </span>
+<span class="line-added">115 // Common helper to create the If nodes for if_then and uif_then</span>
+<span class="line-added">116 void IdealKit::if_then_common(Node* bol, float prob, float cnt,</span>
+<span class="line-added">117                               bool push_new_state) {</span>
+118   // Delay gvn.tranform on if-nodes until construction is finished
+119   // to prevent a constant bool input from discarding a control output.
+120   IfNode* iff = delay_transform(new IfNode(ctrl(), bol, prob, cnt))-&gt;as_If();
+121   Node* then  = IfTrue(iff);
+122   Node* elsen = IfFalse(iff);
+123   Node* else_cvstate = copy_cvstate();
+124   else_cvstate-&gt;set_req(TypeFunc::Control, elsen);
+125   _pending_cvstates-&gt;push(else_cvstate);
+126   DEBUG_ONLY(if (push_new_state) _state-&gt;push(IfThenS));
+127   set_ctrl(then);
+128 }
+129 
+130 //-------------------------------else_-------------------------------------
+131 // Pop the else cvstate off the stack, and push the (current) then cvstate.
+132 // The else cvstate becomes the current cvstate.
+133 void IdealKit::else_() {
+134   assert(state() == IfThenS, &quot;bad state for new Else&quot;);
+135   Node* else_cvstate = _pending_cvstates-&gt;pop();
+136   DEBUG_ONLY(_state-&gt;pop());
+137   // save current (then) cvstate for later use at endif
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="escape.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

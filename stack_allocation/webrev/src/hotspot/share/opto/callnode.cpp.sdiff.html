@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/callnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="c2_globals.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/callnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 468         st-&gt;print(&quot;[%d]&quot;, spobj-&gt;n_fields());
+ 469       } else if (cik-&gt;is_obj_array_klass()) {
+ 470         ciKlass* cie = cik-&gt;as_obj_array_klass()-&gt;base_element_klass();
+ 471         if (cie-&gt;is_instance_klass()) {
+ 472           cie-&gt;print_name_on(st);
+ 473         } else if (cie-&gt;is_type_array_klass()) {
+ 474           cie-&gt;as_array_klass()-&gt;base_element_type()-&gt;print_name_on(st);
+ 475         } else {
+ 476           ShouldNotReachHere();
+ 477         }
+ 478         st-&gt;print(&quot;[%d]&quot;, spobj-&gt;n_fields());
+ 479         int ndim = cik-&gt;as_array_klass()-&gt;dimension() - 1;
+ 480         while (ndim-- &gt; 0) {
+ 481           st-&gt;print(&quot;[]&quot;);
+ 482         }
+ 483       }
+ 484       st-&gt;print(&quot;={&quot;);
+ 485       uint nf = spobj-&gt;n_fields();
+ 486       if (nf &gt; 0) {
+ 487         uint first_ind = spobj-&gt;first_index(mcall-&gt;jvms());
+<span class="line-modified"> 488         Node* fld_node = mcall-&gt;in(first_ind);</span>
+ 489         ciField* cifield;
+ 490         if (iklass != NULL) {
+ 491           st-&gt;print(&quot; [&quot;);
+ 492           cifield = iklass-&gt;nonstatic_field_at(0);
+ 493           cifield-&gt;print_name_on(st);
+<span class="line-modified"> 494           format_helper(regalloc, st, fld_node, &quot;:&quot;, 0, &amp;scobjs);</span>
+
+
+
+
+
+ 495         } else {
+<span class="line-modified"> 496           format_helper(regalloc, st, fld_node, &quot;[&quot;, 0, &amp;scobjs);</span>
+
+
+
+
+
+ 497         }
+ 498         for (uint j = 1; j &lt; nf; j++) {
+<span class="line-removed"> 499           fld_node = mcall-&gt;in(first_ind+j);</span>
+ 500           if (iklass != NULL) {
+ 501             st-&gt;print(&quot;, [&quot;);
+ 502             cifield = iklass-&gt;nonstatic_field_at(j);
+ 503             cifield-&gt;print_name_on(st);
+<span class="line-modified"> 504             format_helper(regalloc, st, fld_node, &quot;:&quot;, j, &amp;scobjs);</span>
+
+
+
+
+
+ 505           } else {
+<span class="line-modified"> 506             format_helper(regalloc, st, fld_node, &quot;, [&quot;, j, &amp;scobjs);</span>
+
+
+
+
+
+ 507           }
+ 508         }
+ 509       }
+ 510       st-&gt;print(&quot; }&quot;);
+ 511     }
+ 512   }
+ 513   st-&gt;cr();
+ 514   if (caller() != NULL) caller()-&gt;format(regalloc, n, st);
+ 515 }
+ 516 
+ 517 
+ 518 void JVMState::dump_spec(outputStream *st) const {
+ 519   if (_method != NULL) {
+ 520     bool printed = false;
+ 521     if (!Verbose) {
+ 522       // The JVMS dumps make really, really long lines.
+ 523       // Take out the most boring parts, which are the package prefixes.
+ 524       char buf[500];
+ 525       stringStream namest(buf, sizeof(buf));
+ 526       _method-&gt;print_short_name(&amp;namest);
+</pre>
+<hr />
+<pre>
+ 944         set_generator(NULL);
+ 945       }
+ 946     } else {
+ 947       assert(callee-&gt;has_member_arg(), &quot;wrong type of call?&quot;);
+ 948       if (in(TypeFunc::Parms + callee-&gt;arg_size() - 1)-&gt;Opcode() == Op_ConP) {
+ 949         phase-&gt;C-&gt;prepend_late_inline(cg);
+ 950         set_generator(NULL);
+ 951       }
+ 952     }
+ 953   }
+ 954   return SafePointNode::Ideal(phase, can_reshape);
+ 955 }
+ 956 
+ 957 bool CallNode::is_call_to_arraycopystub() const {
+ 958   if (_name != NULL &amp;&amp; strstr(_name, &quot;arraycopy&quot;) != 0) {
+ 959     return true;
+ 960   }
+ 961   return false;
+ 962 }
+ 963 
+
+
+
+
+
+
+
+ 964 //=============================================================================
+ 965 uint CallJavaNode::size_of() const { return sizeof(*this); }
+ 966 bool CallJavaNode::cmp( const Node &amp;n ) const {
+ 967   CallJavaNode &amp;call = (CallJavaNode&amp;)n;
+ 968   return CallNode::cmp(call) &amp;&amp; _method == call._method &amp;&amp;
+ 969          _override_symbolic_info == call._override_symbolic_info;
+ 970 }
+ 971 #ifdef ASSERT
+ 972 bool CallJavaNode::validate_symbolic_info() const {
+ 973   if (method() == NULL) {
+ 974     return true; // call into runtime or uncommon trap
+ 975   }
+ 976   ciMethod* symbolic_info = jvms()-&gt;method()-&gt;get_method_at_bci(_bci);
+ 977   ciMethod* callee = method();
+ 978   if (symbolic_info-&gt;is_method_handle_intrinsic() &amp;&amp; !callee-&gt;is_method_handle_intrinsic()) {
+ 979     assert(override_symbolic_info(), &quot;should be set&quot;);
+ 980   }
+ 981   assert(ciMethod::is_consistent_info(symbolic_info, callee), &quot;inconsistent info&quot;);
+ 982   return true;
+ 983 }
+</pre>
+<hr />
+<pre>
+1285 }
+1286 
+1287 void SafePointNode::disconnect_from_root(PhaseIterGVN *igvn) {
+1288   assert(Opcode() == Op_SafePoint, &quot;only value for safepoint in loops&quot;);
+1289   int nb = igvn-&gt;C-&gt;root()-&gt;find_prec_edge(this);
+1290   if (nb != -1) {
+1291     igvn-&gt;C-&gt;root()-&gt;rm_prec(nb);
+1292   }
+1293 }
+1294 
+1295 //==============  SafePointScalarObjectNode  ==============
+1296 
+1297 SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
+1298 #ifdef ASSERT
+1299                                                      AllocateNode* alloc,
+1300 #endif
+1301                                                      uint first_index,
+1302                                                      uint n_fields) :
+1303   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+1304   _first_index(first_index),
+<span class="line-modified">1305   _n_fields(n_fields)</span>
+
+1306 #ifdef ASSERT
+1307   , _alloc(alloc)
+1308 #endif
+1309 {
+1310   init_class_id(Class_SafePointScalarObject);
+1311 }
+1312 
+1313 // Do not allow value-numbering for SafePointScalarObject node.
+1314 uint SafePointScalarObjectNode::hash() const { return NO_HASH; }
+1315 bool SafePointScalarObjectNode::cmp( const Node &amp;n ) const {
+1316   return (&amp;n == this); // Always fail except on self
+1317 }
+1318 
+1319 uint SafePointScalarObjectNode::ideal_reg() const {
+1320   return 0; // No matching to machine instruction
+1321 }
+1322 
+1323 const RegMask &amp;SafePointScalarObjectNode::in_RegMask(uint idx) const {
+1324   return *(Compile::current()-&gt;matcher()-&gt;idealreg2debugmask[in(idx)-&gt;ideal_reg()]);
+1325 }
+</pre>
+<hr />
+<pre>
+1347 #ifndef PRODUCT
+1348 void SafePointScalarObjectNode::dump_spec(outputStream *st) const {
+1349   st-&gt;print(&quot; # fields@[%d..%d]&quot;, first_index(),
+1350              first_index() + n_fields() - 1);
+1351 }
+1352 
+1353 #endif
+1354 
+1355 //=============================================================================
+1356 uint AllocateNode::size_of() const { return sizeof(*this); }
+1357 
+1358 AllocateNode::AllocateNode(Compile* C, const TypeFunc *atype,
+1359                            Node *ctrl, Node *mem, Node *abio,
+1360                            Node *size, Node *klass_node, Node *initial_test)
+1361   : CallNode(atype, NULL, TypeRawPtr::BOTTOM)
+1362 {
+1363   init_class_id(Class_Allocate);
+1364   init_flags(Flag_is_macro);
+1365   _is_scalar_replaceable = false;
+1366   _is_non_escaping = false;
+
+
+1367   _is_allocation_MemBar_redundant = false;
+1368   Node *topnode = C-&gt;top();
+1369 
+1370   init_req( TypeFunc::Control  , ctrl );
+1371   init_req( TypeFunc::I_O      , abio );
+1372   init_req( TypeFunc::Memory   , mem );
+1373   init_req( TypeFunc::ReturnAdr, topnode );
+1374   init_req( TypeFunc::FramePtr , topnode );
+1375   init_req( AllocSize          , size);
+1376   init_req( KlassNode          , klass_node);
+1377   init_req( InitialTest        , initial_test);
+1378   init_req( ALength            , topnode);
+1379   C-&gt;add_macro_node(this);
+1380 }
+1381 
+1382 void AllocateNode::compute_MemBar_redundancy(ciMethod* initializer)
+1383 {
+1384   assert(initializer != NULL &amp;&amp;
+1385          initializer-&gt;is_initializer() &amp;&amp;
+1386          !initializer-&gt;is_static(),
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 468         st-&gt;print(&quot;[%d]&quot;, spobj-&gt;n_fields());
+ 469       } else if (cik-&gt;is_obj_array_klass()) {
+ 470         ciKlass* cie = cik-&gt;as_obj_array_klass()-&gt;base_element_klass();
+ 471         if (cie-&gt;is_instance_klass()) {
+ 472           cie-&gt;print_name_on(st);
+ 473         } else if (cie-&gt;is_type_array_klass()) {
+ 474           cie-&gt;as_array_klass()-&gt;base_element_type()-&gt;print_name_on(st);
+ 475         } else {
+ 476           ShouldNotReachHere();
+ 477         }
+ 478         st-&gt;print(&quot;[%d]&quot;, spobj-&gt;n_fields());
+ 479         int ndim = cik-&gt;as_array_klass()-&gt;dimension() - 1;
+ 480         while (ndim-- &gt; 0) {
+ 481           st-&gt;print(&quot;[]&quot;);
+ 482         }
+ 483       }
+ 484       st-&gt;print(&quot;={&quot;);
+ 485       uint nf = spobj-&gt;n_fields();
+ 486       if (nf &gt; 0) {
+ 487         uint first_ind = spobj-&gt;first_index(mcall-&gt;jvms());
+<span class="line-modified"> 488         Node* fld_node = NULL;</span>
+ 489         ciField* cifield;
+ 490         if (iklass != NULL) {
+ 491           st-&gt;print(&quot; [&quot;);
+ 492           cifield = iklass-&gt;nonstatic_field_at(0);
+ 493           cifield-&gt;print_name_on(st);
+<span class="line-modified"> 494           if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added"> 495             st-&gt;print(&quot;:*0]&quot;);</span>
+<span class="line-added"> 496           } else {</span>
+<span class="line-added"> 497             fld_node = mcall-&gt;in(first_ind);</span>
+<span class="line-added"> 498             format_helper(regalloc, st, fld_node, &quot;:&quot;, 0, &amp;scobjs);</span>
+<span class="line-added"> 499           }</span>
+ 500         } else {
+<span class="line-modified"> 501           if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added"> 502             st-&gt;print(&quot;[*0]&quot;);</span>
+<span class="line-added"> 503           } else {</span>
+<span class="line-added"> 504             fld_node = mcall-&gt;in(first_ind);</span>
+<span class="line-added"> 505             format_helper(regalloc, st, fld_node, &quot;[&quot;, 0, &amp;scobjs);</span>
+<span class="line-added"> 506           }</span>
+ 507         }
+ 508         for (uint j = 1; j &lt; nf; j++) {
+
+ 509           if (iklass != NULL) {
+ 510             st-&gt;print(&quot;, [&quot;);
+ 511             cifield = iklass-&gt;nonstatic_field_at(j);
+ 512             cifield-&gt;print_name_on(st);
+<span class="line-modified"> 513             if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added"> 514               st-&gt;print(&quot;:*%d]&quot;, j);</span>
+<span class="line-added"> 515             } else {</span>
+<span class="line-added"> 516               fld_node = mcall-&gt;in(first_ind+j);</span>
+<span class="line-added"> 517               format_helper(regalloc, st, fld_node, &quot;:&quot;, j, &amp;scobjs);</span>
+<span class="line-added"> 518             }</span>
+ 519           } else {
+<span class="line-modified"> 520             if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added"> 521               st-&gt;print(&quot;, [*%d]&quot;, j);</span>
+<span class="line-added"> 522             } else {</span>
+<span class="line-added"> 523               fld_node = mcall-&gt;in(first_ind+j);</span>
+<span class="line-added"> 524               format_helper(regalloc, st, fld_node, &quot;, [&quot;, j, &amp;scobjs);</span>
+<span class="line-added"> 525             }</span>
+ 526           }
+ 527         }
+ 528       }
+ 529       st-&gt;print(&quot; }&quot;);
+ 530     }
+ 531   }
+ 532   st-&gt;cr();
+ 533   if (caller() != NULL) caller()-&gt;format(regalloc, n, st);
+ 534 }
+ 535 
+ 536 
+ 537 void JVMState::dump_spec(outputStream *st) const {
+ 538   if (_method != NULL) {
+ 539     bool printed = false;
+ 540     if (!Verbose) {
+ 541       // The JVMS dumps make really, really long lines.
+ 542       // Take out the most boring parts, which are the package prefixes.
+ 543       char buf[500];
+ 544       stringStream namest(buf, sizeof(buf));
+ 545       _method-&gt;print_short_name(&amp;namest);
+</pre>
+<hr />
+<pre>
+ 963         set_generator(NULL);
+ 964       }
+ 965     } else {
+ 966       assert(callee-&gt;has_member_arg(), &quot;wrong type of call?&quot;);
+ 967       if (in(TypeFunc::Parms + callee-&gt;arg_size() - 1)-&gt;Opcode() == Op_ConP) {
+ 968         phase-&gt;C-&gt;prepend_late_inline(cg);
+ 969         set_generator(NULL);
+ 970       }
+ 971     }
+ 972   }
+ 973   return SafePointNode::Ideal(phase, can_reshape);
+ 974 }
+ 975 
+ 976 bool CallNode::is_call_to_arraycopystub() const {
+ 977   if (_name != NULL &amp;&amp; strstr(_name, &quot;arraycopy&quot;) != 0) {
+ 978     return true;
+ 979   }
+ 980   return false;
+ 981 }
+ 982 
+<span class="line-added"> 983 bool CallNode::is_call_to_osr_migration_end() const {</span>
+<span class="line-added"> 984   if (_name != NULL &amp;&amp; strstr(_name, &quot;OSR_migration_end&quot;) != 0) {</span>
+<span class="line-added"> 985     return true;</span>
+<span class="line-added"> 986   }</span>
+<span class="line-added"> 987   return false;</span>
+<span class="line-added"> 988 }</span>
+<span class="line-added"> 989 </span>
+ 990 //=============================================================================
+ 991 uint CallJavaNode::size_of() const { return sizeof(*this); }
+ 992 bool CallJavaNode::cmp( const Node &amp;n ) const {
+ 993   CallJavaNode &amp;call = (CallJavaNode&amp;)n;
+ 994   return CallNode::cmp(call) &amp;&amp; _method == call._method &amp;&amp;
+ 995          _override_symbolic_info == call._override_symbolic_info;
+ 996 }
+ 997 #ifdef ASSERT
+ 998 bool CallJavaNode::validate_symbolic_info() const {
+ 999   if (method() == NULL) {
+1000     return true; // call into runtime or uncommon trap
+1001   }
+1002   ciMethod* symbolic_info = jvms()-&gt;method()-&gt;get_method_at_bci(_bci);
+1003   ciMethod* callee = method();
+1004   if (symbolic_info-&gt;is_method_handle_intrinsic() &amp;&amp; !callee-&gt;is_method_handle_intrinsic()) {
+1005     assert(override_symbolic_info(), &quot;should be set&quot;);
+1006   }
+1007   assert(ciMethod::is_consistent_info(symbolic_info, callee), &quot;inconsistent info&quot;);
+1008   return true;
+1009 }
+</pre>
+<hr />
+<pre>
+1311 }
+1312 
+1313 void SafePointNode::disconnect_from_root(PhaseIterGVN *igvn) {
+1314   assert(Opcode() == Op_SafePoint, &quot;only value for safepoint in loops&quot;);
+1315   int nb = igvn-&gt;C-&gt;root()-&gt;find_prec_edge(this);
+1316   if (nb != -1) {
+1317     igvn-&gt;C-&gt;root()-&gt;rm_prec(nb);
+1318   }
+1319 }
+1320 
+1321 //==============  SafePointScalarObjectNode  ==============
+1322 
+1323 SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
+1324 #ifdef ASSERT
+1325                                                      AllocateNode* alloc,
+1326 #endif
+1327                                                      uint first_index,
+1328                                                      uint n_fields) :
+1329   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+1330   _first_index(first_index),
+<span class="line-modified">1331   _n_fields(n_fields),</span>
+<span class="line-added">1332   _is_stack_allocated(false)</span>
+1333 #ifdef ASSERT
+1334   , _alloc(alloc)
+1335 #endif
+1336 {
+1337   init_class_id(Class_SafePointScalarObject);
+1338 }
+1339 
+1340 // Do not allow value-numbering for SafePointScalarObject node.
+1341 uint SafePointScalarObjectNode::hash() const { return NO_HASH; }
+1342 bool SafePointScalarObjectNode::cmp( const Node &amp;n ) const {
+1343   return (&amp;n == this); // Always fail except on self
+1344 }
+1345 
+1346 uint SafePointScalarObjectNode::ideal_reg() const {
+1347   return 0; // No matching to machine instruction
+1348 }
+1349 
+1350 const RegMask &amp;SafePointScalarObjectNode::in_RegMask(uint idx) const {
+1351   return *(Compile::current()-&gt;matcher()-&gt;idealreg2debugmask[in(idx)-&gt;ideal_reg()]);
+1352 }
+</pre>
+<hr />
+<pre>
+1374 #ifndef PRODUCT
+1375 void SafePointScalarObjectNode::dump_spec(outputStream *st) const {
+1376   st-&gt;print(&quot; # fields@[%d..%d]&quot;, first_index(),
+1377              first_index() + n_fields() - 1);
+1378 }
+1379 
+1380 #endif
+1381 
+1382 //=============================================================================
+1383 uint AllocateNode::size_of() const { return sizeof(*this); }
+1384 
+1385 AllocateNode::AllocateNode(Compile* C, const TypeFunc *atype,
+1386                            Node *ctrl, Node *mem, Node *abio,
+1387                            Node *size, Node *klass_node, Node *initial_test)
+1388   : CallNode(atype, NULL, TypeRawPtr::BOTTOM)
+1389 {
+1390   init_class_id(Class_Allocate);
+1391   init_flags(Flag_is_macro);
+1392   _is_scalar_replaceable = false;
+1393   _is_non_escaping = false;
+<span class="line-added">1394   _is_stack_allocateable = false;</span>
+<span class="line-added">1395   _is_referenced_stack_allocation = false;</span>
+1396   _is_allocation_MemBar_redundant = false;
+1397   Node *topnode = C-&gt;top();
+1398 
+1399   init_req( TypeFunc::Control  , ctrl );
+1400   init_req( TypeFunc::I_O      , abio );
+1401   init_req( TypeFunc::Memory   , mem );
+1402   init_req( TypeFunc::ReturnAdr, topnode );
+1403   init_req( TypeFunc::FramePtr , topnode );
+1404   init_req( AllocSize          , size);
+1405   init_req( KlassNode          , klass_node);
+1406   init_req( InitialTest        , initial_test);
+1407   init_req( ALength            , topnode);
+1408   C-&gt;add_macro_node(this);
+1409 }
+1410 
+1411 void AllocateNode::compute_MemBar_redundancy(ciMethod* initializer)
+1412 {
+1413   assert(initializer != NULL &amp;&amp;
+1414          initializer-&gt;is_initializer() &amp;&amp;
+1415          !initializer-&gt;is_static(),
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="c2_globals.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

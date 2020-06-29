@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/opto/idealKit.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;opto/addnode.hpp&quot;
+ 27 #include &quot;opto/callnode.hpp&quot;
+ 28 #include &quot;opto/cfgnode.hpp&quot;
+ 29 #include &quot;opto/idealKit.hpp&quot;
+ 30 #include &quot;opto/runtime.hpp&quot;
+ 31 
+ 32 // Static initialization
+ 33 
+ 34 // This declares the position where vars are kept in the cvstate
+ 35 // For some degree of consistency we use the TypeFunc enum to
+ 36 // soak up spots in the inputs even though we only use early Control
+ 37 // and Memory slots. (So far.)
+ 38 const uint IdealKit::first_var = TypeFunc::Parms + 1;
+ 39 
+ 40 //----------------------------IdealKit-----------------------------------------
+ 41 IdealKit::IdealKit(GraphKit* gkit, bool delay_all_transforms, bool has_declarations) :
+ 42   C(gkit-&gt;C), _gvn(gkit-&gt;gvn()) {
+ 43   _initial_ctrl = gkit-&gt;control();
+ 44   _initial_memory = gkit-&gt;merged_memory();
+ 45   _initial_i_o = gkit-&gt;i_o();
+ 46   _delay_all_transforms = delay_all_transforms;
+ 47   _var_ct = 0;
+ 48   _cvstate = NULL;
+ 49   // We can go memory state free or else we need the entire memory state
+ 50   assert(_initial_memory == NULL || _initial_memory-&gt;Opcode() == Op_MergeMem, &quot;memory must be pre-split&quot;);
+ 51   assert(!_gvn.is_IterGVN(), &quot;IdealKit can&#39;t be used during Optimize phase&quot;);
+ 52   int init_size = 5;
+ 53   _pending_cvstates = new (C-&gt;node_arena()) GrowableArray&lt;Node*&gt;(C-&gt;node_arena(), init_size, 0, 0);
+ 54   DEBUG_ONLY(_state = new (C-&gt;node_arena()) GrowableArray&lt;int&gt;(C-&gt;node_arena(), init_size, 0, 0));
+ 55   if (!has_declarations) {
+ 56      declarations_done();
+ 57   }
+ 58 }
+ 59 
+ 60 //----------------------------sync_kit-----------------------------------------
+ 61 void IdealKit::sync_kit(GraphKit* gkit) {
+ 62   set_all_memory(gkit-&gt;merged_memory());
+ 63   set_i_o(gkit-&gt;i_o());
+ 64   set_ctrl(gkit-&gt;control());
+ 65 }
+ 66 
+ 67 //-------------------------------uif_then-------------------------------------
+ 68 // Create: unsigned if(left relop right)
+ 69 //          /  \
+ 70 //   iffalse    iftrue
+ 71 // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+ 72 void IdealKit::uif_then(Node* left, BoolTest::mask relop,
+ 73                        Node* right, float prob, float cnt, bool push_new_state) {
+ 74   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);
+ 75   Node* bol;
+ 76   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {
+ 77     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {
+ 78       bol = Bool(CmpU(left, right), relop);
+ 79     } else {
+ 80       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);
+ 81       bol = Bool(CmpUL(left, right), relop);
+ 82     }
+ 83 
+ 84   } else {
+ 85     bol = Bool(CmpP(left, right), relop);
+ 86   }
+ 87 
+ 88   if_then_common(bol, prob, cnt, push_new_state);
+ 89 }
+ 90 
+ 91 //-------------------------------if_then-------------------------------------
+ 92 // Create:  if(left relop right)
+ 93 //          /  \
+ 94 //   iffalse    iftrue
+ 95 // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+ 96 void IdealKit::if_then(Node* left, BoolTest::mask relop,
+ 97                        Node* right, float prob, float cnt, bool push_new_state) {
+ 98   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);
+ 99   Node* bol;
+100   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {
+101     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {
+102       bol = Bool(CmpI(left, right), relop);
+103     } else {
+104       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);
+105       bol = Bool(CmpL(left, right), relop);
+106     }
+107 
+108   } else {
+109     bol = Bool(CmpP(left, right), relop);
+110   }
+111 
+112   if_then_common(bol, prob, cnt, push_new_state);
+113 }
+114 
+115 // Common helper to create the If nodes for if_then and uif_then
+116 void IdealKit::if_then_common(Node* bol, float prob, float cnt,
+117                               bool push_new_state) {
+118   // Delay gvn.tranform on if-nodes until construction is finished
+119   // to prevent a constant bool input from discarding a control output.
+120   IfNode* iff = delay_transform(new IfNode(ctrl(), bol, prob, cnt))-&gt;as_If();
+121   Node* then  = IfTrue(iff);
+122   Node* elsen = IfFalse(iff);
+123   Node* else_cvstate = copy_cvstate();
+124   else_cvstate-&gt;set_req(TypeFunc::Control, elsen);
+125   _pending_cvstates-&gt;push(else_cvstate);
+126   DEBUG_ONLY(if (push_new_state) _state-&gt;push(IfThenS));
+127   set_ctrl(then);
+128 }
+129 
+130 //-------------------------------else_-------------------------------------
+131 // Pop the else cvstate off the stack, and push the (current) then cvstate.
+132 // The else cvstate becomes the current cvstate.
+133 void IdealKit::else_() {
+134   assert(state() == IfThenS, &quot;bad state for new Else&quot;);
+135   Node* else_cvstate = _pending_cvstates-&gt;pop();
+136   DEBUG_ONLY(_state-&gt;pop());
+137   // save current (then) cvstate for later use at endif
+138   _pending_cvstates-&gt;push(_cvstate);
+139   DEBUG_ONLY(_state-&gt;push(ElseS));
+140   _cvstate = else_cvstate;
+141 }
+142 
+143 //-------------------------------end_if-------------------------------------
+144 // Merge the &quot;then&quot; and &quot;else&quot; cvstates.
+145 //
+146 // The if_then() pushed a copy of the current state for later use
+147 // as the initial state for a future &quot;else&quot; clause.  The
+148 // current state then became the initial state for the
+149 // then clause.  If an &quot;else&quot; clause was encountered, it will
+150 // pop the top state and use it for it&#39;s initial state.
+151 // It will also push the current state (the state at the end of
+152 // the &quot;then&quot; clause) for latter use at the end_if.
+153 //
+154 // At the endif, the states are:
+155 // 1) else exists a) current state is end of &quot;else&quot; clause
+156 //                b) top stack state is end of &quot;then&quot; clause
+157 //
+158 // 2) no else:    a) current state is end of &quot;then&quot; clause
+159 //                b) top stack state is from the &quot;if_then&quot; which
+160 //                   would have been the initial state of the else.
+161 //
+162 // Merging the states is accomplished by:
+163 //   1) make a label for the merge
+164 //   2) terminate the current state with a goto to the label
+165 //   3) pop the top state from the stack and make it the
+166 //        current state
+167 //   4) bind the label at the current state.  Binding a label
+168 //        terminates the current state with a goto to the
+169 //        label and makes the label&#39;s state the current state.
+170 //
+171 void IdealKit::end_if() {
+172   assert(state() &amp; (IfThenS|ElseS), &quot;bad state for new Endif&quot;);
+173   Node* lab = make_label(1);
+174 
+175   // Node* join_state = _pending_cvstates-&gt;pop();
+176                   /* merging, join */
+177   goto_(lab);
+178   _cvstate = _pending_cvstates-&gt;pop();
+179 
+180   bind(lab);
+181   DEBUG_ONLY(_state-&gt;pop());
+182 }
+183 
+184 //-------------------------------loop-------------------------------------
+185 // Create the loop head portion (*) of:
+186 //  *     iv = init
+187 //  *  top: (region node)
+188 //  *     if (iv relop limit) {
+189 //           loop body
+190 //           i = i + 1
+191 //           goto top
+192 //  *     } else // exits loop
+193 //
+194 // Pushes the loop top cvstate first, then the else (loop exit) cvstate
+195 // onto the stack.
+196 void IdealKit::loop(GraphKit* gkit, int nargs, IdealVariable&amp; iv, Node* init, BoolTest::mask relop, Node* limit, float prob, float cnt) {
+197   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new loop&quot;);
+198   if (UseLoopPredicate) {
+199     // Sync IdealKit and graphKit.
+200     gkit-&gt;sync_kit(*this);
+201     // Add loop predicate.
+202     gkit-&gt;add_empty_predicates(nargs);
+203     // Update IdealKit memory.
+204     sync_kit(gkit);
+205   }
+206   set(iv, init);
+207   Node* head = make_label(1);
+208   bind(head);
+209   _pending_cvstates-&gt;push(head); // push for use at end_loop
+210   _cvstate = copy_cvstate();
+211   if_then(value(iv), relop, limit, prob, cnt, false /* no new state */);
+212   DEBUG_ONLY(_state-&gt;push(LoopS));
+213   assert(ctrl()-&gt;is_IfTrue(), &quot;true branch stays in loop&quot;);
+214   assert(_pending_cvstates-&gt;top()-&gt;in(TypeFunc::Control)-&gt;is_IfFalse(), &quot;false branch exits loop&quot;);
+215 }
+216 
+217 //-------------------------------end_loop-------------------------------------
+218 // Creates the goto top label.
+219 // Expects the else (loop exit) cvstate to be on top of the
+220 // stack, and the loop top cvstate to be 2nd.
+221 void IdealKit::end_loop() {
+222   assert((state() == LoopS), &quot;bad state for new end_loop&quot;);
+223   Node* exit = _pending_cvstates-&gt;pop();
+224   Node* head = _pending_cvstates-&gt;pop();
+225   goto_(head);
+226   clear(head);
+227   DEBUG_ONLY(_state-&gt;pop());
+228   _cvstate = exit;
+229 }
+230 
+231 //-------------------------------make_label-------------------------------------
+232 // Creates a label.  The number of goto&#39;s
+233 // must be specified (which should be 1 less than
+234 // the number of precedessors.)
+235 Node* IdealKit::make_label(int goto_ct) {
+236   assert(_cvstate != NULL, &quot;must declare variables before labels&quot;);
+237   Node* lab = new_cvstate();
+238   int sz = 1 + goto_ct + 1 /* fall thru */;
+239   Node* reg = delay_transform(new RegionNode(sz));
+240   lab-&gt;init_req(TypeFunc::Control, reg);
+241   return lab;
+242 }
+243 
+244 //-------------------------------bind-------------------------------------
+245 // Bind a label at the current cvstate by simulating
+246 // a goto to the label.
+247 void IdealKit::bind(Node* lab) {
+248   goto_(lab, true /* bind */);
+249   _cvstate = lab;
+250 }
+251 
+252 //-------------------------------goto_-------------------------------------
+253 // Make the current cvstate a predecessor of the label,
+254 // creating phi&#39;s to merge values.  If bind is true and
+255 // this is not the last control edge, then ensure that
+256 // all live values have phis created. Used to create phis
+257 // at loop-top regions.
+258 void IdealKit::goto_(Node* lab, bool bind) {
+259   Node* reg = lab-&gt;in(TypeFunc::Control);
+260   // find next empty slot in region
+261   uint slot = 1;
+262   while (slot &lt; reg-&gt;req() &amp;&amp; reg-&gt;in(slot) != NULL) slot++;
+263   assert(slot &lt; reg-&gt;req(), &quot;too many gotos&quot;);
+264   // If this is last predecessor, then don&#39;t force phi creation
+265   if (slot == reg-&gt;req() - 1) bind = false;
+266   reg-&gt;init_req(slot, ctrl());
+267   assert(first_var + _var_ct == _cvstate-&gt;req(), &quot;bad _cvstate size&quot;);
+268   for (uint i = first_var; i &lt; _cvstate-&gt;req(); i++) {
+269 
+270     // l is the value of var reaching the label. Could be a single value
+271     // reaching the label, or a phi that merges multiples values reaching
+272     // the label.  The latter is true if the label&#39;s input: in(..) is
+273     // a phi whose control input is the region node for the label.
+274 
+275     Node* l = lab-&gt;in(i);
+276     // Get the current value of the var
+277     Node* m = _cvstate-&gt;in(i);
+278     // If the var went unused no need for a phi
+279     if (m == NULL) {
+280       continue;
+281     } else if (l == NULL || m == l) {
+282       // Only one unique value &quot;m&quot; is known to reach this label so a phi
+283       // is not yet necessary unless:
+284       //    the label is being bound and all predecessors have not been seen,
+285       //    in which case &quot;bind&quot; will be true.
+286       if (bind) {
+287         m = promote_to_phi(m, reg);
+288       }
+289       // Record the phi/value used for this var in the label&#39;s cvstate
+290       lab-&gt;set_req(i, m);
+291     } else {
+292       // More than one value for the variable reaches this label so
+293       // a create a phi if one does not already exist.
+294       if (!was_promoted_to_phi(l, reg)) {
+295         l = promote_to_phi(l, reg);
+296         lab-&gt;set_req(i, l);
+297       }
+298       // Record in the phi, the var&#39;s value from the current state
+299       l-&gt;set_req(slot, m);
+300     }
+301   }
+302   do_memory_merge(_cvstate, lab);
+303   stop();
+304 }
+305 
+306 //-----------------------------promote_to_phi-----------------------------------
+307 Node* IdealKit::promote_to_phi(Node* n, Node* reg) {
+308   assert(!was_promoted_to_phi(n, reg), &quot;n already promoted to phi on this region&quot;);
+309   // Get a conservative type for the phi
+310   const BasicType bt = n-&gt;bottom_type()-&gt;basic_type();
+311   const Type* ct = Type::get_const_basic_type(bt);
+312   return delay_transform(PhiNode::make(reg, n, ct));
+313 }
+314 
+315 //-----------------------------declarations_done-------------------------------
+316 void IdealKit::declarations_done() {
+317   _cvstate = new_cvstate();   // initialize current cvstate
+318   set_ctrl(_initial_ctrl);    // initialize control in current cvstate
+319   set_all_memory(_initial_memory);// initialize memory in current cvstate
+320   set_i_o(_initial_i_o);      // initialize i_o in current cvstate
+321   DEBUG_ONLY(_state-&gt;push(BlockS));
+322 }
+323 
+324 //-----------------------------transform-----------------------------------
+325 Node* IdealKit::transform(Node* n) {
+326   if (_delay_all_transforms) {
+327     return delay_transform(n);
+328   } else {
+329     n = gvn().transform(n);
+330     C-&gt;record_for_igvn(n);
+331     return n;
+332   }
+333 }
+334 
+335 //-----------------------------delay_transform-----------------------------------
+336 Node* IdealKit::delay_transform(Node* n) {
+337   // Delay transform until IterativeGVN
+338   gvn().set_type(n, n-&gt;bottom_type());
+339   C-&gt;record_for_igvn(n);
+340   return n;
+341 }
+342 
+343 //-----------------------------new_cvstate-----------------------------------
+344 Node* IdealKit::new_cvstate() {
+345   uint sz = _var_ct + first_var;
+346   return new Node(sz);
+347 }
+348 
+349 //-----------------------------copy_cvstate-----------------------------------
+350 Node* IdealKit::copy_cvstate() {
+351   Node* ns = new_cvstate();
+352   for (uint i = 0; i &lt; ns-&gt;req(); i++) ns-&gt;init_req(i, _cvstate-&gt;in(i));
+353   // We must clone memory since it will be updated as we do stores.
+354   ns-&gt;set_req(TypeFunc::Memory, MergeMemNode::make(ns-&gt;in(TypeFunc::Memory)));
+355   return ns;
+356 }
+357 
+358 //-----------------------------clear-----------------------------------
+359 void IdealKit::clear(Node* m) {
+360   for (uint i = 0; i &lt; m-&gt;req(); i++) m-&gt;set_req(i, NULL);
+361 }
+362 
+363 //-----------------------------IdealVariable----------------------------
+364 IdealVariable::IdealVariable(IdealKit &amp;k) {
+365   k.declare(this);
+366 }
+367 
+368 Node* IdealKit::memory(uint alias_idx) {
+369   MergeMemNode* mem = merged_memory();
+370   Node* p = mem-&gt;memory_at(alias_idx);
+371   _gvn.set_type(p, Type::MEMORY);  // must be mapped
+372   return p;
+373 }
+374 
+375 void IdealKit::set_memory(Node* mem, uint alias_idx) {
+376   merged_memory()-&gt;set_memory_at(alias_idx, mem);
+377 }
+378 
+379 //----------------------------- make_load ----------------------------
+380 Node* IdealKit::load(Node* ctl,
+381                      Node* adr,
+382                      const Type* t,
+383                      BasicType bt,
+384                      int adr_idx,
+385                      bool require_atomic_access) {
+386 
+387   assert(adr_idx != Compile::AliasIdxTop, &quot;use other make_load factory&quot; );
+388   const TypePtr* adr_type = NULL; // debug-mode-only argument
+389   debug_only(adr_type = C-&gt;get_adr_type(adr_idx));
+390   Node* mem = memory(adr_idx);
+391   Node* ld;
+392   if (require_atomic_access &amp;&amp; bt == T_LONG) {
+393     ld = LoadLNode::make_atomic(ctl, mem, adr, adr_type, t, MemNode::unordered);
+394   } else {
+395     ld = LoadNode::make(_gvn, ctl, mem, adr, adr_type, t, bt, MemNode::unordered);
+396   }
+397   return transform(ld);
+398 }
+399 
+400 Node* IdealKit::store(Node* ctl, Node* adr, Node *val, BasicType bt,
+401                       int adr_idx,
+402                       MemNode::MemOrd mo, bool require_atomic_access,
+403                       bool mismatched) {
+404   assert(adr_idx != Compile::AliasIdxTop, &quot;use other store_to_memory factory&quot;);
+405   const TypePtr* adr_type = NULL;
+406   debug_only(adr_type = C-&gt;get_adr_type(adr_idx));
+407   Node *mem = memory(adr_idx);
+408   Node* st;
+409   if (require_atomic_access &amp;&amp; bt == T_LONG) {
+410     st = StoreLNode::make_atomic(ctl, mem, adr, adr_type, val, mo);
+411   } else {
+412     st = StoreNode::make(_gvn, ctl, mem, adr, adr_type, val, bt, mo);
+413   }
+414   if (mismatched) {
+415     st-&gt;as_Store()-&gt;set_mismatched_access();
+416   }
+417   st = transform(st);
+418   set_memory(st, adr_idx);
+419 
+420   return st;
+421 }
+422 
+423 // Card mark store. Must be ordered so that it will come after the store of
+424 // the oop.
+425 Node* IdealKit::storeCM(Node* ctl, Node* adr, Node *val, Node* oop_store, int oop_adr_idx,
+426                         BasicType bt,
+427                         int adr_idx) {
+428   assert(adr_idx != Compile::AliasIdxTop, &quot;use other store_to_memory factory&quot; );
+429   const TypePtr* adr_type = NULL;
+430   debug_only(adr_type = C-&gt;get_adr_type(adr_idx));
+431   Node *mem = memory(adr_idx);
+432 
+433   // Add required edge to oop_store, optimizer does not support precedence edges.
+434   // Convert required edge to precedence edge before allocation.
+435   Node* st = new StoreCMNode(ctl, mem, adr, adr_type, val, oop_store, oop_adr_idx);
+436 
+437   st = transform(st);
+438   set_memory(st, adr_idx);
+439 
+440   return st;
+441 }
+442 
+443 //---------------------------- do_memory_merge --------------------------------
+444 // The memory from one merging cvstate needs to be merged with the memory for another
+445 // join cvstate. If the join cvstate doesn&#39;t have a merged memory yet then we
+446 // can just copy the state from the merging cvstate
+447 
+448 // Merge one slow path into the rest of memory.
+449 void IdealKit::do_memory_merge(Node* merging, Node* join) {
+450 
+451   // Get the region for the join state
+452   Node* join_region = join-&gt;in(TypeFunc::Control);
+453   assert(join_region != NULL, &quot;join region must exist&quot;);
+454   if (join-&gt;in(TypeFunc::I_O) == NULL ) {
+455     join-&gt;set_req(TypeFunc::I_O,  merging-&gt;in(TypeFunc::I_O));
+456   }
+457   if (join-&gt;in(TypeFunc::Memory) == NULL ) {
+458     join-&gt;set_req(TypeFunc::Memory,  merging-&gt;in(TypeFunc::Memory));
+459     return;
+460   }
+461 
+462   // The control flow for merging must have already been attached to the join region
+463   // we need its index for the phis.
+464   uint slot;
+465   for (slot = 1; slot &lt; join_region-&gt;req() ; slot ++ ) {
+466     if (join_region-&gt;in(slot) == merging-&gt;in(TypeFunc::Control)) break;
+467   }
+468   assert(slot !=  join_region-&gt;req(), &quot;edge must already exist&quot;);
+469 
+470   MergeMemNode* join_m    = join-&gt;in(TypeFunc::Memory)-&gt;as_MergeMem();
+471   MergeMemNode* merging_m = merging-&gt;in(TypeFunc::Memory)-&gt;as_MergeMem();
+472 
+473   // join_m should be an ancestor mergemem of merging
+474   // Slow path memory comes from the current map (which is from a slow call)
+475   // Fast path/null path memory comes from the call&#39;s input
+476 
+477   // Merge the other fast-memory inputs with the new slow-default memory.
+478   // for (MergeMemStream mms(merged_memory(), fast_mem-&gt;as_MergeMem()); mms.next_non_empty2(); ) {
+479   for (MergeMemStream mms(join_m, merging_m); mms.next_non_empty2(); ) {
+480     Node* join_slice = mms.force_memory();
+481     Node* merging_slice = mms.memory2();
+482     if (join_slice != merging_slice) {
+483       PhiNode* phi;
+484       // bool new_phi = false;
+485       // Is the phi for this slice one that we created for this join region or simply
+486       // one we copied? If it is ours then add
+487       if (join_slice-&gt;is_Phi() &amp;&amp; join_slice-&gt;as_Phi()-&gt;region() == join_region) {
+488         phi = join_slice-&gt;as_Phi();
+489       } else {
+490         // create the phi with join_slice filling supplying memory for all of the
+491         // control edges to the join region
+492         phi = PhiNode::make(join_region, join_slice, Type::MEMORY, mms.adr_type(C));
+493         phi = (PhiNode*) delay_transform(phi);
+494         // gvn().set_type(phi, Type::MEMORY);
+495         // new_phi = true;
+496       }
+497       // Now update the phi with the slice for the merging slice
+498       phi-&gt;set_req(slot, merging_slice/* slow_path, slow_slice */);
+499       // this updates join_m with the phi
+500       mms.set_memory(phi);
+501     }
+502   }
+503 
+504   Node* join_io    = join-&gt;in(TypeFunc::I_O);
+505   Node* merging_io = merging-&gt;in(TypeFunc::I_O);
+506   if (join_io != merging_io) {
+507     PhiNode* phi;
+508     if (join_io-&gt;is_Phi() &amp;&amp; join_io-&gt;as_Phi()-&gt;region() == join_region) {
+509       phi = join_io-&gt;as_Phi();
+510     } else {
+511       phi = PhiNode::make(join_region, join_io, Type::ABIO);
+512       phi = (PhiNode*) delay_transform(phi);
+513       join-&gt;set_req(TypeFunc::I_O, phi);
+514     }
+515     phi-&gt;set_req(slot, merging_io);
+516   }
+517 }
+518 
+519 
+520 //----------------------------- make_call  ----------------------------
+521 // Trivial runtime call
+522 Node* IdealKit::make_leaf_call(const TypeFunc *slow_call_type,
+523                                address slow_call,
+524                                const char *leaf_name,
+525                                Node* parm0,
+526                                Node* parm1,
+527                                Node* parm2,
+528                                Node* parm3) {
+529 
+530   // We only handle taking in RawMem and modifying RawMem
+531   const TypePtr* adr_type = TypeRawPtr::BOTTOM;
+532   uint adr_idx = C-&gt;get_alias_index(adr_type);
+533 
+534   // Slow-path leaf call
+535   CallNode *call =  (CallNode*)new CallLeafNode( slow_call_type, slow_call, leaf_name, adr_type);
+536 
+537   // Set fixed predefined input arguments
+538   call-&gt;init_req( TypeFunc::Control, ctrl() );
+539   call-&gt;init_req( TypeFunc::I_O    , top() )     ;   // does no i/o
+540   // Narrow memory as only memory input
+541   call-&gt;init_req( TypeFunc::Memory , memory(adr_idx));
+542   call-&gt;init_req( TypeFunc::FramePtr, top() /* frameptr() */ );
+543   call-&gt;init_req( TypeFunc::ReturnAdr, top() );
+544 
+545   if (parm0 != NULL)  call-&gt;init_req(TypeFunc::Parms+0, parm0);
+546   if (parm1 != NULL)  call-&gt;init_req(TypeFunc::Parms+1, parm1);
+547   if (parm2 != NULL)  call-&gt;init_req(TypeFunc::Parms+2, parm2);
+548   if (parm3 != NULL)  call-&gt;init_req(TypeFunc::Parms+3, parm3);
+549 
+550   // Node *c = _gvn.transform(call);
+551   call = (CallNode *) _gvn.transform(call);
+552   Node *c = call; // dbx gets confused with call call-&gt;dump()
+553 
+554   // Slow leaf call has no side-effects, sets few values
+555 
+556   set_ctrl(transform( new ProjNode(call,TypeFunc::Control) ));
+557 
+558   // Make memory for the call
+559   Node* mem = _gvn.transform( new ProjNode(call, TypeFunc::Memory) );
+560 
+561   // Set the RawPtr memory state only.
+562   set_memory(mem, adr_idx);
+563 
+564   assert(C-&gt;alias_type(call-&gt;adr_type()) == C-&gt;alias_type(adr_type),
+565          &quot;call node must be constructed correctly&quot;);
+566   Node* res = NULL;
+567   if (slow_call_type-&gt;range()-&gt;cnt() &gt; TypeFunc::Parms) {
+568     assert(slow_call_type-&gt;range()-&gt;cnt() == TypeFunc::Parms+1, &quot;only one return value&quot;);
+569     res = transform(new ProjNode(call, TypeFunc::Parms));
+570   }
+571   return res;
+572 }
+573 
+574 void IdealKit::make_leaf_call_no_fp(const TypeFunc *slow_call_type,
+575                               address slow_call,
+576                               const char *leaf_name,
+577                               const TypePtr* adr_type,
+578                               Node* parm0,
+579                               Node* parm1,
+580                               Node* parm2,
+581                               Node* parm3) {
+582 
+583   // We only handle taking in RawMem and modifying RawMem
+584   uint adr_idx = C-&gt;get_alias_index(adr_type);
+585 
+586   // Slow-path leaf call
+587   CallNode *call =  (CallNode*)new CallLeafNoFPNode( slow_call_type, slow_call, leaf_name, adr_type);
+588 
+589   // Set fixed predefined input arguments
+590   call-&gt;init_req( TypeFunc::Control, ctrl() );
+591   call-&gt;init_req( TypeFunc::I_O    , top() )     ;   // does no i/o
+592   // Narrow memory as only memory input
+593   call-&gt;init_req( TypeFunc::Memory , memory(adr_idx));
+594   call-&gt;init_req( TypeFunc::FramePtr, top() /* frameptr() */ );
+595   call-&gt;init_req( TypeFunc::ReturnAdr, top() );
+596 
+597   if (parm0 != NULL)  call-&gt;init_req(TypeFunc::Parms+0, parm0);
+598   if (parm1 != NULL)  call-&gt;init_req(TypeFunc::Parms+1, parm1);
+599   if (parm2 != NULL)  call-&gt;init_req(TypeFunc::Parms+2, parm2);
+600   if (parm3 != NULL)  call-&gt;init_req(TypeFunc::Parms+3, parm3);
+601 
+602   // Node *c = _gvn.transform(call);
+603   call = (CallNode *) _gvn.transform(call);
+604   Node *c = call; // dbx gets confused with call call-&gt;dump()
+605 
+606   // Slow leaf call has no side-effects, sets few values
+607 
+608   set_ctrl(transform( new ProjNode(call,TypeFunc::Control) ));
+609 
+610   // Make memory for the call
+611   Node* mem = _gvn.transform( new ProjNode(call, TypeFunc::Memory) );
+612 
+613   // Set the RawPtr memory state only.
+614   set_memory(mem, adr_idx);
+615 
+616   assert(C-&gt;alias_type(call-&gt;adr_type()) == C-&gt;alias_type(adr_type),
+617          &quot;call node must be constructed correctly&quot;);
+618 }
+    </pre>
+  </body>
+</html>

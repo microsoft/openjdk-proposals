@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/idealKit.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="idealKit.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="loopnode.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/idealKit.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+110   Node* _initial_memory;                   // saves initial memory  until variables declared
+111   Node* _initial_i_o;                      // saves initial i_o  until variables declared
+112 
+113   PhaseGVN&amp; gvn() const { return _gvn; }
+114   // Create a new cvstate filled with nulls
+115   Node* new_cvstate();                     // Create a new cvstate
+116   Node* cvstate() { return _cvstate; }     // current cvstate
+117   Node* copy_cvstate();                    // copy current cvstate
+118 
+119   void set_memory(Node* mem, uint alias_idx );
+120   void do_memory_merge(Node* merging, Node* join);
+121   void clear(Node* m);                     // clear a cvstate
+122   void stop() { clear(_cvstate); }         // clear current cvstate
+123   Node* delay_transform(Node* n);
+124   Node* transform(Node* n);                // gvn.transform or skip it
+125   Node* promote_to_phi(Node* n, Node* reg);// Promote &quot;n&quot; to a phi on region &quot;reg&quot;
+126   bool was_promoted_to_phi(Node* n, Node* reg) {
+127     return (n-&gt;is_Phi() &amp;&amp; n-&gt;in(0) == reg);
+128   }
+129   void declare(IdealVariable* v) { v-&gt;set_id(_var_ct++); }
+
+
+
+
+130   // This declares the position where vars are kept in the cvstate
+131   // For some degree of consistency we use the TypeFunc enum to
+132   // soak up spots in the inputs even though we only use early Control
+133   // and Memory slots. (So far.)
+134   static const uint first_var; // = TypeFunc::Parms + 1;
+135 
+136 #ifdef ASSERT
+137   enum State { NullS=0, BlockS=1, LoopS=2, IfThenS=4, ElseS=8, EndifS= 16 };
+138   GrowableArray&lt;int&gt;* _state;
+139   State state() { return (State)(_state-&gt;top()); }
+140 #endif
+141 
+142   // Users should not care about slices only MergedMem so no access for them.
+143   Node* memory(uint alias_idx);
+144 
+145  public:
+146   IdealKit(GraphKit* gkit, bool delay_all_transforms = false, bool has_declarations = false);
+147   ~IdealKit() {
+148     stop();
+149   }
+150   void sync_kit(GraphKit* gkit);
+151 
+152   // Control
+153   Node* ctrl()                          { return _cvstate-&gt;in(TypeFunc::Control); }
+154   void set_ctrl(Node* ctrl)             { _cvstate-&gt;set_req(TypeFunc::Control, ctrl); }
+155   Node* top()                           { return C-&gt;top(); }
+156   MergeMemNode* merged_memory()         { return _cvstate-&gt;in(TypeFunc::Memory)-&gt;as_MergeMem(); }
+157   void set_all_memory(Node* mem)        { _cvstate-&gt;set_req(TypeFunc::Memory, mem); }
+158   Node* i_o()                           { return _cvstate-&gt;in(TypeFunc::I_O); }
+159   void set_i_o(Node* c)                 { _cvstate-&gt;set_req(TypeFunc::I_O, c); }
+160   void set(IdealVariable&amp; v, Node* rhs) { _cvstate-&gt;set_req(first_var + v.id(), rhs); }
+161   Node* value(IdealVariable&amp; v)         { return _cvstate-&gt;in(first_var + v.id()); }
+162   void dead(IdealVariable&amp; v)           { set(v, (Node*)NULL); }
+163   void if_then(Node* left, BoolTest::mask relop, Node* right,
+164                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+165                bool push_new_state = true);
+
+
+
+166   void else_();
+167   void end_if();
+168   void loop(GraphKit* gkit, int nargs, IdealVariable&amp; iv, Node* init, BoolTest::mask cmp, Node* limit,
+169             float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+170   void end_loop();
+171   Node* make_label(int goto_ct);
+172   void bind(Node* lab);
+173   void goto_(Node* lab, bool bind = false);
+174   void declarations_done();
+175 
+176   Node* IfTrue(IfNode* iff)  { return transform(new IfTrueNode(iff)); }
+177   Node* IfFalse(IfNode* iff) { return transform(new IfFalseNode(iff)); }
+178 
+179   // Data
+180   Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+181   Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+182 
+183   Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+184   Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
+
+185   Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+186   Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+187   Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+188   Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+189   Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
+
+190   Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+191   void  increment(IdealVariable&amp; v, Node* j)  { set(v, AddI(value(v), j)); }
+192   void  decrement(IdealVariable&amp; v, Node* j)  { set(v, SubI(value(v), j)); }
+193 
+194   Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
+
+195 
+196   // TLS
+197   Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+198 
+199   // Pointers
+200 
+201   // Raw address should be transformed regardless &#39;delay_transform&#39; flag
+202   // to produce canonical form CastX2P(offset).
+203   Node* AddP(Node *base, Node *ptr, Node *off) { return _gvn.transform(new AddPNode(base, ptr, off)); }
+204 
+205   Node* CmpP(Node* l, Node* r) { return transform(new CmpPNode(l, r)); }
+206 #ifdef _LP64
+207   Node* XorX(Node* l, Node* r) { return transform(new XorLNode(l, r)); }
+208 #else // _LP64
+209   Node* XorX(Node* l, Node* r) { return transform(new XorINode(l, r)); }
+210 #endif // _LP64
+211   Node* URShiftX(Node* l, Node* r) { return transform(new URShiftXNode(l, r)); }
+212   Node* ConX(jint k) { return (Node*)gvn().MakeConX(k); }
+213   Node* CastPX(Node* ctl, Node* p) { return transform(new CastP2XNode(ctl, p)); }
+214 
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+110   Node* _initial_memory;                   // saves initial memory  until variables declared
+111   Node* _initial_i_o;                      // saves initial i_o  until variables declared
+112 
+113   PhaseGVN&amp; gvn() const { return _gvn; }
+114   // Create a new cvstate filled with nulls
+115   Node* new_cvstate();                     // Create a new cvstate
+116   Node* cvstate() { return _cvstate; }     // current cvstate
+117   Node* copy_cvstate();                    // copy current cvstate
+118 
+119   void set_memory(Node* mem, uint alias_idx );
+120   void do_memory_merge(Node* merging, Node* join);
+121   void clear(Node* m);                     // clear a cvstate
+122   void stop() { clear(_cvstate); }         // clear current cvstate
+123   Node* delay_transform(Node* n);
+124   Node* transform(Node* n);                // gvn.transform or skip it
+125   Node* promote_to_phi(Node* n, Node* reg);// Promote &quot;n&quot; to a phi on region &quot;reg&quot;
+126   bool was_promoted_to_phi(Node* n, Node* reg) {
+127     return (n-&gt;is_Phi() &amp;&amp; n-&gt;in(0) == reg);
+128   }
+129   void declare(IdealVariable* v) { v-&gt;set_id(_var_ct++); }
+<span class="line-added">130 </span>
+<span class="line-added">131   void if_then_common(Node* bol, float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,</span>
+<span class="line-added">132                       bool push_new_state = true);</span>
+<span class="line-added">133 </span>
+134   // This declares the position where vars are kept in the cvstate
+135   // For some degree of consistency we use the TypeFunc enum to
+136   // soak up spots in the inputs even though we only use early Control
+137   // and Memory slots. (So far.)
+138   static const uint first_var; // = TypeFunc::Parms + 1;
+139 
+140 #ifdef ASSERT
+141   enum State { NullS=0, BlockS=1, LoopS=2, IfThenS=4, ElseS=8, EndifS= 16 };
+142   GrowableArray&lt;int&gt;* _state;
+143   State state() { return (State)(_state-&gt;top()); }
+144 #endif
+145 
+146   // Users should not care about slices only MergedMem so no access for them.
+147   Node* memory(uint alias_idx);
+148 
+149  public:
+150   IdealKit(GraphKit* gkit, bool delay_all_transforms = false, bool has_declarations = false);
+151   ~IdealKit() {
+152     stop();
+153   }
+154   void sync_kit(GraphKit* gkit);
+155 
+156   // Control
+157   Node* ctrl()                          { return _cvstate-&gt;in(TypeFunc::Control); }
+158   void set_ctrl(Node* ctrl)             { _cvstate-&gt;set_req(TypeFunc::Control, ctrl); }
+159   Node* top()                           { return C-&gt;top(); }
+160   MergeMemNode* merged_memory()         { return _cvstate-&gt;in(TypeFunc::Memory)-&gt;as_MergeMem(); }
+161   void set_all_memory(Node* mem)        { _cvstate-&gt;set_req(TypeFunc::Memory, mem); }
+162   Node* i_o()                           { return _cvstate-&gt;in(TypeFunc::I_O); }
+163   void set_i_o(Node* c)                 { _cvstate-&gt;set_req(TypeFunc::I_O, c); }
+164   void set(IdealVariable&amp; v, Node* rhs) { _cvstate-&gt;set_req(first_var + v.id(), rhs); }
+165   Node* value(IdealVariable&amp; v)         { return _cvstate-&gt;in(first_var + v.id()); }
+166   void dead(IdealVariable&amp; v)           { set(v, (Node*)NULL); }
+167   void if_then(Node* left, BoolTest::mask relop, Node* right,
+168                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+169                bool push_new_state = true);
+<span class="line-added">170   void uif_then(Node* left, BoolTest::mask relop, Node* right,</span>
+<span class="line-added">171                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,</span>
+<span class="line-added">172                bool push_new_state = true);</span>
+173   void else_();
+174   void end_if();
+175   void loop(GraphKit* gkit, int nargs, IdealVariable&amp; iv, Node* init, BoolTest::mask cmp, Node* limit,
+176             float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+177   void end_loop();
+178   Node* make_label(int goto_ct);
+179   void bind(Node* lab);
+180   void goto_(Node* lab, bool bind = false);
+181   void declarations_done();
+182 
+183   Node* IfTrue(IfNode* iff)  { return transform(new IfTrueNode(iff)); }
+184   Node* IfFalse(IfNode* iff) { return transform(new IfFalseNode(iff)); }
+185 
+186   // Data
+187   Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+188   Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+189 
+190   Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+191   Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
+<span class="line-added">192   Node* SubL(Node* l, Node* r) { return transform(new SubLNode(l, r)); }</span>
+193   Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+194   Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+195   Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+196   Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+197   Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
+<span class="line-added">198   Node* CmpU(Node* l, Node* r) { return transform(new CmpUNode(l, r)); }</span>
+199   Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+200   void  increment(IdealVariable&amp; v, Node* j)  { set(v, AddI(value(v), j)); }
+201   void  decrement(IdealVariable&amp; v, Node* j)  { set(v, SubI(value(v), j)); }
+202 
+203   Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
+<span class="line-added">204   Node* CmpUL(Node* l, Node* r) { return transform(new CmpULNode(l, r)); }</span>
+205 
+206   // TLS
+207   Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+208 
+209   // Pointers
+210 
+211   // Raw address should be transformed regardless &#39;delay_transform&#39; flag
+212   // to produce canonical form CastX2P(offset).
+213   Node* AddP(Node *base, Node *ptr, Node *off) { return _gvn.transform(new AddPNode(base, ptr, off)); }
+214 
+215   Node* CmpP(Node* l, Node* r) { return transform(new CmpPNode(l, r)); }
+216 #ifdef _LP64
+217   Node* XorX(Node* l, Node* r) { return transform(new XorLNode(l, r)); }
+218 #else // _LP64
+219   Node* XorX(Node* l, Node* r) { return transform(new XorINode(l, r)); }
+220 #endif // _LP64
+221   Node* URShiftX(Node* l, Node* r) { return transform(new URShiftXNode(l, r)); }
+222   Node* ConX(jint k) { return (Node*)gvn().MakeConX(k); }
+223   Node* CastPX(Node* ctl, Node* p) { return transform(new CastP2XNode(ctl, p)); }
+224 
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="idealKit.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="loopnode.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

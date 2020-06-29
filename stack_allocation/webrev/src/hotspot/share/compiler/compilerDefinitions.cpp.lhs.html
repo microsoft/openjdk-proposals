@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/compiler/compilerDefinitions.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+    <script type="text/javascript" src="../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;code/codeCache.hpp&quot;
+ 27 #include &quot;runtime/globals.hpp&quot;
+ 28 #include &quot;runtime/globals_extension.hpp&quot;
+ 29 #include &quot;compiler/compilerDefinitions.hpp&quot;
+ 30 #include &quot;gc/shared/gcConfig.hpp&quot;
+ 31 #include &quot;utilities/defaultStream.hpp&quot;
+ 32 
+ 33 const char* compilertype2name_tab[compiler_number_of_types] = {
+ 34   &quot;&quot;,
+ 35   &quot;c1&quot;,
+ 36   &quot;c2&quot;,
+ 37   &quot;jvmci&quot;
+ 38 };
+ 39 
+ 40 #ifdef TIERED
+ 41 bool CompilationModeFlag::_quick_only = false;
+ 42 bool CompilationModeFlag::_high_only = false;
+ 43 bool CompilationModeFlag::_high_only_quick_internal = false;
+ 44 
+ 45 
+ 46 bool CompilationModeFlag::initialize() {
+ 47   if (CompilationMode != NULL) {
+ 48     if (strcmp(CompilationMode, &quot;default&quot;) == 0) {
+ 49       // Do nothing, just support the &quot;default&quot; keyword.
+ 50     } else if (strcmp(CompilationMode, &quot;quick-only&quot;) == 0) {
+ 51       _quick_only = true;
+ 52     } else if (strcmp(CompilationMode, &quot;high-only&quot;) == 0) {
+ 53       _high_only = true;
+ 54     } else if (strcmp(CompilationMode, &quot;high-only-quick-internal&quot;) == 0) {
+ 55       _high_only_quick_internal = true;
+ 56     } else {
+ 57       jio_fprintf(defaultStream::error_stream(), &quot;Unsupported compilation mode &#39;%s&#39;, supported modes are: quick-only, high-only, high-only-quick-internal\n&quot;, CompilationMode);
+ 58       return false;
+ 59     }
+ 60   }
+ 61   return true;
+ 62 }
+ 63 
+ 64 #endif
+ 65 
+ 66 #if defined(COMPILER2)
+ 67 CompLevel  CompLevel_highest_tier      = CompLevel_full_optimization;  // pure C2 and tiered or JVMCI and tiered
+ 68 #elif defined(COMPILER1)
+ 69 CompLevel  CompLevel_highest_tier      = CompLevel_simple;             // pure C1 or JVMCI
+ 70 #else
+ 71 CompLevel  CompLevel_highest_tier      = CompLevel_none;
+ 72 #endif
+ 73 
+ 74 #if defined(COMPILER2)
+ 75 CompMode  Compilation_mode             = CompMode_server;
+ 76 #elif defined(COMPILER1)
+ 77 CompMode  Compilation_mode             = CompMode_client;
+ 78 #else
+ 79 CompMode  Compilation_mode             = CompMode_none;
+ 80 #endif
+ 81 
+ 82 // Returns threshold scaled with CompileThresholdScaling
+ 83 intx CompilerConfig::scaled_compile_threshold(intx threshold) {
+ 84   return scaled_compile_threshold(threshold, CompileThresholdScaling);
+ 85 }
+ 86 
+ 87 // Returns freq_log scaled with CompileThresholdScaling
+ 88 intx CompilerConfig::scaled_freq_log(intx freq_log) {
+ 89   return scaled_freq_log(freq_log, CompileThresholdScaling);
+ 90 }
+ 91 
+ 92 // Returns threshold scaled with the value of scale.
+ 93 // If scale &lt; 0.0, threshold is returned without scaling.
+ 94 intx CompilerConfig::scaled_compile_threshold(intx threshold, double scale) {
+ 95   if (scale == 1.0 || scale &lt; 0.0) {
+ 96     return threshold;
+ 97   } else {
+ 98     return (intx)(threshold * scale);
+ 99   }
+100 }
+101 
+102 // Returns freq_log scaled with the value of scale.
+103 // Returned values are in the range of [0, InvocationCounter::number_of_count_bits + 1].
+104 // If scale &lt; 0.0, freq_log is returned without scaling.
+105 intx CompilerConfig::scaled_freq_log(intx freq_log, double scale) {
+106   // Check if scaling is necessary or if negative value was specified.
+107   if (scale == 1.0 || scale &lt; 0.0) {
+108     return freq_log;
+109   }
+110   // Check values to avoid calculating log2 of 0.
+111   if (scale == 0.0 || freq_log == 0) {
+112     return 0;
+113   }
+114   // Determine the maximum notification frequency value currently supported.
+115   // The largest mask value that the interpreter/C1 can handle is
+116   // of length InvocationCounter::number_of_count_bits. Mask values are always
+117   // one bit shorter then the value of the notification frequency. Set
+118   // max_freq_bits accordingly.
+119   intx max_freq_bits = InvocationCounter::number_of_count_bits + 1;
+120   intx scaled_freq = scaled_compile_threshold((intx)1 &lt;&lt; freq_log, scale);
+121   if (scaled_freq == 0) {
+122     // Return 0 right away to avoid calculating log2 of 0.
+123     return 0;
+124   } else if (scaled_freq &gt; nth_bit(max_freq_bits)) {
+125     return max_freq_bits;
+126   } else {
+127     return log2_intptr(scaled_freq);
+128   }
+129 }
+130 
+131 #ifdef TIERED
+132 void set_client_compilation_mode() {
+133   Compilation_mode = CompMode_client;
+134   CompLevel_highest_tier = CompLevel_simple;
+135   FLAG_SET_ERGO(TieredCompilation, false);
+136   FLAG_SET_ERGO(ProfileInterpreter, false);
+137 #if INCLUDE_JVMCI
+138   FLAG_SET_ERGO(EnableJVMCI, false);
+139   FLAG_SET_ERGO(UseJVMCICompiler, false);
+140 #endif
+141 #if INCLUDE_AOT
+142   FLAG_SET_ERGO(UseAOT, false);
+143 #endif
+144   if (FLAG_IS_DEFAULT(NeverActAsServerClassMachine)) {
+145     FLAG_SET_ERGO(NeverActAsServerClassMachine, true);
+146   }
+147   if (FLAG_IS_DEFAULT(InitialCodeCacheSize)) {
+148     FLAG_SET_ERGO(InitialCodeCacheSize, 160*K);
+149   }
+150   if (FLAG_IS_DEFAULT(ReservedCodeCacheSize)) {
+151     FLAG_SET_ERGO(ReservedCodeCacheSize, 32*M);
+152   }
+153   if (FLAG_IS_DEFAULT(NonProfiledCodeHeapSize)) {
+154     FLAG_SET_ERGO(NonProfiledCodeHeapSize, 27*M);
+155   }
+156   if (FLAG_IS_DEFAULT(ProfiledCodeHeapSize)) {
+157     FLAG_SET_ERGO(ProfiledCodeHeapSize, 0);
+158   }
+159   if (FLAG_IS_DEFAULT(NonNMethodCodeHeapSize)) {
+160     FLAG_SET_ERGO(NonNMethodCodeHeapSize, 5*M);
+161   }
+162   if (FLAG_IS_DEFAULT(CodeCacheExpansionSize)) {
+163     FLAG_SET_ERGO(CodeCacheExpansionSize, 32*K);
+164   }
+165   if (FLAG_IS_DEFAULT(MetaspaceSize)) {
+166     FLAG_SET_ERGO(MetaspaceSize, MIN2(12*M, MaxMetaspaceSize));
+167   }
+168   if (FLAG_IS_DEFAULT(MaxRAM)) {
+169     // Do not use FLAG_SET_ERGO to update MaxRAM, as this will impact
+170     // heap setting done based on available phys_mem (see Arguments::set_heap_size).
+171     FLAG_SET_DEFAULT(MaxRAM, 1ULL*G);
+172   }
+173   if (FLAG_IS_DEFAULT(CompileThreshold)) {
+174     FLAG_SET_ERGO(CompileThreshold, 1500);
+175   }
+176   if (FLAG_IS_DEFAULT(OnStackReplacePercentage)) {
+177     FLAG_SET_ERGO(OnStackReplacePercentage, 933);
+178   }
+179   if (FLAG_IS_DEFAULT(CICompilerCount)) {
+180     FLAG_SET_ERGO(CICompilerCount, 1);
+181   }
+182 }
+183 
+184 bool compilation_mode_selected() {
+185   return !FLAG_IS_DEFAULT(TieredCompilation) ||
+186          !FLAG_IS_DEFAULT(TieredStopAtLevel) ||
+187          !FLAG_IS_DEFAULT(UseAOT)
+188          JVMCI_ONLY(|| !FLAG_IS_DEFAULT(EnableJVMCI)
+189                     || !FLAG_IS_DEFAULT(UseJVMCICompiler));
+190 }
+191 
+192 void select_compilation_mode_ergonomically() {
+193 #if defined(_WINDOWS) &amp;&amp; !defined(_LP64)
+194   if (FLAG_IS_DEFAULT(NeverActAsServerClassMachine)) {
+195     FLAG_SET_ERGO(NeverActAsServerClassMachine, true);
+196   }
+197 #endif
+198   if (NeverActAsServerClassMachine) {
+199     set_client_compilation_mode();
+200   }
+201 }
+202 
+203 
+204 void CompilerConfig::set_tiered_flags() {
+205   // Increase the code cache size - tiered compiles a lot more.
+206   if (FLAG_IS_DEFAULT(ReservedCodeCacheSize)) {
+207     FLAG_SET_ERGO(ReservedCodeCacheSize,
+208                   MIN2(CODE_CACHE_DEFAULT_LIMIT, (size_t)ReservedCodeCacheSize * 5));
+209   }
+210   // Enable SegmentedCodeCache if TieredCompilation is enabled, ReservedCodeCacheSize &gt;= 240M
+211   // and the code cache contains at least 8 pages (segmentation disables advantage of huge pages).
+212   if (FLAG_IS_DEFAULT(SegmentedCodeCache) &amp;&amp; ReservedCodeCacheSize &gt;= 240*M &amp;&amp;
+213       8 * CodeCache::page_size() &lt;= ReservedCodeCacheSize) {
+214     FLAG_SET_ERGO(SegmentedCodeCache, true);
+215   }
+216   if (!UseInterpreter) { // -Xcomp
+217     Tier3InvokeNotifyFreqLog = 0;
+218     Tier4InvocationThreshold = 0;
+219   }
+220 
+221   if (CompileThresholdScaling &lt; 0) {
+222     vm_exit_during_initialization(&quot;Negative value specified for CompileThresholdScaling&quot;, NULL);
+223   }
+224 
+225   if (CompilationModeFlag::disable_intermediate()) {
+226     if (FLAG_IS_DEFAULT(Tier0ProfilingStartPercentage)) {
+227       FLAG_SET_DEFAULT(Tier0ProfilingStartPercentage, 33);
+228     }
+229   }
+230 
+231   // Scale tiered compilation thresholds.
+232   // CompileThresholdScaling == 0.0 is equivalent to -Xint and leaves compilation thresholds unchanged.
+233   if (!FLAG_IS_DEFAULT(CompileThresholdScaling) &amp;&amp; CompileThresholdScaling &gt; 0.0) {
+234     FLAG_SET_ERGO(Tier0InvokeNotifyFreqLog, scaled_freq_log(Tier0InvokeNotifyFreqLog));
+235     FLAG_SET_ERGO(Tier0BackedgeNotifyFreqLog, scaled_freq_log(Tier0BackedgeNotifyFreqLog));
+236 
+237     FLAG_SET_ERGO(Tier3InvocationThreshold, scaled_compile_threshold(Tier3InvocationThreshold));
+238     FLAG_SET_ERGO(Tier3MinInvocationThreshold, scaled_compile_threshold(Tier3MinInvocationThreshold));
+239     FLAG_SET_ERGO(Tier3CompileThreshold, scaled_compile_threshold(Tier3CompileThreshold));
+240     FLAG_SET_ERGO(Tier3BackEdgeThreshold, scaled_compile_threshold(Tier3BackEdgeThreshold));
+241 
+242     // Tier2{Invocation,MinInvocation,Compile,Backedge}Threshold should be scaled here
+243     // once these thresholds become supported.
+244 
+245     FLAG_SET_ERGO(Tier2InvokeNotifyFreqLog, scaled_freq_log(Tier2InvokeNotifyFreqLog));
+246     FLAG_SET_ERGO(Tier2BackedgeNotifyFreqLog, scaled_freq_log(Tier2BackedgeNotifyFreqLog));
+247 
+248     FLAG_SET_ERGO(Tier3InvokeNotifyFreqLog, scaled_freq_log(Tier3InvokeNotifyFreqLog));
+249     FLAG_SET_ERGO(Tier3BackedgeNotifyFreqLog, scaled_freq_log(Tier3BackedgeNotifyFreqLog));
+250 
+251     FLAG_SET_ERGO(Tier23InlineeNotifyFreqLog, scaled_freq_log(Tier23InlineeNotifyFreqLog));
+252 
+253     FLAG_SET_ERGO(Tier4InvocationThreshold, scaled_compile_threshold(Tier4InvocationThreshold));
+254     FLAG_SET_ERGO(Tier4MinInvocationThreshold, scaled_compile_threshold(Tier4MinInvocationThreshold));
+255     FLAG_SET_ERGO(Tier4CompileThreshold, scaled_compile_threshold(Tier4CompileThreshold));
+256     FLAG_SET_ERGO(Tier4BackEdgeThreshold, scaled_compile_threshold(Tier4BackEdgeThreshold));
+257 
+258     if (CompilationModeFlag::disable_intermediate()) {
+259       FLAG_SET_ERGO(Tier40InvocationThreshold, scaled_compile_threshold(Tier40InvocationThreshold));
+260       FLAG_SET_ERGO(Tier40MinInvocationThreshold, scaled_compile_threshold(Tier40MinInvocationThreshold));
+261       FLAG_SET_ERGO(Tier40CompileThreshold, scaled_compile_threshold(Tier40CompileThreshold));
+262       FLAG_SET_ERGO(Tier40BackEdgeThreshold, scaled_compile_threshold(Tier40BackEdgeThreshold));
+263     }
+264 
+265 #if INCLUDE_AOT
+266     if (UseAOT) {
+267       FLAG_SET_ERGO(Tier3AOTInvocationThreshold, scaled_compile_threshold(Tier3AOTInvocationThreshold));
+268       FLAG_SET_ERGO(Tier3AOTMinInvocationThreshold, scaled_compile_threshold(Tier3AOTMinInvocationThreshold));
+269       FLAG_SET_ERGO(Tier3AOTCompileThreshold, scaled_compile_threshold(Tier3AOTCompileThreshold));
+270       FLAG_SET_ERGO(Tier3AOTBackEdgeThreshold, scaled_compile_threshold(Tier3AOTBackEdgeThreshold));
+271 
+272       if (CompilationModeFlag::disable_intermediate()) {
+273         FLAG_SET_ERGO(Tier0AOTInvocationThreshold, scaled_compile_threshold(Tier0AOTInvocationThreshold));
+274         FLAG_SET_ERGO(Tier0AOTMinInvocationThreshold, scaled_compile_threshold(Tier0AOTMinInvocationThreshold));
+275         FLAG_SET_ERGO(Tier0AOTCompileThreshold, scaled_compile_threshold(Tier0AOTCompileThreshold));
+276         FLAG_SET_ERGO(Tier0AOTBackEdgeThreshold, scaled_compile_threshold(Tier0AOTBackEdgeThreshold));
+277       }
+278     }
+279 #endif // INCLUDE_AOT
+280   }
+281 
+282   // Reduce stack usage due to inlining of methods which require much stack.
+283   // (High tier compiler can inline better based on profiling information.)
+284   if (FLAG_IS_DEFAULT(C1InlineStackLimit) &amp;&amp;
+285       TieredStopAtLevel == CompLevel_full_optimization &amp;&amp; !CompilationModeFlag::quick_only()) {
+286     FLAG_SET_DEFAULT(C1InlineStackLimit, 5);
+287   }
+288 }
+289 
+290 #endif // TIERED
+291 
+292 #if INCLUDE_JVMCI
+293 void set_jvmci_specific_flags() {
+294   if (UseJVMCICompiler) {
+295     Compilation_mode = CompMode_server;
+296 
+297     if (FLAG_IS_DEFAULT(TypeProfileWidth)) {
+298       FLAG_SET_DEFAULT(TypeProfileWidth, 8);
+299     }
+300     if (FLAG_IS_DEFAULT(TypeProfileLevel)) {
+301       FLAG_SET_DEFAULT(TypeProfileLevel, 0);
+302     }
+303 
+304     if (UseJVMCINativeLibrary) {
+305       // SVM compiled code requires more stack space
+306       if (FLAG_IS_DEFAULT(CompilerThreadStackSize)) {
+307         // Duplicate logic in the implementations of os::create_thread
+308         // so that we can then double the computed stack size. Once
+309         // the stack size requirements of SVM are better understood,
+310         // this logic can be pushed down into os::create_thread.
+311         int stack_size = CompilerThreadStackSize;
+312         if (stack_size == 0) {
+313           stack_size = VMThreadStackSize;
+314         }
+315         if (stack_size != 0) {
+316           FLAG_SET_DEFAULT(CompilerThreadStackSize, stack_size * 2);
+317         }
+318       }
+319     } else {
+320 #ifdef TIERED
+321       if (!TieredCompilation) {
+322          warning(&quot;Disabling tiered compilation with non-native JVMCI compiler is not recommended. &quot;
+323                  &quot;Turning on tiered compilation and disabling intermediate compilation levels instead. &quot;);
+324          FLAG_SET_ERGO(TieredCompilation, true);
+325          if (CompilationModeFlag::normal()) {
+326            CompilationModeFlag::set_high_only_quick_internal(true);
+327          }
+328          if (CICompilerCount &lt; 2 &amp;&amp; CompilationModeFlag::quick_internal()) {
+329             warning(&quot;Increasing number of compiler threads for JVMCI compiler.&quot;);
+330             FLAG_SET_ERGO(CICompilerCount, 2);
+331          }
+332       }
+333 #else // TIERED
+334       // Adjust the on stack replacement percentage to avoid early
+335       // OSR compilations while JVMCI itself is warming up
+336       if (FLAG_IS_DEFAULT(OnStackReplacePercentage)) {
+337         FLAG_SET_DEFAULT(OnStackReplacePercentage, 933);
+338       }
+339 #endif // !TIERED
+340       // JVMCI needs values not less than defaults
+341       if (FLAG_IS_DEFAULT(ReservedCodeCacheSize)) {
+342         FLAG_SET_DEFAULT(ReservedCodeCacheSize, MAX2(64*M, ReservedCodeCacheSize));
+343       }
+344       if (FLAG_IS_DEFAULT(InitialCodeCacheSize)) {
+345         FLAG_SET_DEFAULT(InitialCodeCacheSize, MAX2(16*M, InitialCodeCacheSize));
+346       }
+347       if (FLAG_IS_DEFAULT(MetaspaceSize)) {
+348         FLAG_SET_DEFAULT(MetaspaceSize, MIN2(MAX2(12*M, MetaspaceSize), MaxMetaspaceSize));
+349       }
+350       if (FLAG_IS_DEFAULT(NewSizeThreadIncrease)) {
+351         FLAG_SET_DEFAULT(NewSizeThreadIncrease, MAX2(4*K, NewSizeThreadIncrease));
+352       }
+353     } // !UseJVMCINativeLibrary
+354   } // UseJVMCICompiler
+355 }
+356 #endif // INCLUDE_JVMCI
+357 
+358 bool CompilerConfig::check_args_consistency(bool status) {
+359   // Check lower bounds of the code cache
+360   // Template Interpreter code is approximately 3X larger in debug builds.
+361   uint min_code_cache_size = CodeCacheMinimumUseSpace DEBUG_ONLY(* 3);
+362   if (ReservedCodeCacheSize &lt; InitialCodeCacheSize) {
+363     jio_fprintf(defaultStream::error_stream(),
+364                 &quot;Invalid ReservedCodeCacheSize: %dK. Must be at least InitialCodeCacheSize=%dK.\n&quot;,
+365                 ReservedCodeCacheSize/K, InitialCodeCacheSize/K);
+366     status = false;
+367   } else if (ReservedCodeCacheSize &lt; min_code_cache_size) {
+368     jio_fprintf(defaultStream::error_stream(),
+369                 &quot;Invalid ReservedCodeCacheSize=%dK. Must be at least %uK.\n&quot;, ReservedCodeCacheSize/K,
+370                 min_code_cache_size/K);
+371     status = false;
+372   } else if (ReservedCodeCacheSize &gt; CODE_CACHE_SIZE_LIMIT) {
+373     // Code cache size larger than CODE_CACHE_SIZE_LIMIT is not supported.
+374     jio_fprintf(defaultStream::error_stream(),
+375                 &quot;Invalid ReservedCodeCacheSize=%dM. Must be at most %uM.\n&quot;, ReservedCodeCacheSize/M,
+376                 CODE_CACHE_SIZE_LIMIT/M);
+377     status = false;
+378   } else if (NonNMethodCodeHeapSize &lt; min_code_cache_size) {
+379     jio_fprintf(defaultStream::error_stream(),
+380                 &quot;Invalid NonNMethodCodeHeapSize=%dK. Must be at least %uK.\n&quot;, NonNMethodCodeHeapSize/K,
+381                 min_code_cache_size/K);
+382     status = false;
+383   }
+384 
+385 #ifdef _LP64
+386   if (!FLAG_IS_DEFAULT(CICompilerCount) &amp;&amp; !FLAG_IS_DEFAULT(CICompilerCountPerCPU) &amp;&amp; CICompilerCountPerCPU) {
+387     warning(&quot;The VM option CICompilerCountPerCPU overrides CICompilerCount.&quot;);
+388   }
+389 #endif
+390 
+391   if (BackgroundCompilation &amp;&amp; ReplayCompiles) {
+392     if (!FLAG_IS_DEFAULT(BackgroundCompilation)) {
+393       warning(&quot;BackgroundCompilation disabled due to ReplayCompiles option.&quot;);
+394     }
+395     FLAG_SET_CMDLINE(BackgroundCompilation, false);
+396   }
+397 
+398 #ifdef COMPILER2
+399   if (PostLoopMultiversioning &amp;&amp; !RangeCheckElimination) {
+400     if (!FLAG_IS_DEFAULT(PostLoopMultiversioning)) {
+401       warning(&quot;PostLoopMultiversioning disabled because RangeCheckElimination is disabled.&quot;);
+402     }
+403     FLAG_SET_CMDLINE(PostLoopMultiversioning, false);
+404   }
+405   if (UseCountedLoopSafepoints &amp;&amp; LoopStripMiningIter == 0) {
+406     if (!FLAG_IS_DEFAULT(UseCountedLoopSafepoints) || !FLAG_IS_DEFAULT(LoopStripMiningIter)) {
+407       warning(&quot;When counted loop safepoints are enabled, LoopStripMiningIter must be at least 1 (a safepoint every 1 iteration): setting it to 1&quot;);
+408     }
+409     LoopStripMiningIter = 1;
+410   } else if (!UseCountedLoopSafepoints &amp;&amp; LoopStripMiningIter &gt; 0) {
+411     if (!FLAG_IS_DEFAULT(UseCountedLoopSafepoints) || !FLAG_IS_DEFAULT(LoopStripMiningIter)) {
+412       warning(&quot;Disabling counted safepoints implies no loop strip mining: setting LoopStripMiningIter to 0&quot;);
+413     }
+414     LoopStripMiningIter = 0;
+415   }
+416 #endif // COMPILER2
+417 
+418   if (Arguments::is_interpreter_only()) {
+419     if (UseCompiler) {
+420       if (!FLAG_IS_DEFAULT(UseCompiler)) {
+421         warning(&quot;UseCompiler disabled due to -Xint.&quot;);
+422       }
+423       FLAG_SET_CMDLINE(UseCompiler, false);
+424     }
+425     if (ProfileInterpreter) {
+426       if (!FLAG_IS_DEFAULT(ProfileInterpreter)) {
+427         warning(&quot;ProfileInterpreter disabled due to -Xint.&quot;);
+428       }
+429       FLAG_SET_CMDLINE(ProfileInterpreter, false);
+430     }
+431     if (TieredCompilation) {
+432       if (!FLAG_IS_DEFAULT(TieredCompilation)) {
+433         warning(&quot;TieredCompilation disabled due to -Xint.&quot;);
+434       }
+435       FLAG_SET_CMDLINE(TieredCompilation, false);
+436     }
+437 #if INCLUDE_JVMCI
+438     if (EnableJVMCI) {
+439       if (!FLAG_IS_DEFAULT(EnableJVMCI) || !FLAG_IS_DEFAULT(UseJVMCICompiler)) {
+440         warning(&quot;JVMCI Compiler disabled due to -Xint.&quot;);
+441       }
+442       FLAG_SET_CMDLINE(EnableJVMCI, false);
+443       FLAG_SET_CMDLINE(UseJVMCICompiler, false);
+444     }
+445 #endif
+446   } else {
+447 #if INCLUDE_JVMCI
+448     status = status &amp;&amp; JVMCIGlobals::check_jvmci_flags_are_consistent();
+449 #endif
+450   }
+451   return status;
+452 }
+453 
+454 void CompilerConfig::ergo_initialize() {
+455   if (Arguments::is_interpreter_only()) {
+456     return; // Nothing to do.
+457   }
+458 
+459 #ifdef TIERED
+460   if (!compilation_mode_selected()) {
+461     select_compilation_mode_ergonomically();
+462   }
+463 #endif
+464 
+465 #if INCLUDE_JVMCI
+466   // Check that JVMCI compiler supports selested GC.
+467   // Should be done after GCConfig::initialize() was called.
+468   JVMCIGlobals::check_jvmci_supported_gc();
+469 
+470   // Do JVMCI specific settings
+471   set_jvmci_specific_flags();
+472 #endif
+473 
+474 #ifdef TIERED
+475   if (TieredCompilation) {
+476     set_tiered_flags();
+477   } else
+478 #endif
+479   {
+480     // Scale CompileThreshold
+481     // CompileThresholdScaling == 0.0 is equivalent to -Xint and leaves CompileThreshold unchanged.
+482     if (!FLAG_IS_DEFAULT(CompileThresholdScaling) &amp;&amp; CompileThresholdScaling &gt; 0.0) {
+483       FLAG_SET_ERGO(CompileThreshold, scaled_compile_threshold(CompileThreshold));
+484     }
+485   }
+486 
+487   if (FLAG_IS_DEFAULT(SweeperThreshold)) {
+488     if ((SweeperThreshold * ReservedCodeCacheSize / 100) &gt; (1.2 * M)) {
+489       // Cap default SweeperThreshold value to an equivalent of 1.2 Mb
+490       FLAG_SET_ERGO(SweeperThreshold, (1.2 * M * 100) / ReservedCodeCacheSize);
+491     }
+492   }
+493 
+494   if (UseOnStackReplacement &amp;&amp; !UseLoopCounter) {
+495     warning(&quot;On-stack-replacement requires loop counters; enabling loop counters&quot;);
+496     FLAG_SET_DEFAULT(UseLoopCounter, true);
+497   }
+498 
+499 #ifdef COMPILER2
+500   if (!EliminateLocks) {
+501     EliminateNestedLocks = false;
+502   }
+503   if (!Inline) {
+504     IncrementalInline = false;
+505   }
+506 #ifndef PRODUCT
+507   if (!IncrementalInline) {
+508     AlwaysIncrementalInline = false;
+509   }
+510   if (FLAG_IS_CMDLINE(PrintIdealGraph) &amp;&amp; !PrintIdealGraph) {
+511     FLAG_SET_ERGO(PrintIdealGraphLevel, -1);
+512   }
+513 #endif
+514   if (!UseTypeSpeculation &amp;&amp; FLAG_IS_DEFAULT(TypeProfileLevel)) {
+515     // nothing to use the profiling, turn if off
+516     FLAG_SET_DEFAULT(TypeProfileLevel, 0);
+517   }
+518   if (!FLAG_IS_DEFAULT(OptoLoopAlignment) &amp;&amp; FLAG_IS_DEFAULT(MaxLoopPad)) {
+519     FLAG_SET_DEFAULT(MaxLoopPad, OptoLoopAlignment-1);
+520   }
+521   if (FLAG_IS_DEFAULT(LoopStripMiningIterShortLoop)) {
+522     // blind guess
+523     LoopStripMiningIterShortLoop = LoopStripMiningIter / 10;
+524   }
+<a name="1" id="anc1"></a>
+
+
+
+
+
+
+
+
+525 #endif // COMPILER2
+526 }
+527 
+528 static CompLevel highest_compile_level() {
+529   return TieredCompilation ? MIN2((CompLevel) TieredStopAtLevel, CompLevel_highest_tier) : CompLevel_highest_tier;
+530 }
+531 
+532 bool is_c1_or_interpreter_only() {
+533   if (Arguments::is_interpreter_only()) {
+534     return true;
+535   }
+536 
+537 #if INCLUDE_AOT
+538   if (UseAOT) {
+539     return false;
+540   }
+541 #endif
+542 
+543   if (highest_compile_level() &lt; CompLevel_full_optimization) {
+544 #if INCLUDE_JVMCI
+545     if (TieredCompilation) {
+546        return true;
+547     }
+548     // This happens on jvm variant with C2 disabled and JVMCI
+549     // enabled.
+550     return !UseJVMCICompiler;
+551 #else
+552     return true;
+553 #endif
+554   }
+555 
+556 #ifdef TIERED
+557   // The quick-only compilation mode is c1 only. However,
+558   // CompilationModeFlag only takes effect with TieredCompilation
+559   // enabled.
+560   if (TieredCompilation &amp;&amp; CompilationModeFlag::quick_only()) {
+561     return true;
+562   }
+563 #endif
+564   return false;
+565 }
+<a name="2" id="anc2"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="2" type="hidden" />
+</body>
+</html>

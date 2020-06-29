@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/opto/c2_globals.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_OPTO_C2_GLOBALS_HPP
+ 26 #define SHARE_OPTO_C2_GLOBALS_HPP
+ 27 
+ 28 #include &quot;runtime/globals_shared.hpp&quot;
+ 29 #include &quot;utilities/macros.hpp&quot;
+ 30 
+ 31 #include CPU_HEADER(c2_globals)
+ 32 #include OS_HEADER(c2_globals)
+ 33 
+ 34 //
+ 35 // Defines all globals flags used by the server compiler.
+ 36 //
+ 37 
+ 38 #define C2_FLAGS(develop, \
+ 39                  develop_pd, \
+ 40                  product, \
+ 41                  product_pd, \
+ 42                  diagnostic, \
+ 43                  diagnostic_pd, \
+ 44                  experimental, \
+ 45                  notproduct, \
+ 46                  range, \
+ 47                  constraint) \
+ 48                                                                             \
+ 49   diagnostic(bool, StressLCM, false,                                        \
+ 50           &quot;Randomize instruction scheduling in LCM&quot;)                        \
+ 51                                                                             \
+ 52   diagnostic(bool, StressGCM, false,                                        \
+ 53           &quot;Randomize instruction scheduling in GCM&quot;)                        \
+ 54                                                                             \
+ 55   develop(bool, StressMethodHandleLinkerInlining, false,                    \
+ 56           &quot;Stress inlining through method handle linkers&quot;)                  \
+ 57                                                                             \
+ 58   develop(intx, OptoPrologueNops, 0,                                        \
+ 59           &quot;Insert this many extra nop instructions &quot;                        \
+ 60           &quot;in the prologue of every nmethod&quot;)                               \
+ 61           range(0, 128)                                                     \
+ 62                                                                             \
+ 63   product_pd(intx, InteriorEntryAlignment,                                  \
+ 64           &quot;Code alignment for interior entry points &quot;                       \
+ 65           &quot;in generated code (in bytes)&quot;)                                   \
+ 66           constraint(InteriorEntryAlignmentConstraintFunc, AfterErgo)       \
+ 67                                                                             \
+ 68   product(intx, MaxLoopPad, (OptoLoopAlignment-1),                          \
+ 69           &quot;Align a loop if padding size in bytes is less or equal to this &quot; \
+ 70           &quot;value&quot;)                                                          \
+ 71           range(0, max_jint)                                                \
+ 72                                                                             \
+ 73   product(intx, MaxVectorSize, 64,                                          \
+ 74           &quot;Max vector size in bytes, &quot;                                      \
+ 75           &quot;actual size could be less depending on elements type&quot;)           \
+ 76           range(0, max_jint)                                                \
+ 77                                                                             \
+ 78   product(bool, AlignVector, true,                                          \
+ 79           &quot;Perform vector store/load alignment in loop&quot;)                    \
+ 80                                                                             \
+ 81   product(intx, NumberOfLoopInstrToAlign, 4,                                \
+ 82           &quot;Number of first instructions in a loop to align&quot;)                \
+ 83           range(0, max_jint)                                                \
+ 84                                                                             \
+ 85   notproduct(intx, IndexSetWatch, 0,                                        \
+ 86           &quot;Trace all operations on this IndexSet (-1 means all, 0 none)&quot;)   \
+ 87           range(-1, 0)                                                      \
+ 88                                                                             \
+ 89   develop(intx, OptoNodeListSize, 4,                                        \
+ 90           &quot;Starting allocation size of Node_List data structures&quot;)          \
+ 91           range(0, max_jint)                                                \
+ 92                                                                             \
+ 93   develop(intx, OptoBlockListSize, 8,                                       \
+ 94           &quot;Starting allocation size of Block_List data structures&quot;)         \
+ 95           range(0, max_jint)                                                \
+ 96                                                                             \
+ 97   develop(intx, OptoPeepholeAt, -1,                                         \
+ 98           &quot;Apply peephole optimizations to this peephole rule&quot;)             \
+ 99                                                                             \
+100   notproduct(bool, PrintIdeal, false,                                       \
+101           &quot;Print ideal graph before code generation&quot;)                       \
+102                                                                             \
+103   notproduct(bool, PrintOpto, false,                                        \
+104           &quot;Print compiler2 attempts&quot;)                                       \
+105                                                                             \
+106   notproduct(bool, PrintOptoInlining, false,                                \
+107           &quot;Print compiler2 inlining decisions&quot;)                             \
+108                                                                             \
+109   notproduct(bool, VerifyIdealNodeCount, false,                             \
+110           &quot;Verify that tracked dead ideal node count is accurate&quot;)          \
+111                                                                             \
+112   notproduct(bool, PrintIdealNodeCount, false,                              \
+113           &quot;Print liveness counts of ideal nodes&quot;)                           \
+114                                                                             \
+115   notproduct(bool, VerifyOptoOopOffsets, false,                             \
+116           &quot;Check types of base addresses in field references&quot;)              \
+117                                                                             \
+118   develop(bool, IdealizedNumerics, false,                                   \
+119           &quot;Check performance difference allowing FP &quot;                       \
+120           &quot;associativity and commutativity...&quot;)                             \
+121                                                                             \
+122   diagnostic_pd(bool, IdealizeClearArrayNode,                               \
+123           &quot;Replace ClearArrayNode by subgraph of basic operations.&quot;)        \
+124                                                                             \
+125   develop(bool, OptoBreakpoint, false,                                      \
+126           &quot;insert breakpoint at method entry&quot;)                              \
+127                                                                             \
+128   notproduct(bool, OptoBreakpointOSR, false,                                \
+129           &quot;insert breakpoint at osr method entry&quot;)                          \
+130                                                                             \
+131   notproduct(intx, BreakAtNode, 0,                                          \
+132           &quot;Break at construction of this Node (either _idx or _debug_idx)&quot;) \
+133                                                                             \
+134   notproduct(bool, OptoBreakpointC2R, false,                                \
+135           &quot;insert breakpoint at runtime stub entry&quot;)                        \
+136                                                                             \
+137   notproduct(bool, OptoNoExecute, false,                                    \
+138           &quot;Attempt to parse and compile but do not execute generated code&quot;) \
+139                                                                             \
+140   notproduct(bool, PrintOptoStatistics, false,                              \
+141           &quot;Print New compiler statistics&quot;)                                  \
+142                                                                             \
+143   diagnostic(bool, PrintOptoAssembly, false,                                \
+144           &quot;Print New compiler assembly output&quot;)                             \
+145                                                                             \
+146   develop_pd(bool, OptoPeephole,                                            \
+147           &quot;Apply peephole optimizations after register allocation&quot;)         \
+148                                                                             \
+149   develop(bool, OptoRemoveUseless, true,                                    \
+150           &quot;Remove useless nodes after parsing&quot;)                             \
+151                                                                             \
+152   notproduct(bool, PrintFrameConverterAssembly, false,                      \
+153           &quot;Print New compiler assembly output for frame converters&quot;)        \
+154                                                                             \
+155   notproduct(bool, PrintParseStatistics, false,                             \
+156           &quot;Print nodes, transforms and new values made per bytecode parsed&quot;)\
+157                                                                             \
+158   notproduct(bool, PrintOptoPeephole, false,                                \
+159           &quot;Print New compiler peephole replacements&quot;)                       \
+160                                                                             \
+161   develop(bool, PrintCFGBlockFreq, false,                                   \
+162           &quot;Print CFG block freqencies&quot;)                                     \
+163                                                                             \
+164   develop(bool, TraceOptoParse, false,                                      \
+165           &quot;Trace bytecode parse and control-flow merge&quot;)                    \
+166                                                                             \
+167   product_pd(intx,  LoopUnrollLimit,                                        \
+168           &quot;Unroll loop bodies with node count less than this&quot;)              \
+169           range(0, max_jint / 4)                                            \
+170                                                                             \
+171   product_pd(intx, LoopPercentProfileLimit,                                 \
+172              &quot;Unroll loop bodies with % node count of profile limit&quot;)       \
+173              range(10, 100)                                                 \
+174                                                                             \
+175   product(intx,  LoopMaxUnroll, 16,                                         \
+176           &quot;Maximum number of unrolls for main loop&quot;)                        \
+177           range(0, max_jint)                                                \
+178                                                                             \
+179   product_pd(bool,  SuperWordLoopUnrollAnalysis,                            \
+180            &quot;Map number of unrolls for main loop via &quot;                       \
+181            &quot;Superword Level Parallelism analysis&quot;)                          \
+182                                                                             \
+183   experimental(bool, PostLoopMultiversioning, false,                        \
+184            &quot;Multi versioned post loops to eliminate range checks&quot;)          \
+185                                                                             \
+186   notproduct(bool, TraceSuperWordLoopUnrollAnalysis, false,                 \
+187           &quot;Trace what Superword Level Parallelism analysis applies&quot;)        \
+188                                                                             \
+189   diagnostic(bool, UseVectorMacroLogic, true,                               \
+190           &quot;Use ternary macro logic instructions&quot;)                           \
+191                                                                             \
+192   product(intx,  LoopUnrollMin, 4,                                          \
+193           &quot;Minimum number of unroll loop bodies before checking progress&quot;   \
+194           &quot;of rounds of unroll,optimize,..&quot;)                                \
+195           range(0, max_jint)                                                \
+196                                                                             \
+197   product(bool, UseSubwordForMaxVector, true,                               \
+198           &quot;Use Subword Analysis to set maximum vector size&quot;)                \
+199                                                                             \
+200   product(bool, UseVectorCmov, false,                                       \
+201           &quot;Use Vectorized Cmov&quot;)                                            \
+202                                                                             \
+203   develop(intx, UnrollLimitForProfileCheck, 1,                              \
+204           &quot;Don&#39;t use profile_trip_cnt() to restrict unrolling until &quot;       \
+205           &quot;unrolling would push the number of unrolled iterations above &quot;   \
+206           &quot;UnrollLimitForProfileCheck. A higher value allows more &quot;         \
+207           &quot;unrolling. Zero acts as a very large value.&quot; )                   \
+208           range(0, max_intx)                                                \
+209                                                                             \
+210   product(intx, MultiArrayExpandLimit, 6,                                   \
+211           &quot;Maximum number of individual allocations in an inline-expanded &quot; \
+212           &quot;multianewarray instruction&quot;)                                     \
+213           range(0, max_jint)                                                \
+214                                                                             \
+215   notproduct(bool, TraceProfileTripCount, false,                            \
+216           &quot;Trace profile loop trip count information&quot;)                      \
+217                                                                             \
+218   product(bool, UseCountedLoopSafepoints, false,                            \
+219           &quot;Force counted loops to keep a safepoint&quot;)                        \
+220                                                                             \
+221   product(bool, UseLoopPredicate, true,                                     \
+222           &quot;Generate a predicate to select fast/slow loop versions&quot;)         \
+223                                                                             \
+224   develop(bool, TraceLoopPredicate, false,                                  \
+225           &quot;Trace generation of loop predicates&quot;)                            \
+226                                                                             \
+227   develop(bool, TraceLoopOpts, false,                                       \
+228           &quot;Trace executed loop optimizations&quot;)                              \
+229                                                                             \
+230   develop(bool, TraceLoopLimitCheck, false,                                 \
+231           &quot;Trace generation of loop limits checks&quot;)                         \
+232                                                                             \
+233   develop(bool, TraceRangeLimitCheck, false,                                \
+234           &quot;Trace additional overflow checks in RCE&quot;)                        \
+235                                                                             \
+236   /* OptimizeFill not yet supported on PowerPC. */                          \
+237   product(bool, OptimizeFill, true PPC64_ONLY(&amp;&amp; false),                    \
+238           &quot;convert fill/copy loops into intrinsic&quot;)                         \
+239                                                                             \
+240   develop(bool, TraceOptimizeFill, false,                                   \
+241           &quot;print detailed information about fill conversion&quot;)               \
+242                                                                             \
+243   develop(bool, OptoCoalesce, true,                                         \
+244           &quot;Use Conservative Copy Coalescing in the Register Allocator&quot;)     \
+245                                                                             \
+246   develop(bool, UseUniqueSubclasses, true,                                  \
+247           &quot;Narrow an abstract reference to the unique concrete subclass&quot;)   \
+248                                                                             \
+249   product(intx, TrackedInitializationLimit, 50,                             \
+250           &quot;When initializing fields, track up to this many words&quot;)          \
+251           range(0, 65535)                                                   \
+252                                                                             \
+253   product(bool, ReduceFieldZeroing, true,                                   \
+254           &quot;When initializing fields, try to avoid needless zeroing&quot;)        \
+255                                                                             \
+256   product(bool, ReduceInitialCardMarks, true,                               \
+257           &quot;When initializing fields, try to avoid needless card marks&quot;)     \
+258                                                                             \
+259   product(bool, ReduceBulkZeroing, true,                                    \
+260           &quot;When bulk-initializing, try to avoid needless zeroing&quot;)          \
+261                                                                             \
+262   product(bool, UseFPUForSpilling, false,                                   \
+263           &quot;Spill integer registers to FPU instead of stack when possible&quot;)  \
+264                                                                             \
+265   develop_pd(intx, RegisterCostAreaRatio,                                   \
+266           &quot;Spill selection in reg allocator: scale area by (X/64K) before &quot; \
+267           &quot;adding cost&quot;)                                                    \
+268                                                                             \
+269   develop_pd(bool, UseCISCSpill,                                            \
+270           &quot;Use ADLC supplied cisc instructions during allocation&quot;)          \
+271                                                                             \
+272   notproduct(bool, VerifyGraphEdges , false,                                \
+273           &quot;Verify Bi-directional Edges&quot;)                                    \
+274                                                                             \
+275   notproduct(bool, VerifyDUIterators, true,                                 \
+276           &quot;Verify the safety of all iterations of Bi-directional Edges&quot;)    \
+277                                                                             \
+278   notproduct(bool, VerifyHashTableKeys, true,                               \
+279           &quot;Verify the immutability of keys in the VN hash tables&quot;)          \
+280                                                                             \
+281   notproduct(bool, VerifyRegisterAllocator , false,                         \
+282           &quot;Verify Register Allocator&quot;)                                      \
+283                                                                             \
+284   develop_pd(intx, FLOATPRESSURE,                                           \
+285           &quot;Number of float LRG&#39;s that constitute high register pressure&quot;)   \
+286           range(0, max_jint)                                                \
+287                                                                             \
+288   develop_pd(intx, INTPRESSURE,                                             \
+289           &quot;Number of integer LRG&#39;s that constitute high register pressure&quot;) \
+290           range(0, max_jint)                                                \
+291                                                                             \
+292   notproduct(bool, TraceOptoPipelining, false,                              \
+293           &quot;Trace pipelining information&quot;)                                   \
+294                                                                             \
+295   notproduct(bool, TraceOptoOutput, false,                                  \
+296           &quot;Trace pipelining information&quot;)                                   \
+297                                                                             \
+298   product_pd(bool, OptoScheduling,                                          \
+299           &quot;Instruction Scheduling after register allocation&quot;)               \
+300                                                                             \
+301   product_pd(bool, OptoRegScheduling,                                       \
+302           &quot;Instruction Scheduling before register allocation for pressure&quot;) \
+303                                                                             \
+304   product(bool, PartialPeelLoop, true,                                      \
+305           &quot;Partial peel (rotate) loops&quot;)                                    \
+306                                                                             \
+307   product(intx, PartialPeelNewPhiDelta, 0,                                  \
+308           &quot;Additional phis that can be created by partial peeling&quot;)         \
+309           range(0, max_jint)                                                \
+310                                                                             \
+311   notproduct(bool, TracePartialPeeling, false,                              \
+312           &quot;Trace partial peeling (loop rotation) information&quot;)              \
+313                                                                             \
+314   product(bool, PartialPeelAtUnsignedTests, true,                           \
+315           &quot;Partial peel at unsigned tests if no signed test exists&quot;)        \
+316                                                                             \
+317   product(bool, ReassociateInvariants, true,                                \
+318           &quot;Enable reassociation of expressions with loop invariants.&quot;)      \
+319                                                                             \
+320   product(bool, LoopUnswitching, true,                                      \
+321           &quot;Enable loop unswitching (a form of invariant test hoisting)&quot;)    \
+322                                                                             \
+323   notproduct(bool, TraceLoopUnswitching, false,                             \
+324           &quot;Trace loop unswitching&quot;)                                         \
+325                                                                             \
+326   product(bool, AllowVectorizeOnDemand, true,                               \
+327           &quot;Globally supress vectorization set in VectorizeMethod&quot;)          \
+328                                                                             \
+329   product(bool, UseSuperWord, true,                                         \
+330           &quot;Transform scalar operations into superword operations&quot;)          \
+331                                                                             \
+332   develop(bool, SuperWordRTDepCheck, false,                                 \
+333           &quot;Enable runtime dependency checks.&quot;)                              \
+334                                                                             \
+335   product(bool, SuperWordReductions, true,                                  \
+336           &quot;Enable reductions support in superword.&quot;)                        \
+337                                                                             \
+338   product(bool, UseCMoveUnconditionally, false,                             \
+339           &quot;Use CMove (scalar and vector) ignoring profitability test.&quot;)     \
+340                                                                             \
+341   product(bool, DoReserveCopyInSuperWord, true,                             \
+342           &quot;Create reserve copy of graph in SuperWord.&quot;)                     \
+343                                                                             \
+344   notproduct(bool, TraceSuperWord, false,                                   \
+345           &quot;Trace superword transforms&quot;)                                     \
+346                                                                             \
+347   notproduct(bool, TraceNewVectors, false,                                  \
+348           &quot;Trace creation of Vector nodes&quot;)                                 \
+349                                                                             \
+350   product_pd(bool, OptoBundling,                                            \
+351           &quot;Generate nops to fill i-cache lines&quot;)                            \
+352                                                                             \
+353   product_pd(intx, ConditionalMoveLimit,                                    \
+354           &quot;Limit of ops to make speculative when using CMOVE&quot;)              \
+355           range(0, max_jint)                                                \
+356                                                                             \
+357   product(bool, UseRDPCForConstantTableBase, false,                         \
+358           &quot;Use Sparc RDPC instruction for the constant table base.&quot;)        \
+359                                                                             \
+360   notproduct(bool, PrintIdealGraph, false,                                  \
+361           &quot;Print ideal graph to XML file / network interface. &quot;             \
+362           &quot;By default attempts to connect to the visualizer on a socket.&quot;)  \
+363                                                                             \
+364   notproduct(intx, PrintIdealGraphLevel, 0,                                 \
+365           &quot;Level of detail of the ideal graph printout. &quot;                   \
+366           &quot;System-wide value, -1=printing is disabled, &quot;                    \
+367           &quot;0=print nothing except IGVPrintLevel directives, &quot;               \
+368           &quot;4=all details printed. &quot;                                         \
+369           &quot;Level of detail of printouts can be set on a per-method level &quot;  \
+370           &quot;as well by using CompileCommand=option.&quot;)                        \
+371           range(-1, 4)                                                      \
+372                                                                             \
+373   notproduct(intx, PrintIdealGraphPort, 4444,                               \
+374           &quot;Ideal graph printer to network port&quot;)                            \
+375           range(0, SHRT_MAX)                                                \
+376                                                                             \
+377   notproduct(ccstr, PrintIdealGraphAddress, &quot;127.0.0.1&quot;,                    \
+378           &quot;IP address to connect to visualizer&quot;)                            \
+379                                                                             \
+380   notproduct(ccstr, PrintIdealGraphFile, NULL,                              \
+381           &quot;File to dump ideal graph to.  If set overrides the &quot;             \
+382           &quot;use of the network&quot;)                                             \
+383                                                                             \
+384   product(bool, UseBimorphicInlining, true,                                 \
+385           &quot;Profiling based inlining for two receivers&quot;)                     \
+386                                                                             \
+387   product(bool, UseOnlyInlinedBimorphic, true,                              \
+388           &quot;Don&#39;t use BimorphicInlining if can&#39;t inline a second method&quot;)    \
+389                                                                             \
+390   product(bool, InsertMemBarAfterArraycopy, true,                           \
+391           &quot;Insert memory barrier after arraycopy call&quot;)                     \
+392                                                                             \
+393   develop(bool, SubsumeLoads, true,                                         \
+394           &quot;Attempt to compile while subsuming loads into machine &quot;          \
+395           &quot;instructions.&quot;)                                                  \
+396                                                                             \
+397   develop(bool, StressRecompilation, false,                                 \
+398           &quot;Recompile each compiled method without subsuming loads &quot;         \
+399           &quot;or escape analysis.&quot;)                                            \
+400                                                                             \
+401   develop(intx, ImplicitNullCheckThreshold, 3,                              \
+402           &quot;Don&#39;t do implicit null checks if NPE&#39;s in a method exceeds &quot;     \
+403           &quot;limit&quot;)                                                          \
+404           range(0, max_jint)                                                \
+405                                                                             \
+406   product(intx, LoopOptsCount, 43,                                          \
+407           &quot;Set level of loop optimization for tier 1 compiles&quot;)             \
+408           range(5, 43)                                                      \
+409                                                                             \
+410   /* controls for heat-based inlining */                                    \
+411                                                                             \
+412   develop(intx, NodeCountInliningCutoff, 18000,                             \
+413           &quot;If parser node generation exceeds limit stop inlining&quot;)          \
+414           range(0, max_jint)                                                \
+415                                                                             \
+416   develop(intx, NodeCountInliningStep, 1000,                                \
+417           &quot;Target size of warm calls inlined between optimization passes&quot;)  \
+418           range(0, max_jint)                                                \
+419                                                                             \
+420   develop(bool, InlineWarmCalls, false,                                     \
+421           &quot;Use a heat-based priority queue to govern inlining&quot;)             \
+422                                                                             \
+423   /* Max values must not exceed WarmCallInfo::MAX_VALUE(). */               \
+424   develop(intx, HotCallCountThreshold, 999999,                              \
+425           &quot;large numbers of calls (per method invocation) force hotness&quot;)   \
+426           range(0, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))      \
+427                                                                             \
+428   develop(intx, HotCallProfitThreshold, 999999,                             \
+429           &quot;highly profitable inlining opportunities force hotness&quot;)         \
+430           range(0, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))      \
+431                                                                             \
+432   develop(intx, HotCallTrivialWork, -1,                                     \
+433           &quot;trivial execution time (no larger than this) forces hotness&quot;)    \
+434           range(-1, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))     \
+435                                                                             \
+436   develop(intx, HotCallTrivialSize, -1,                                     \
+437           &quot;trivial methods (no larger than this) force calls to be hot&quot;)    \
+438           range(-1, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))     \
+439                                                                             \
+440   develop(intx, WarmCallMinCount, -1,                                       \
+441           &quot;number of calls (per method invocation) to enable inlining&quot;)     \
+442           range(-1, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))     \
+443                                                                             \
+444   develop(intx, WarmCallMinProfit, -1,                                      \
+445           &quot;number of calls (per method invocation) to enable inlining&quot;)     \
+446           range(-1, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))     \
+447                                                                             \
+448   develop(intx, WarmCallMaxWork, 999999,                                    \
+449           &quot;execution time of the largest inlinable method&quot;)                 \
+450           range(0, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))      \
+451                                                                             \
+452   develop(intx, WarmCallMaxSize, 999999,                                    \
+453           &quot;size of the largest inlinable method&quot;)                           \
+454           range(0, ((intx)MIN2((int64_t)max_intx,(int64_t)(+1.0e10))))      \
+455                                                                             \
+456   product(intx, MaxNodeLimit, 80000,                                        \
+457           &quot;Maximum number of nodes&quot;)                                        \
+458           range(1000, max_jint / 3)                                         \
+459                                                                             \
+460   product(intx, NodeLimitFudgeFactor, 2000,                                 \
+461           &quot;Fudge Factor for certain optimizations&quot;)                         \
+462           constraint(NodeLimitFudgeFactorConstraintFunc, AfterErgo)         \
+463                                                                             \
+464   product(bool, UseJumpTables, true,                                        \
+465           &quot;Use JumpTables instead of a binary search tree for switches&quot;)    \
+466                                                                             \
+467   product(bool, UseDivMod, true,                                            \
+468           &quot;Use combined DivMod instruction if available&quot;)                   \
+469                                                                             \
+470   product_pd(intx, MinJumpTableSize,                                        \
+471           &quot;Minimum number of targets in a generated jump table&quot;)            \
+472           range(0, max_intx)                                                \
+473                                                                             \
+474   product(intx, MaxJumpTableSize, 65000,                                    \
+475           &quot;Maximum number of targets in a generated jump table&quot;)            \
+476           range(0, max_intx)                                                \
+477                                                                             \
+478   product(intx, MaxJumpTableSparseness, 5,                                  \
+479           &quot;Maximum sparseness for jumptables&quot;)                              \
+480           range(0, max_intx / 4)                                            \
+481                                                                             \
+482   product(bool, EliminateLocks, true,                                       \
+483           &quot;Coarsen locks when possible&quot;)                                    \
+484                                                                             \
+485   product(bool, EliminateNestedLocks, true,                                 \
+486           &quot;Eliminate nested locks of the same object when possible&quot;)        \
+487                                                                             \
+488   notproduct(bool, PrintLockStatistics, false,                              \
+489           &quot;Print precise statistics on the dynamic lock usage&quot;)             \
+490                                                                             \
+491   diagnostic(bool, PrintPreciseBiasedLockingStatistics, false,              \
+492           &quot;(Deprecated) Print per-lock-site statistics of biased locking &quot;  \
+493           &quot;in JVM&quot;)                                                         \
+494                                                                             \
+495   diagnostic(bool, PrintPreciseRTMLockingStatistics, false,                 \
+496           &quot;Print per-lock-site statistics of rtm locking in JVM&quot;)           \
+497                                                                             \
+498   notproduct(bool, PrintEliminateLocks, false,                              \
+499           &quot;Print out when locks are eliminated&quot;)                            \
+500                                                                             \
+501   product(bool, EliminateAutoBox, true,                                     \
+502           &quot;Control optimizations for autobox elimination&quot;)                  \
+503                                                                             \
+504   product(intx, AutoBoxCacheMax, 128,                                       \
+505           &quot;Sets max value cached by the java.lang.Integer autobox cache&quot;)   \
+506           range(0, max_jint)                                                \
+507                                                                             \
+508   diagnostic(bool, AggressiveUnboxing, true,                                \
+509           &quot;Control optimizations for aggressive boxing elimination&quot;)        \
+510                                                                             \
+511   develop(bool, TracePostallocExpand, false, &quot;Trace expanding nodes after&quot;  \
+512           &quot; register allocation.&quot;)                                          \
+513                                                                             \
+514   product(bool, DoEscapeAnalysis, true,                                     \
+515           &quot;Perform escape analysis&quot;)                                        \
+516                                                                             \
+517   product(double, EscapeAnalysisTimeout, 20. DEBUG_ONLY(+40.),              \
+518           &quot;Abort EA when it reaches time limit (in sec)&quot;)                   \
+519           range(0, DBL_MAX)                                                 \
+520                                                                             \
+521   develop(bool, ExitEscapeAnalysisOnTimeout, true,                          \
+522           &quot;Exit or throw assert in EA when it reaches time limit&quot;)          \
+523                                                                             \
+524   notproduct(bool, PrintEscapeAnalysis, false,                              \
+525           &quot;Print the results of escape analysis&quot;)                           \
+526                                                                             \
+527   product(bool, EliminateAllocations, true,                                 \
+528           &quot;Use escape analysis to eliminate allocations&quot;)                   \
+529                                                                             \
+530   notproduct(bool, PrintEliminateAllocations, false,                        \
+531           &quot;Print out when allocations are eliminated&quot;)                      \
+532                                                                             \
+533   product(intx, EliminateAllocationArraySizeLimit, 64,                      \
+534           &quot;Array size (number of elements) limit for scalar replacement&quot;)   \
+535           range(0, max_jint)                                                \
+536                                                                             \
+537   product(bool, OptimizePtrCompare, true,                                   \
+538           &quot;Use escape analysis to optimize pointers compare&quot;)               \
+539                                                                             \
+540   notproduct(bool, PrintOptimizePtrCompare, false,                          \
+541           &quot;Print information about optimized pointers compare&quot;)             \
+542                                                                             \
+543   notproduct(bool, VerifyConnectionGraph , true,                            \
+544           &quot;Verify Connection Graph construction in Escape Analysis&quot;)        \
+545                                                                             \
+546   product(bool, UseOptoBiasInlining, true,                                  \
+547           &quot;(Deprecated) Generate biased locking code in C2 ideal graph&quot;)    \
+548                                                                             \
+549   product(bool, OptimizeStringConcat, true,                                 \
+550           &quot;Optimize the construction of Strings by StringBuilder&quot;)          \
+551                                                                             \
+552   notproduct(bool, PrintOptimizeStringConcat, false,                        \
+553           &quot;Print information about transformations performed on Strings&quot;)   \
+554                                                                             \
+555   product(intx, ValueSearchLimit, 1000,                                     \
+556           &quot;Recursion limit in PhaseMacroExpand::value_from_mem_phi&quot;)        \
+557           range(0, max_jint)                                                \
+558                                                                             \
+559   product(intx, MaxLabelRootDepth, 1100,                                    \
+560           &quot;Maximum times call Label_Root to prevent stack overflow&quot;)        \
+561           range(100, max_jint)                                              \
+562                                                                             \
+563   diagnostic(intx, DominatorSearchLimit, 1000,                              \
+564           &quot;Iterations limit in Node::dominates&quot;)                            \
+565           range(0, max_jint)                                                \
+566                                                                             \
+567   product(bool, BlockLayoutByFrequency, true,                               \
+568           &quot;Use edge frequencies to drive block ordering&quot;)                   \
+569                                                                             \
+570   product(intx, BlockLayoutMinDiamondPercentage, 20,                        \
+571           &quot;Miniumum %% of a successor (predecessor) for which block &quot;       \
+572           &quot;layout a will allow a fork (join) in a single chain&quot;)            \
+573           range(0, 100)                                                     \
+574                                                                             \
+575   product(bool, BlockLayoutRotateLoops, true,                               \
+576           &quot;Allow back branches to be fall throughs in the block layout&quot;)    \
+577                                                                             \
+578   diagnostic(bool, InlineReflectionGetCallerClass, true,                    \
+579           &quot;inline sun.reflect.Reflection.getCallerClass(), known to be &quot;    \
+580           &quot;part of base library DLL&quot;)                                       \
+581                                                                             \
+582   diagnostic(bool, InlineObjectCopy, true,                                  \
+583           &quot;inline Object.clone and Arrays.copyOf[Range] intrinsics&quot;)        \
+584                                                                             \
+585   diagnostic(bool, SpecialStringCompareTo, true,                            \
+586           &quot;special version of string compareTo&quot;)                            \
+587                                                                             \
+588   diagnostic(bool, SpecialStringIndexOf, true,                              \
+589           &quot;special version of string indexOf&quot;)                              \
+590                                                                             \
+591   diagnostic(bool, SpecialStringEquals, true,                               \
+592           &quot;special version of string equals&quot;)                               \
+593                                                                             \
+594   diagnostic(bool, SpecialArraysEquals, true,                               \
+595           &quot;special version of Arrays.equals(char[],char[])&quot;)                \
+596                                                                             \
+597   diagnostic(bool, SpecialEncodeISOArray, true,                             \
+598           &quot;special version of ISO_8859_1$Encoder.encodeISOArray&quot;)           \
+599                                                                             \
+600   develop(bool, BailoutToInterpreterForThrows, false,                       \
+601           &quot;Compiled methods which throws/catches exceptions will be &quot;       \
+602           &quot;deopt and intp.&quot;)                                                \
+603                                                                             \
+604   develop(bool, ConvertCmpD2CmpF, true,                                     \
+605           &quot;Convert cmpD to cmpF when one input is constant in float range&quot;) \
+606                                                                             \
+607   develop(bool, ConvertFloat2IntClipping, true,                             \
+608           &quot;Convert float2int clipping idiom to integer clipping&quot;)           \
+609                                                                             \
+610   develop(bool, MonomorphicArrayCheck, true,                                \
+611           &quot;Uncommon-trap array store checks that require full type check&quot;)  \
+612                                                                             \
+613   notproduct(bool, TracePhaseCCP, false,                                    \
+614           &quot;Print progress during Conditional Constant Propagation&quot;)         \
+615                                                                             \
+616   develop(bool, PrintDominators, false,                                     \
+617           &quot;Print out dominator trees for GVN&quot;)                              \
+618                                                                             \
+619   diagnostic(bool, TraceSpilling, false,                                    \
+620           &quot;Trace spilling&quot;)                                                 \
+621                                                                             \
+622   diagnostic(bool, TraceTypeProfile, false,                                 \
+623           &quot;Trace type profile&quot;)                                             \
+624                                                                             \
+625   develop(bool, PoisonOSREntry, true,                                       \
+626            &quot;Detect abnormal calls to OSR code&quot;)                             \
+627                                                                             \
+628   develop(bool, SoftMatchFailure, trueInProduct,                            \
+629           &quot;If the DFA fails to match a node, print a message and bail out&quot;) \
+630                                                                             \
+631   develop(bool, InlineAccessors, true,                                      \
+632           &quot;inline accessor methods (get/set)&quot;)                              \
+633                                                                             \
+634   product(intx, TypeProfileMajorReceiverPercent, 90,                        \
+635           &quot;% of major receiver type to all profiled receivers&quot;)             \
+636           range(0, 100)                                                     \
+637                                                                             \
+638   diagnostic(bool, PrintIntrinsics, false,                                  \
+639           &quot;prints attempted and successful inlining of intrinsics&quot;)         \
+640                                                                             \
+641   develop(bool, StressReflectiveCode, false,                                \
+642           &quot;Use inexact types at allocations, etc., to test reflection&quot;)     \
+643                                                                             \
+644   diagnostic(bool, DebugInlinedCalls, true,                                 \
+645          &quot;If false, restricts profiled locations to the root method only&quot;)  \
+646                                                                             \
+647   notproduct(bool, VerifyLoopOptimizations, false,                          \
+648           &quot;verify major loop optimizations&quot;)                                \
+649                                                                             \
+650   diagnostic(bool, ProfileDynamicTypes, true,                               \
+651           &quot;do extra type profiling and use it more aggressively&quot;)           \
+652                                                                             \
+653   develop(bool, TraceIterativeGVN, false,                                   \
+654           &quot;Print progress during Iterative Global Value Numbering&quot;)         \
+655                                                                             \
+656   develop(bool, VerifyIterativeGVN, false,                                  \
+657           &quot;Verify Def-Use modifications during sparse Iterative Global &quot;    \
+658           &quot;Value Numbering&quot;)                                                \
+659                                                                             \
+660   notproduct(bool, TraceCISCSpill, false,                                   \
+661           &quot;Trace allocators use of cisc spillable instructions&quot;)            \
+662                                                                             \
+663   product(bool, SplitIfBlocks, true,                                        \
+664           &quot;Clone compares and control flow through merge points to fold &quot;   \
+665           &quot;some branches&quot;)                                                  \
+666                                                                             \
+667   develop(intx, FreqCountInvocations,  1,                                   \
+668           &quot;Scaling factor for branch frequencies (deprecated)&quot;)             \
+669           range(1, max_intx)                                                \
+670                                                                             \
+671   product(intx, AliasLevel,     3,                                          \
+672           &quot;0 for no aliasing, 1 for oop/field/static/array split, &quot;         \
+673           &quot;2 for class split, 3 for unique instances&quot;)                      \
+674           range(0, 3)                                                       \
+675           constraint(AliasLevelConstraintFunc,AfterErgo)                    \
+676                                                                             \
+677   develop(bool, VerifyAliases, false,                                       \
+678           &quot;perform extra checks on the results of alias analysis&quot;)          \
+679                                                                             \
+680   product(intx, MaxInlineLevel, 15,                                         \
+681           &quot;maximum number of nested calls that are inlined by high tier &quot;   \
+682           &quot;compiler&quot;)                                                       \
+683           range(0, max_jint)                                                \
+684                                                                             \
+685   product(intx, MaxRecursiveInlineLevel, 1,                                 \
+686           &quot;maximum number of nested recursive calls that are inlined by &quot;   \
+687           &quot;high tier compiler&quot;)                                             \
+688           range(0, max_jint)                                                \
+689                                                                             \
+690   product_pd(intx, InlineSmallCode,                                         \
+691           &quot;Only inline already compiled methods if their code size is &quot;     \
+692           &quot;less than this&quot;)                                                 \
+693           range(0, max_jint)                                                \
+694                                                                             \
+695   product(intx, MaxInlineSize, 35,                                          \
+696           &quot;The maximum bytecode size of a method to be inlined by high &quot;    \
+697           &quot;tier compiler&quot;)                                                  \
+698           range(0, max_jint)                                                \
+699                                                                             \
+700   product_pd(intx, FreqInlineSize,                                          \
+701           &quot;The maximum bytecode size of a frequent method to be inlined&quot;)   \
+702           range(0, max_jint)                                                \
+703                                                                             \
+704   product(intx, MaxTrivialSize, 6,                                          \
+705           &quot;The maximum bytecode size of a trivial method to be inlined by &quot; \
+706           &quot;high tier compiler&quot;)                                             \
+707           range(0, max_jint)                                                \
+708                                                                             \
+709   product(bool, IncrementalInline, true,                                    \
+710           &quot;do post parse inlining&quot;)                                         \
+711                                                                             \
+712   develop(bool, AlwaysIncrementalInline, false,                             \
+713           &quot;do all inlining incrementally&quot;)                                  \
+714                                                                             \
+715   product(intx, LiveNodeCountInliningCutoff, 40000,                         \
+716           &quot;max number of live nodes in a method&quot;)                           \
+717           range(0, max_juint / 8)                                           \
+718                                                                             \
+719   diagnostic(bool, OptimizeExpensiveOps, true,                              \
+720           &quot;Find best control for expensive operations&quot;)                     \
+721                                                                             \
+722   diagnostic(bool, UseMathExactIntrinsics, true,                            \
+723           &quot;Enables intrinsification of various java.lang.Math functions&quot;)   \
+724                                                                             \
+725   diagnostic(bool, UseCharacterCompareIntrinsics, false,                    \
+726           &quot;Enables intrinsification of java.lang.Character functions&quot;)      \
+727                                                                             \
+728   diagnostic(bool, UseMultiplyToLenIntrinsic, false,                        \
+729           &quot;Enables intrinsification of BigInteger.multiplyToLen()&quot;)         \
+730                                                                             \
+731   diagnostic(bool, UseSquareToLenIntrinsic, false,                          \
+732           &quot;Enables intrinsification of BigInteger.squareToLen()&quot;)           \
+733                                                                             \
+734   diagnostic(bool, UseMulAddIntrinsic, false,                               \
+735           &quot;Enables intrinsification of BigInteger.mulAdd()&quot;)                \
+736                                                                             \
+737   diagnostic(bool, UseMontgomeryMultiplyIntrinsic, false,                   \
+738           &quot;Enables intrinsification of BigInteger.montgomeryMultiply()&quot;)    \
+739                                                                             \
+740   diagnostic(bool, UseMontgomerySquareIntrinsic, false,                     \
+741           &quot;Enables intrinsification of BigInteger.montgomerySquare()&quot;)      \
+742                                                                             \
+743   product(bool, UseTypeSpeculation, true,                                   \
+744           &quot;Speculatively propagate types from profiles&quot;)                    \
+745                                                                             \
+746   diagnostic(bool, UseInlineDepthForSpeculativeTypes, true,                 \
+747           &quot;Carry inline depth of profile point with speculative type &quot;      \
+748           &quot;and give priority to profiling from lower inline depth&quot;)         \
+749                                                                             \
+750   product_pd(bool, TrapBasedRangeChecks,                                    \
+751           &quot;Generate code for range checks that uses a cmp and trap &quot;        \
+752           &quot;instruction raising SIGTRAP. Used on PPC64.&quot;)                    \
+753                                                                             \
+754   product(intx, ArrayCopyLoadStoreMaxElem, 8,                               \
+755           &quot;Maximum number of arraycopy elements inlined as a sequence of&quot;   \
+756           &quot;loads/stores&quot;)                                                   \
+757           range(0, max_intx)                                                \
+758                                                                             \
+759   develop(bool, StressArrayCopyMacroNode, false,                            \
+760           &quot;Perform ArrayCopy load/store replacement during IGVN only&quot;)      \
+761                                                                             \
+762   develop(bool, RenumberLiveNodes, true,                                    \
+763           &quot;Renumber live nodes&quot;)                                            \
+764                                                                             \
+765   product(uintx, LoopStripMiningIter, 0,                                    \
+766           &quot;Number of iterations in strip mined loop&quot;)                       \
+767           range(0, max_juint)                                               \
+768                                                                             \
+769   product(uintx, LoopStripMiningIterShortLoop, 0,                           \
+770           &quot;Loop with fewer iterations are not strip mined&quot;)                 \
+771           range(0, max_juint)                                               \
+772                                                                             \
+773   product(bool, UseProfiledLoopPredicate, true,                             \
+774           &quot;Move predicates out of loops based on profiling data&quot;)           \
+775                                                                             \
+776   diagnostic(bool, ExpandSubTypeCheckAtParseTime, false,                    \
+777           &quot;Do not use subtype check macro node&quot;)                            \
+778 
+779 #endif // SHARE_OPTO_C2_GLOBALS_HPP
+    </pre>
+  </body>
+</html>

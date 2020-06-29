@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/loopnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="idealKit.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="machnode.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/loopnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+3874   } else {
+3875     // Note that it is possible for a LoopNode to reach here, if the
+3876     // backedge has been made unreachable (hence the LoopNode no longer
+3877     // denotes a Loop, and will eventually be removed).
+3878 
+3879     // Record tightest enclosing loop for self.  Mark as post-visited.
+3880     set_loop(n, innermost);
+3881     // Also record has_call flag early on
+3882     if( innermost ) {
+3883       if( n-&gt;is_Call() &amp;&amp; !n-&gt;is_CallLeaf() &amp;&amp; !n-&gt;is_macro() ) {
+3884         // Do not count uncommon calls
+3885         if( !n-&gt;is_CallStaticJava() || !n-&gt;as_CallStaticJava()-&gt;_name ) {
+3886           Node *iff = n-&gt;in(0)-&gt;in(0);
+3887           // No any calls for vectorized loops.
+3888           if( UseSuperWord || !iff-&gt;is_If() ||
+3889               (n-&gt;in(0)-&gt;Opcode() == Op_IfFalse &amp;&amp;
+3890                (1.0 - iff-&gt;as_If()-&gt;_prob) &gt;= 0.01) ||
+3891               (iff-&gt;as_If()-&gt;_prob &gt;= 0.01) )
+3892             innermost-&gt;_has_call = 1;
+3893         }
+<span class="line-modified">3894       } else if( n-&gt;is_Allocate() &amp;&amp; n-&gt;as_Allocate()-&gt;_is_scalar_replaceable ) {</span>
+3895         // Disable loop optimizations if the loop has a scalar replaceable
+3896         // allocation. This disabling may cause a potential performance lost
+3897         // if the allocation is not eliminated for some reason.
+3898         innermost-&gt;_allow_optimizations = false;
+3899         innermost-&gt;_has_call = 1; // = true
+3900       } else if (n-&gt;Opcode() == Op_SafePoint) {
+3901         // Record all safepoints in this loop.
+3902         if (innermost-&gt;_safepts == NULL) innermost-&gt;_safepts = new Node_List();
+3903         innermost-&gt;_safepts-&gt;push(n);
+3904       }
+3905     }
+3906   }
+3907 
+3908   // Flag as post-visited now
+3909   set_postvisited(n);
+3910   return pre_order;
+3911 }
+3912 
+3913 
+3914 //------------------------------build_loop_early-------------------------------
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+3874   } else {
+3875     // Note that it is possible for a LoopNode to reach here, if the
+3876     // backedge has been made unreachable (hence the LoopNode no longer
+3877     // denotes a Loop, and will eventually be removed).
+3878 
+3879     // Record tightest enclosing loop for self.  Mark as post-visited.
+3880     set_loop(n, innermost);
+3881     // Also record has_call flag early on
+3882     if( innermost ) {
+3883       if( n-&gt;is_Call() &amp;&amp; !n-&gt;is_CallLeaf() &amp;&amp; !n-&gt;is_macro() ) {
+3884         // Do not count uncommon calls
+3885         if( !n-&gt;is_CallStaticJava() || !n-&gt;as_CallStaticJava()-&gt;_name ) {
+3886           Node *iff = n-&gt;in(0)-&gt;in(0);
+3887           // No any calls for vectorized loops.
+3888           if( UseSuperWord || !iff-&gt;is_If() ||
+3889               (n-&gt;in(0)-&gt;Opcode() == Op_IfFalse &amp;&amp;
+3890                (1.0 - iff-&gt;as_If()-&gt;_prob) &gt;= 0.01) ||
+3891               (iff-&gt;as_If()-&gt;_prob &gt;= 0.01) )
+3892             innermost-&gt;_has_call = 1;
+3893         }
+<span class="line-modified">3894       } else if( n-&gt;is_Allocate() &amp;&amp; (n-&gt;as_Allocate()-&gt;_is_scalar_replaceable || n-&gt;as_Allocate()-&gt;_is_stack_allocateable) ) {</span>
+3895         // Disable loop optimizations if the loop has a scalar replaceable
+3896         // allocation. This disabling may cause a potential performance lost
+3897         // if the allocation is not eliminated for some reason.
+3898         innermost-&gt;_allow_optimizations = false;
+3899         innermost-&gt;_has_call = 1; // = true
+3900       } else if (n-&gt;Opcode() == Op_SafePoint) {
+3901         // Record all safepoints in this loop.
+3902         if (innermost-&gt;_safepts == NULL) innermost-&gt;_safepts = new Node_List();
+3903         innermost-&gt;_safepts-&gt;push(n);
+3904       }
+3905     }
+3906   }
+3907 
+3908   // Flag as post-visited now
+3909   set_postvisited(n);
+3910   return pre_order;
+3911 }
+3912 
+3913 
+3914 //------------------------------build_loop_early-------------------------------
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="idealKit.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="machnode.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

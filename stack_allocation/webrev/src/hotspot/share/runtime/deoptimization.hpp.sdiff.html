@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/runtime/deoptimization.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="deoptimization.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/runtime/deoptimization.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+153   static void revoke_from_deopt_handler(JavaThread* thread, frame fr, RegisterMap* map);
+154 
+155  public:
+156   // Deoptimizes a frame lazily. Deopt happens on return to the frame.
+157   static void deoptimize(JavaThread* thread, frame fr, DeoptReason reason = Reason_constraint);
+158 
+159 #if INCLUDE_JVMCI
+160   static address deoptimize_for_missing_exception_handler(CompiledMethod* cm);
+161   static oop get_cached_box(AutoBoxObjectValue* bv, frame* fr, RegisterMap* reg_map, TRAPS);
+162 #endif
+163 
+164   private:
+165   // Does the actual work for deoptimizing a single frame
+166   static void deoptimize_single_frame(JavaThread* thread, frame fr, DeoptReason reason);
+167 
+168 #if COMPILER2_OR_JVMCI
+169  public:
+170 
+171   // Support for restoring non-escaping objects
+172   static bool realloc_objects(JavaThread* thread, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, TRAPS);
+<span class="line-modified">173   static void reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);</span>
+<span class="line-modified">174   static void reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj);</span>
+
+
+
+
+
+
+
+175   static void reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures, bool skip_internal);
+176   static void relock_objects(GrowableArray&lt;MonitorInfo*&gt;* monitors, JavaThread* thread, bool realloc_failures);
+177   static void pop_frames_failed_reallocs(JavaThread* thread, vframeArray* array);
+178   NOT_PRODUCT(static void print_objects(GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures);)
+179 #endif // COMPILER2_OR_JVMCI
+180 
+181   public:
+182   static vframeArray* create_vframeArray(JavaThread* thread, frame fr, RegisterMap *reg_map, GrowableArray&lt;compiledVFrame*&gt;* chunk, bool realloc_failures);
+183 
+184   // Interface used for unpacking deoptimized frames
+185 
+186   // UnrollBlock is returned by fetch_unroll_info() to the deoptimization handler (blob).
+187   // This is only a CheapObj to ease debugging after a deopt failure
+188   class UnrollBlock : public CHeapObj&lt;mtCompiler&gt; {
+189     friend class VMStructs;
+190     friend class JVMCIVMStructs;
+191    private:
+192     int       _size_of_deoptimized_frame; // Size, in bytes, of current deoptimized frame
+193     int       _caller_adjustment;         // Adjustment, in bytes, to caller&#39;s SP by initial interpreted frame
+194     int       _number_of_frames;          // Number frames to unroll
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+153   static void revoke_from_deopt_handler(JavaThread* thread, frame fr, RegisterMap* map);
+154 
+155  public:
+156   // Deoptimizes a frame lazily. Deopt happens on return to the frame.
+157   static void deoptimize(JavaThread* thread, frame fr, DeoptReason reason = Reason_constraint);
+158 
+159 #if INCLUDE_JVMCI
+160   static address deoptimize_for_missing_exception_handler(CompiledMethod* cm);
+161   static oop get_cached_box(AutoBoxObjectValue* bv, frame* fr, RegisterMap* reg_map, TRAPS);
+162 #endif
+163 
+164   private:
+165   // Does the actual work for deoptimizing a single frame
+166   static void deoptimize_single_frame(JavaThread* thread, frame fr, DeoptReason reason);
+167 
+168 #if COMPILER2_OR_JVMCI
+169  public:
+170 
+171   // Support for restoring non-escaping objects
+172   static bool realloc_objects(JavaThread* thread, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, TRAPS);
+<span class="line-modified">173   static void reassign_stack_allocated_fields(frame *fr, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue *sv, Handle obj, Klass* k);</span>
+<span class="line-modified">174   static void reassign_stack_allocated_type_array_elements(oop orig, oop newly_allocated, Klass *k);</span>
+<span class="line-added">175   static void reassign_stack_allocated_object_array_elements(oop orig, oop newly_allocated, intptr_t *sp_base, intptr_t *sp_top, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="line-added">176   static void reassign_scalar_replaced_fields(frame *fr, RegisterMap *reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue *sv, Handle obj, Klass* k, bool skip_internal);</span>
+<span class="line-added">177   static void reassign_scalar_replaced_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);</span>
+<span class="line-added">178   static void reassign_scalar_replaced_object_array_elements(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue* sv, objArrayOop obj);</span>
+<span class="line-added">179   static ScopeValue *get_scope_value(frame* fr, RegisterMap* reg_map, ScopeValue* sv, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="line-added">180   static ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="line-added">181   static void reassign_scalar_replaced_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue* sv, int svIndex, oop obj, bool skip_internal);</span>
+182   static void reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures, bool skip_internal);
+183   static void relock_objects(GrowableArray&lt;MonitorInfo*&gt;* monitors, JavaThread* thread, bool realloc_failures);
+184   static void pop_frames_failed_reallocs(JavaThread* thread, vframeArray* array);
+185   NOT_PRODUCT(static void print_objects(GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures);)
+186 #endif // COMPILER2_OR_JVMCI
+187 
+188   public:
+189   static vframeArray* create_vframeArray(JavaThread* thread, frame fr, RegisterMap *reg_map, GrowableArray&lt;compiledVFrame*&gt;* chunk, bool realloc_failures);
+190 
+191   // Interface used for unpacking deoptimized frames
+192 
+193   // UnrollBlock is returned by fetch_unroll_info() to the deoptimization handler (blob).
+194   // This is only a CheapObj to ease debugging after a deopt failure
+195   class UnrollBlock : public CHeapObj&lt;mtCompiler&gt; {
+196     friend class VMStructs;
+197     friend class JVMCIVMStructs;
+198    private:
+199     int       _size_of_deoptimized_frame; // Size, in bytes, of current deoptimized frame
+200     int       _caller_adjustment;         // Adjustment, in bytes, to caller&#39;s SP by initial interpreted frame
+201     int       _number_of_frames;          // Number frames to unroll
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="deoptimization.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

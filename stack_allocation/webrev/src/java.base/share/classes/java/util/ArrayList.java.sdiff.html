@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/java.base/share/classes/java/util/ArrayList.java</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../../../../../hotspot/share/runtime/vframe_hp.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="regex/Matcher.java.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/java.base/share/classes/java/util/ArrayList.java</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 218             modCount++;
+ 219             grow(minCapacity);
+ 220         }
+ 221     }
+ 222 
+ 223     /**
+ 224      * Increases the capacity to ensure that it can hold at least the
+ 225      * number of elements specified by the minimum capacity argument.
+ 226      *
+ 227      * @param minCapacity the desired minimum capacity
+ 228      * @throws OutOfMemoryError if minCapacity is less than zero
+ 229      */
+ 230     private Object[] grow(int minCapacity) {
+ 231         int oldCapacity = elementData.length;
+ 232         if (oldCapacity &gt; 0 || elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+ 233             int newCapacity = ArraysSupport.newLength(oldCapacity,
+ 234                     minCapacity - oldCapacity, /* minimum growth */
+ 235                     oldCapacity &gt;&gt; 1           /* preferred growth */);
+ 236             return elementData = Arrays.copyOf(elementData, newCapacity);
+ 237         } else {
+<span class="line-modified"> 238             return elementData = new Object[Math.max(DEFAULT_CAPACITY, minCapacity)];</span>
+<span class="line-modified"> 239         }</span>
+
+
+
+ 240     }
+ 241 
+ 242     private Object[] grow() {
+ 243         return grow(size + 1);
+ 244     }
+ 245 
+ 246     /**
+ 247      * Returns the number of elements in this list.
+ 248      *
+ 249      * @return the number of elements in this list
+ 250      */
+ 251     public int size() {
+ 252         return size;
+ 253     }
+ 254 
+ 255     /**
+ 256      * Returns {@code true} if this list contains no elements.
+ 257      *
+ 258      * @return {@code true} if this list contains no elements
+ 259      */
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 218             modCount++;
+ 219             grow(minCapacity);
+ 220         }
+ 221     }
+ 222 
+ 223     /**
+ 224      * Increases the capacity to ensure that it can hold at least the
+ 225      * number of elements specified by the minimum capacity argument.
+ 226      *
+ 227      * @param minCapacity the desired minimum capacity
+ 228      * @throws OutOfMemoryError if minCapacity is less than zero
+ 229      */
+ 230     private Object[] grow(int minCapacity) {
+ 231         int oldCapacity = elementData.length;
+ 232         if (oldCapacity &gt; 0 || elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+ 233             int newCapacity = ArraysSupport.newLength(oldCapacity,
+ 234                     minCapacity - oldCapacity, /* minimum growth */
+ 235                     oldCapacity &gt;&gt; 1           /* preferred growth */);
+ 236             return elementData = Arrays.copyOf(elementData, newCapacity);
+ 237         } else {
+<span class="line-modified"> 238             if (DEFAULT_CAPACITY &gt; minCapacity) {</span>
+<span class="line-modified"> 239                 return elementData = new Object[DEFAULT_CAPACITY];</span>
+<span class="line-added"> 240             }</span>
+<span class="line-added"> 241             return elementData = new Object[minCapacity];</span>
+<span class="line-added"> 242          }</span>
+ 243     }
+ 244 
+ 245     private Object[] grow() {
+ 246         return grow(size + 1);
+ 247     }
+ 248 
+ 249     /**
+ 250      * Returns the number of elements in this list.
+ 251      *
+ 252      * @return the number of elements in this list
+ 253      */
+ 254     public int size() {
+ 255         return size;
+ 256     }
+ 257 
+ 258     /**
+ 259      * Returns {@code true} if this list contains no elements.
+ 260      *
+ 261      * @return {@code true} if this list contains no elements
+ 262      */
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../../../../../hotspot/share/runtime/vframe_hp.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="regex/Matcher.java.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

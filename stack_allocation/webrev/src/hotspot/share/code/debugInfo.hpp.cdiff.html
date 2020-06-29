@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/code/debugInfo.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="debugInfo.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../compiler/compilerDefinitions.cpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/code/debugInfo.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 143,12 ***</span>
+    bool                        is_visited() const        { return _visited; }
+  
+    void                        set_value(oop value);
+    void                        set_visited(bool visited) { _visited = false; }
+  
+    // Serialization of debugging information
+<span class="line-modified">!   void read_object(DebugInfoReadStream* stream);</span>
+    void write_on(DebugInfoWriteStream* stream);
+  
+    // Printing
+    void print_on(outputStream* st) const;
+    void print_fields_on(outputStream* st) const;
+<span class="line-new-header">--- 143,14 ---</span>
+    bool                        is_visited() const        { return _visited; }
+  
+    void                        set_value(oop value);
+    void                        set_visited(bool visited) { _visited = false; }
+  
+<span class="line-added">+   virtual bool                is_stack_object()         { return false; }</span>
+<span class="line-added">+ </span>
+    // Serialization of debugging information
+<span class="line-modified">!   virtual void read_object(DebugInfoReadStream* stream);</span>
+    void write_on(DebugInfoWriteStream* stream);
+  
+    // Printing
+    void print_on(outputStream* st) const;
+    void print_fields_on(outputStream* st) const;
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 183,10 ***</span>
+<span class="line-new-header">--- 185,29 ---</span>
+  
+    // Printing
+    void print_on(outputStream* st) const;
+  };
+  
+<span class="line-added">+ class StackObjectValue: public ObjectValue {</span>
+<span class="line-added">+ private:</span>
+<span class="line-added">+   Location    _location;</span>
+<span class="line-added">+   ConstantIntValue *_field_length;</span>
+<span class="line-added">+ public:</span>
+<span class="line-added">+   StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length);</span>
+<span class="line-added">+   StackObjectValue(int id) : ObjectValue(id), _location(), _field_length(NULL) { }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   Location get_stack_location() { return _location; }</span>
+<span class="line-added">+   ConstantIntValue* get_field_length() { return _field_length; }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   bool is_stack_object(){ return true; }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     // Serialization of debugging information</span>
+<span class="line-added">+   void read_object(DebugInfoReadStream* stream);</span>
+<span class="line-added">+   void write_on(DebugInfoWriteStream* stream);</span>
+<span class="line-added">+ };</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ </span>
+  class ConstantLongValue: public ScopeValue {
+   private:
+    jlong _value;
+   public:
+    ConstantLongValue(jlong value)       { _value = value; }
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 302,11 ***</span>
+      Method* o = (Method*)(code()-&gt;metadata_at(read_int()));
+      // is_metadata() is a faster check than is_metaspace_object()
+      assert(o == NULL || o-&gt;is_metadata(), &quot;meta data only&quot;);
+      return o;
+    }
+<span class="line-modified">!   ScopeValue* read_object_value(bool is_auto_box);</span>
+    ScopeValue* get_cached_object();
+    // BCI encoding is mostly unsigned, but -1 is a distinguished value
+    int read_bci() { return read_int() + InvocationEntryBci; }
+  };
+  
+<span class="line-new-header">--- 323,11 ---</span>
+      Method* o = (Method*)(code()-&gt;metadata_at(read_int()));
+      // is_metadata() is a faster check than is_metaspace_object()
+      assert(o == NULL || o-&gt;is_metadata(), &quot;meta data only&quot;);
+      return o;
+    }
+<span class="line-modified">!   ScopeValue* read_object_value(int type);</span>
+    ScopeValue* get_cached_object();
+    // BCI encoding is mostly unsigned, but -1 is a distinguished value
+    int read_bci() { return read_int() + InvocationEntryBci; }
+  };
+  
+</pre>
+<center><a href="debugInfo.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../compiler/compilerDefinitions.cpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

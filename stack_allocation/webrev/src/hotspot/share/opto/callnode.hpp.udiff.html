@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/callnode.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="callnode.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compile.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/callnode.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -492,10 +492,11 @@</span>
+  class SafePointScalarObjectNode: public TypeNode {
+    uint _first_index; // First input edge relative index of a SafePoint node where
+                       // states of the scalarized object fields are collected.
+                       // It is relative to the last (youngest) jvms-&gt;_scloff.
+    uint _n_fields;    // Number of non-static fields of the scalarized object.
+<span class="udiff-line-added">+   bool _is_stack_allocated;</span>
+    DEBUG_ONLY(AllocateNode* _alloc;)
+  
+    virtual uint hash() const ; // { return NO_HASH; }
+    virtual bool cmp( const Node &amp;n ) const;
+  
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -517,10 +518,13 @@</span>
+      assert(jvms != NULL, &quot;missed JVMS&quot;);
+      return jvms-&gt;scloff() + _first_index;
+    }
+    uint n_fields()    const { return _n_fields; }
+  
+<span class="udiff-line-added">+   void set_stack_allocated(bool v) { _is_stack_allocated = true; }</span>
+<span class="udiff-line-added">+   bool stack_allocated() { return _is_stack_allocated; }</span>
+<span class="udiff-line-added">+ </span>
+  #ifdef ASSERT
+    AllocateNode* alloc() const { return _alloc; }
+  #endif
+  
+    virtual uint size_of() const { return sizeof(*this); }
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -637,10 +641,11 @@</span>
+    void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+  
+    virtual uint match_edge(uint idx) const;
+  
+    bool is_call_to_arraycopystub() const;
+<span class="udiff-line-added">+   bool is_call_to_osr_migration_end() const;</span>
+  
+  #ifndef PRODUCT
+    virtual void        dump_req(outputStream *st = tty) const;
+    virtual void        dump_spec(outputStream *st) const;
+  #endif
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -839,10 +844,13 @@</span>
+      InitialTest,                      // slow-path test (may be constant)
+      ALength,                          // array length (or TOP if none)
+      ParmLimit
+    };
+  
+<span class="udiff-line-added">+   // Maximum object size considered for stack allocation</span>
+<span class="udiff-line-added">+   static const int StackAllocSizeLimit = 0x100;</span>
+<span class="udiff-line-added">+ </span>
+    static const TypeFunc* alloc_type(const Type* t) {
+      const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+      fields[AllocSize]   = TypeInt::POS;
+      fields[KlassNode]   = TypeInstPtr::NOTNULL;
+      fields[InitialTest] = TypeInt::BOOL;
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -860,10 +868,12 @@</span>
+    }
+  
+    // Result of Escape Analysis
+    bool _is_scalar_replaceable;
+    bool _is_non_escaping;
+<span class="udiff-line-added">+   bool _is_stack_allocateable;</span>
+<span class="udiff-line-added">+   bool _is_referenced_stack_allocation;</span>
+    // True when MemBar for new is redundant with MemBar at initialzer exit
+    bool _is_allocation_MemBar_redundant;
+  
+    virtual uint size_of() const; // Size is bigger
+    AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+</pre>
+<center><a href="callnode.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compile.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

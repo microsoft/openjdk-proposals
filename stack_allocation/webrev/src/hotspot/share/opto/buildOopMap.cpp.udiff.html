@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/buildOopMap.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="block.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="c2_globals.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/buildOopMap.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -239,11 +239,12 @@</span>
+      Node *def = _defs[reg];     // Get reaching def
+      assert( def, &quot;since live better have reaching def&quot; );
+  
+      // Classify the reaching def as oop, derived, callee-save, dead, or other
+      const Type *t = def-&gt;bottom_type();
+<span class="udiff-line-modified-removed">-     if( t-&gt;isa_oop_ptr() ) {    // Oop or derived?</span>
+<span class="udiff-line-modified-added">+     if( t-&gt;isa_oop_ptr() || // Oop or derived?</span>
+<span class="udiff-line-added">+        (C-&gt;do_stack_allocation() &amp;&amp; t-&gt;isa_rawptr() &amp;&amp; def-&gt;is_BoxLock())) {  // consider stack oops too</span>
+        assert( !OptoReg::is_valid(_callees[reg]), &quot;oop can&#39;t be callee save&quot; );
+  #ifdef _LP64
+        // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+        // Make sure both are record from the same reaching def, but do not
+        // put both into the oopmap.
+</pre>
+<center><a href="block.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="c2_globals.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

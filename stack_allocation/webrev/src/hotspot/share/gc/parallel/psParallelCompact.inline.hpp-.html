@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</title>
+    <link rel="stylesheet" href="../../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_GC_PARALLEL_PSPARALLELCOMPACT_INLINE_HPP
+ 26 #define SHARE_GC_PARALLEL_PSPARALLELCOMPACT_INLINE_HPP
+ 27 
+ 28 #include &quot;gc/parallel/parallelScavengeHeap.hpp&quot;
+ 29 #include &quot;gc/parallel/parMarkBitMap.inline.hpp&quot;
+ 30 #include &quot;gc/parallel/psParallelCompact.hpp&quot;
+ 31 #include &quot;gc/shared/collectedHeap.hpp&quot;
+ 32 #include &quot;oops/access.inline.hpp&quot;
+ 33 #include &quot;oops/compressedOops.inline.hpp&quot;
+ 34 #include &quot;oops/klass.hpp&quot;
+ 35 #include &quot;oops/oop.inline.hpp&quot;
+ 36 
+ 37 inline bool PSParallelCompact::is_marked(oop obj) {
+ 38   return mark_bitmap()-&gt;is_marked(obj);
+ 39 }
+ 40 
+ 41 inline double PSParallelCompact::normal_distribution(double density) {
+ 42   assert(_dwl_initialized, &quot;uninitialized&quot;);
+ 43   const double squared_term = (density - _dwl_mean) / _dwl_std_dev;
+ 44   return _dwl_first_term * exp(-0.5 * squared_term * squared_term);
+ 45 }
+ 46 
+ 47 inline bool PSParallelCompact::dead_space_crosses_boundary(const RegionData* region,
+ 48                                                            idx_t bit) {
+ 49   assert(bit &gt; 0, &quot;cannot call this for the first bit/region&quot;);
+ 50   assert(_summary_data.region_to_addr(region) == _mark_bitmap.bit_to_addr(bit),
+ 51          &quot;sanity check&quot;);
+ 52 
+ 53   // Dead space crosses the boundary if (1) a partial object does not extend
+ 54   // onto the region, (2) an object does not start at the beginning of the
+ 55   // region, and (3) an object does not end at the end of the prior region.
+ 56   return region-&gt;partial_obj_size() == 0 &amp;&amp;
+ 57     !_mark_bitmap.is_obj_beg(bit) &amp;&amp;
+ 58     !_mark_bitmap.is_obj_end(bit - 1);
+ 59 }
+ 60 
+ 61 inline bool PSParallelCompact::is_in(HeapWord* p, HeapWord* beg_addr, HeapWord* end_addr) {
+ 62   return p &gt;= beg_addr &amp;&amp; p &lt; end_addr;
+ 63 }
+ 64 
+ 65 inline bool PSParallelCompact::is_in(oop* p, HeapWord* beg_addr, HeapWord* end_addr) {
+ 66   return is_in((HeapWord*)p, beg_addr, end_addr);
+ 67 }
+ 68 
+ 69 inline MutableSpace* PSParallelCompact::space(SpaceId id) {
+ 70   assert(id &lt; last_space_id, &quot;id out of range&quot;);
+ 71   return _space_info[id].space();
+ 72 }
+ 73 
+ 74 inline HeapWord* PSParallelCompact::new_top(SpaceId id) {
+ 75   assert(id &lt; last_space_id, &quot;id out of range&quot;);
+ 76   return _space_info[id].new_top();
+ 77 }
+ 78 
+ 79 inline HeapWord* PSParallelCompact::dense_prefix(SpaceId id) {
+ 80   assert(id &lt; last_space_id, &quot;id out of range&quot;);
+ 81   return _space_info[id].dense_prefix();
+ 82 }
+ 83 
+ 84 inline ObjectStartArray* PSParallelCompact::start_array(SpaceId id) {
+ 85   assert(id &lt; last_space_id, &quot;id out of range&quot;);
+ 86   return _space_info[id].start_array();
+ 87 }
+ 88 
+ 89 #ifdef ASSERT
+ 90 inline void PSParallelCompact::check_new_location(HeapWord* old_addr, HeapWord* new_addr) {
+ 91   assert(old_addr &gt;= new_addr || space_id(old_addr) != space_id(new_addr),
+ 92          &quot;must move left or to a different space&quot;);
+ 93   assert(is_object_aligned(old_addr) &amp;&amp; is_object_aligned(new_addr),
+ 94          &quot;checking alignment&quot;);
+ 95 }
+ 96 #endif // ASSERT
+ 97 
+ 98 inline bool PSParallelCompact::mark_obj(oop obj) {
+ 99   const int obj_size = obj-&gt;size();
+100   if (mark_bitmap()-&gt;mark_obj(obj, obj_size)) {
+101     _summary_data.add_obj(obj, obj_size);
+102     return true;
+103   } else {
+104     return false;
+105   }
+106 }
+107 
+108 template &lt;class T&gt;
+109 inline void PSParallelCompact::adjust_pointer(T* p, ParCompactionManager* cm) {
+110   T heap_oop = RawAccess&lt;&gt;::oop_load(p);
+111   if (!CompressedOops::is_null(heap_oop)) {
+112     oop obj = CompressedOops::decode_not_null(heap_oop);
+113     assert(ParallelScavengeHeap::heap()-&gt;is_in(obj), &quot;should be in heap&quot;);
+114 
+115     oop new_obj = (oop)summary_data().calc_new_pointer(obj, cm);
+116     assert(new_obj != NULL,                    // is forwarding ptr?
+117            &quot;should be forwarded&quot;);
+118     // Just always do the update unconditionally?
+119     if (new_obj != NULL) {
+120       assert(ParallelScavengeHeap::heap()-&gt;is_in_reserved(new_obj),
+121              &quot;should be in object space&quot;);
+122       RawAccess&lt;IS_NOT_NULL&gt;::oop_store(p, new_obj);
+123     }
+124   }
+125 }
+126 
+127 class PCAdjustPointerClosure: public BasicOopIterateClosure {
+128 public:
+129   PCAdjustPointerClosure(ParCompactionManager* cm) {
+130     assert(cm != NULL, &quot;associate ParCompactionManage should not be NULL&quot;);
+131     _cm = cm;
+132   }
+133   template &lt;typename T&gt; void do_oop_nv(T* p) { PSParallelCompact::adjust_pointer(p, _cm); }
+134   virtual void do_oop(oop* p)                { do_oop_nv(p); }
+135   virtual void do_oop(narrowOop* p)          { do_oop_nv(p); }
+136 
+137   // This closure provides its own oop verification code.
+138   debug_only(virtual bool should_verify_oops() { return false; })
+139   virtual ReferenceIterationMode reference_iteration_mode() { return DO_FIELDS; }
+140 private:
+141   ParCompactionManager* _cm;
+142 };
+143 
+144 #endif // SHARE_GC_PARALLEL_PSPARALLELCOMPACT_INLINE_HPP
+    </pre>
+  </body>
+</html>

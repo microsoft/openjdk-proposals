@@ -1,0 +1,20 @@
+diff a/src/hotspot/share/opto/machnode.hpp b/src/hotspot/share/opto/machnode.hpp
+--- a/src/hotspot/share/opto/machnode.hpp
++++ b/src/hotspot/share/opto/machnode.hpp
+@@ -844,11 +844,15 @@
+     return in(_jvmadj + jvms->locoff() + idx);
+   }
+   Node *stack(const JVMState* jvms, uint idx) const {
+     assert(verify_jvms(jvms), "jvms must match");
+     return in(_jvmadj + jvms->stkoff() + idx);
+- }
++  }
++  Node *scalar(const JVMState* jvms, uint idx) const {
++    assert(verify_jvms(jvms), "jvms must match");
++    return in(_jvmadj + jvms->scloff() + idx);
++  }
+   Node *monitor_obj(const JVMState* jvms, uint idx) const {
+     assert(verify_jvms(jvms), "jvms must match");
+     return in(_jvmadj + jvms->monitor_obj_offset(idx));
+   }
+   Node *monitor_box(const JVMState* jvms, uint idx) const {

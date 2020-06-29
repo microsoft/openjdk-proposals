@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/block.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="../memory/iterator.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="buildOopMap.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/block.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 160     return not_empty;
+ 161   }
+ 162 
+ 163   int success_result = completely_empty;
+ 164   int end_idx = number_of_nodes() - 1;
+ 165 
+ 166   // Check for ending goto
+ 167   if ((end_idx &gt; 0) &amp;&amp; (get_node(end_idx)-&gt;is_MachGoto())) {
+ 168     success_result = empty_with_goto;
+ 169     end_idx--;
+ 170   }
+ 171 
+ 172   // Unreachable blocks are considered empty
+ 173   if (num_preds() &lt;= 1) {
+ 174     return success_result;
+ 175   }
+ 176 
+ 177   // Ideal nodes are allowable in empty blocks: skip them  Only MachNodes
+ 178   // turn directly into code, because only MachNodes have non-trivial
+ 179   // emit() functions.
+<span class="line-modified"> 180   while ((end_idx &gt; 0) &amp;&amp; !get_node(end_idx)-&gt;is_Mach()) {</span>
+ 181     end_idx--;
+ 182   }
+ 183 
+ 184   // No room for any interesting instructions?
+ 185   if (end_idx == 0) {
+ 186     return success_result;
+ 187   }
+ 188 
+ 189   return not_empty;
+ 190 }
+ 191 
+ 192 // Return true if the block&#39;s code implies that it is likely to be
+ 193 // executed infrequently.  Check to see if the block ends in a Halt or
+ 194 // a low probability call.
+ 195 bool Block::has_uncommon_code() const {
+ 196   Node* en = end();
+ 197 
+ 198   if (en-&gt;is_MachGoto())
+ 199     en = en-&gt;in(0);
+ 200   if (en-&gt;is_Catch())
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 160     return not_empty;
+ 161   }
+ 162 
+ 163   int success_result = completely_empty;
+ 164   int end_idx = number_of_nodes() - 1;
+ 165 
+ 166   // Check for ending goto
+ 167   if ((end_idx &gt; 0) &amp;&amp; (get_node(end_idx)-&gt;is_MachGoto())) {
+ 168     success_result = empty_with_goto;
+ 169     end_idx--;
+ 170   }
+ 171 
+ 172   // Unreachable blocks are considered empty
+ 173   if (num_preds() &lt;= 1) {
+ 174     return success_result;
+ 175   }
+ 176 
+ 177   // Ideal nodes are allowable in empty blocks: skip them  Only MachNodes
+ 178   // turn directly into code, because only MachNodes have non-trivial
+ 179   // emit() functions.
+<span class="line-modified"> 180   while ((end_idx &gt; 0) &amp;&amp; !(get_node(end_idx)-&gt;is_Mach() || get_node(end_idx)-&gt;is_BoxLock())) {</span>
+ 181     end_idx--;
+ 182   }
+ 183 
+ 184   // No room for any interesting instructions?
+ 185   if (end_idx == 0) {
+ 186     return success_result;
+ 187   }
+ 188 
+ 189   return not_empty;
+ 190 }
+ 191 
+ 192 // Return true if the block&#39;s code implies that it is likely to be
+ 193 // executed infrequently.  Check to see if the block ends in a Halt or
+ 194 // a low probability call.
+ 195 bool Block::has_uncommon_code() const {
+ 196   Node* en = end();
+ 197 
+ 198   if (en-&gt;is_MachGoto())
+ 199     en = en-&gt;in(0);
+ 200   if (en-&gt;is_Catch())
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../memory/iterator.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="buildOopMap.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

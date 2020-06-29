@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/code/debugInfo.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+    <script type="text/javascript" src="../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;code/debugInfo.hpp&quot;
+ 27 #include &quot;code/debugInfoRec.hpp&quot;
+ 28 #include &quot;code/nmethod.hpp&quot;
+ 29 #include &quot;memory/universe.hpp&quot;
+ 30 #include &quot;oops/oop.inline.hpp&quot;
+ 31 #include &quot;runtime/handles.inline.hpp&quot;
+ 32 #include &quot;runtime/interfaceSupport.inline.hpp&quot;
+ 33 #include &quot;runtime/jniHandles.inline.hpp&quot;
+ 34 #include &quot;runtime/thread.hpp&quot;
+ 35 
+ 36 // Constructors
+ 37 
+ 38 DebugInfoWriteStream::DebugInfoWriteStream(DebugInformationRecorder* recorder, int initial_size)
+ 39 : CompressedWriteStream(initial_size) {
+ 40   _recorder = recorder;
+ 41 }
+ 42 
+ 43 // Serializing oops
+ 44 
+ 45 void DebugInfoWriteStream::write_handle(jobject h) {
+ 46   write_int(recorder()-&gt;oop_recorder()-&gt;find_index(h));
+ 47 }
+ 48 
+ 49 void DebugInfoWriteStream::write_metadata(Metadata* h) {
+ 50   write_int(recorder()-&gt;oop_recorder()-&gt;find_index(h));
+ 51 }
+ 52 
+ 53 oop DebugInfoReadStream::read_oop() {
+ 54   nmethod* nm = const_cast&lt;CompiledMethod*&gt;(code())-&gt;as_nmethod_or_null();
+ 55   oop o;
+ 56   if (nm != NULL) {
+ 57     // Despite these oops being found inside nmethods that are on-stack,
+ 58     // they are not kept alive by all GCs (e.g. G1 and Shenandoah).
+ 59     o = nm-&gt;oop_at_phantom(read_int());
+ 60   } else {
+ 61     o = code()-&gt;oop_at(read_int());
+ 62   }
+ 63   assert(oopDesc::is_oop_or_null(o), &quot;oop only&quot;);
+ 64   return o;
+ 65 }
+ 66 
+<a name="1" id="anc1"></a><span class="line-modified"> 67 ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {</span>
+
+
+
+
+
+
+ 68   int id = read_int();
+ 69 #ifdef ASSERT
+ 70   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 71   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+ 72     assert(_obj_pool-&gt;at(i)-&gt;as_ObjectValue()-&gt;id() != id, &quot;should not be read twice&quot;);
+ 73   }
+ 74 #endif
+<a name="2" id="anc2"></a><span class="line-modified"> 75   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);</span>
+
+
+
+
+
+
+
+
+ 76   // Cache the object since an object field could reference it.
+ 77   _obj_pool-&gt;push(result);
+ 78   result-&gt;read_object(this);
+ 79   return result;
+ 80 }
+ 81 
+ 82 ScopeValue* DebugInfoReadStream::get_cached_object() {
+ 83   int id = read_int();
+ 84   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 85   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+ 86     ObjectValue* ov = _obj_pool-&gt;at(i)-&gt;as_ObjectValue();
+ 87     if (ov-&gt;id() == id) {
+ 88       return ov;
+ 89     }
+ 90   }
+ 91   ShouldNotReachHere();
+ 92   return NULL;
+ 93 }
+ 94 
+ 95 // Serializing scope values
+ 96 
+<a name="3" id="anc3"></a><span class="line-removed"> 97 enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,</span>
+<span class="line-removed"> 98                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,</span>
+<span class="line-removed"> 99                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,</span>
+<span class="line-removed">100                           AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8 };</span>
+<span class="line-removed">101 </span>
+102 ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+103   ScopeValue* result = NULL;
+104   switch(stream-&gt;read_int()) {
+105    case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+106    case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+107    case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+108    case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+109    case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+<a name="4" id="anc4"></a><span class="line-modified">110    case OBJECT_CODE:          result = stream-&gt;read_object_value(false /*is_auto_box*/); break;</span>
+<span class="line-modified">111    case AUTO_BOX_OBJECT_CODE: result = stream-&gt;read_object_value(true /*is_auto_box*/);  break;</span>
+
+112    case OBJECT_ID_CODE:       result = stream-&gt;get_cached_object();                      break;
+113    case MARKER_CODE:          result = new MarkerValue();                                break;
+114    default: ShouldNotReachHere();
+115   }
+116   return result;
+117 }
+118 
+119 // LocationValue
+120 
+121 LocationValue::LocationValue(DebugInfoReadStream* stream) {
+122   _location = Location(stream);
+123 }
+124 
+125 void LocationValue::write_on(DebugInfoWriteStream* stream) {
+126   stream-&gt;write_int(LOCATION_CODE);
+127   location().write_on(stream);
+128 }
+129 
+130 void LocationValue::print_on(outputStream* st) const {
+131   location().print_on(st);
+132 }
+133 
+134 // MarkerValue
+135 
+136 void MarkerValue::write_on(DebugInfoWriteStream* stream) {
+137   stream-&gt;write_int(MARKER_CODE);
+138 }
+139 
+140 void MarkerValue::print_on(outputStream* st) const {
+141     st-&gt;print(&quot;marker&quot;);
+142 }
+143 
+144 // ObjectValue
+145 
+146 void ObjectValue::set_value(oop value) {
+147   _value = Handle(Thread::current(), value);
+148 }
+149 
+150 void ObjectValue::read_object(DebugInfoReadStream* stream) {
+151   _klass = read_from(stream);
+152   assert(_klass-&gt;is_constant_oop(), &quot;should be constant java mirror oop&quot;);
+153   int length = stream-&gt;read_int();
+154   for (int i = 0; i &lt; length; i++) {
+155     ScopeValue* val = read_from(stream);
+156     _field_values.append(val);
+157   }
+158 }
+159 
+160 void ObjectValue::write_on(DebugInfoWriteStream* stream) {
+161   if (_visited) {
+162     stream-&gt;write_int(OBJECT_ID_CODE);
+163     stream-&gt;write_int(_id);
+164   } else {
+165     _visited = true;
+166     stream-&gt;write_int(is_auto_box() ? AUTO_BOX_OBJECT_CODE : OBJECT_CODE);
+167     stream-&gt;write_int(_id);
+168     _klass-&gt;write_on(stream);
+169     int length = _field_values.length();
+170     stream-&gt;write_int(length);
+171     for (int i = 0; i &lt; length; i++) {
+172       _field_values.at(i)-&gt;write_on(stream);
+173     }
+174   }
+175 }
+176 
+177 void ObjectValue::print_on(outputStream* st) const {
+178   st-&gt;print(&quot;%s[%d]&quot;, is_auto_box() ? &quot;box_obj&quot; : &quot;obj&quot;, _id);
+179 }
+180 
+181 void ObjectValue::print_fields_on(outputStream* st) const {
+182 #ifndef PRODUCT
+183   if (_field_values.length() &gt; 0) {
+184     _field_values.at(0)-&gt;print_on(st);
+185   }
+186   for (int i = 1; i &lt; _field_values.length(); i++) {
+187     st-&gt;print(&quot;, &quot;);
+188     _field_values.at(i)-&gt;print_on(st);
+189   }
+190 #endif
+191 }
+192 
+<a name="5" id="anc5"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+193 // ConstantIntValue
+194 
+195 ConstantIntValue::ConstantIntValue(DebugInfoReadStream* stream) {
+196   _value = stream-&gt;read_signed_int();
+197 }
+198 
+199 void ConstantIntValue::write_on(DebugInfoWriteStream* stream) {
+200   stream-&gt;write_int(CONSTANT_INT_CODE);
+201   stream-&gt;write_signed_int(value());
+202 }
+203 
+204 void ConstantIntValue::print_on(outputStream* st) const {
+205   st-&gt;print(&quot;%d&quot;, value());
+206 }
+207 
+208 // ConstantLongValue
+209 
+210 ConstantLongValue::ConstantLongValue(DebugInfoReadStream* stream) {
+211   _value = stream-&gt;read_long();
+212 }
+213 
+214 void ConstantLongValue::write_on(DebugInfoWriteStream* stream) {
+215   stream-&gt;write_int(CONSTANT_LONG_CODE);
+216   stream-&gt;write_long(value());
+217 }
+218 
+219 void ConstantLongValue::print_on(outputStream* st) const {
+220   st-&gt;print(JLONG_FORMAT, value());
+221 }
+222 
+223 // ConstantDoubleValue
+224 
+225 ConstantDoubleValue::ConstantDoubleValue(DebugInfoReadStream* stream) {
+226   _value = stream-&gt;read_double();
+227 }
+228 
+229 void ConstantDoubleValue::write_on(DebugInfoWriteStream* stream) {
+230   stream-&gt;write_int(CONSTANT_DOUBLE_CODE);
+231   stream-&gt;write_double(value());
+232 }
+233 
+234 void ConstantDoubleValue::print_on(outputStream* st) const {
+235   st-&gt;print(&quot;%f&quot;, value());
+236 }
+237 
+238 // ConstantOopWriteValue
+239 
+240 void ConstantOopWriteValue::write_on(DebugInfoWriteStream* stream) {
+241 #ifdef ASSERT
+242   {
+243     // cannot use ThreadInVMfromNative here since in case of JVMCI compiler,
+244     // thread is already in VM state.
+245     ThreadInVMfromUnknown tiv;
+246     assert(JNIHandles::resolve(value()) == NULL ||
+247            Universe::heap()-&gt;is_in(JNIHandles::resolve(value())),
+248            &quot;Should be in heap&quot;);
+249  }
+250 #endif
+251   stream-&gt;write_int(CONSTANT_OOP_CODE);
+252   stream-&gt;write_handle(value());
+253 }
+254 
+255 void ConstantOopWriteValue::print_on(outputStream* st) const {
+256   // using ThreadInVMfromUnknown here since in case of JVMCI compiler,
+257   // thread is already in VM state.
+258   ThreadInVMfromUnknown tiv;
+259   JNIHandles::resolve(value())-&gt;print_value_on(st);
+260 }
+261 
+262 
+263 // ConstantOopReadValue
+264 
+265 ConstantOopReadValue::ConstantOopReadValue(DebugInfoReadStream* stream) {
+266   _value = Handle(Thread::current(), stream-&gt;read_oop());
+267   assert(_value() == NULL ||
+268          Universe::heap()-&gt;is_in(_value()), &quot;Should be in heap&quot;);
+269 }
+270 
+271 void ConstantOopReadValue::write_on(DebugInfoWriteStream* stream) {
+272   ShouldNotReachHere();
+273 }
+274 
+275 void ConstantOopReadValue::print_on(outputStream* st) const {
+276   if (value()() != NULL) {
+277     value()()-&gt;print_value_on(st);
+278   } else {
+279     st-&gt;print_cr(&quot;NULL&quot;);
+280   }
+281 }
+282 
+283 
+284 // MonitorValue
+285 
+286 MonitorValue::MonitorValue(ScopeValue* owner, Location basic_lock, bool eliminated) {
+287   _owner       = owner;
+288   _basic_lock  = basic_lock;
+289   _eliminated  = eliminated;
+290 }
+291 
+292 MonitorValue::MonitorValue(DebugInfoReadStream* stream) {
+293   _basic_lock  = Location(stream);
+294   _owner       = ScopeValue::read_from(stream);
+295   _eliminated  = (stream-&gt;read_bool() != 0);
+296 }
+297 
+298 void MonitorValue::write_on(DebugInfoWriteStream* stream) {
+299   _basic_lock.write_on(stream);
+300   _owner-&gt;write_on(stream);
+301   stream-&gt;write_bool(_eliminated);
+302 }
+303 
+304 #ifndef PRODUCT
+305 void MonitorValue::print_on(outputStream* st) const {
+306   st-&gt;print(&quot;monitor{&quot;);
+307   owner()-&gt;print_on(st);
+308   st-&gt;print(&quot;,&quot;);
+309   basic_lock().print_on(st);
+310   st-&gt;print(&quot;}&quot;);
+311   if (_eliminated) {
+312     st-&gt;print(&quot; (eliminated)&quot;);
+313   }
+314 }
+315 #endif
+<a name="6" id="anc6"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="6" type="hidden" />
+</body>
+</html>

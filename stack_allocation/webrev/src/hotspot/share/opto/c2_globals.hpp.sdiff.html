@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/c2_globals.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="buildOopMap.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/c2_globals.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+517   product(double, EscapeAnalysisTimeout, 20. DEBUG_ONLY(+40.),              \
+518           &quot;Abort EA when it reaches time limit (in sec)&quot;)                   \
+519           range(0, DBL_MAX)                                                 \
+520                                                                             \
+521   develop(bool, ExitEscapeAnalysisOnTimeout, true,                          \
+522           &quot;Exit or throw assert in EA when it reaches time limit&quot;)          \
+523                                                                             \
+524   notproduct(bool, PrintEscapeAnalysis, false,                              \
+525           &quot;Print the results of escape analysis&quot;)                           \
+526                                                                             \
+527   product(bool, EliminateAllocations, true,                                 \
+528           &quot;Use escape analysis to eliminate allocations&quot;)                   \
+529                                                                             \
+530   notproduct(bool, PrintEliminateAllocations, false,                        \
+531           &quot;Print out when allocations are eliminated&quot;)                      \
+532                                                                             \
+533   product(intx, EliminateAllocationArraySizeLimit, 64,                      \
+534           &quot;Array size (number of elements) limit for scalar replacement&quot;)   \
+535           range(0, max_jint)                                                \
+536                                                                             \
+
+
+
+
+
+
+
+
+
+537   product(bool, OptimizePtrCompare, true,                                   \
+538           &quot;Use escape analysis to optimize pointers compare&quot;)               \
+539                                                                             \
+540   notproduct(bool, PrintOptimizePtrCompare, false,                          \
+541           &quot;Print information about optimized pointers compare&quot;)             \
+542                                                                             \
+543   notproduct(bool, VerifyConnectionGraph , true,                            \
+544           &quot;Verify Connection Graph construction in Escape Analysis&quot;)        \
+545                                                                             \
+546   product(bool, UseOptoBiasInlining, true,                                  \
+547           &quot;(Deprecated) Generate biased locking code in C2 ideal graph&quot;)    \
+548                                                                             \
+549   product(bool, OptimizeStringConcat, true,                                 \
+550           &quot;Optimize the construction of Strings by StringBuilder&quot;)          \
+551                                                                             \
+552   notproduct(bool, PrintOptimizeStringConcat, false,                        \
+553           &quot;Print information about transformations performed on Strings&quot;)   \
+554                                                                             \
+555   product(intx, ValueSearchLimit, 1000,                                     \
+556           &quot;Recursion limit in PhaseMacroExpand::value_from_mem_phi&quot;)        \
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+517   product(double, EscapeAnalysisTimeout, 20. DEBUG_ONLY(+40.),              \
+518           &quot;Abort EA when it reaches time limit (in sec)&quot;)                   \
+519           range(0, DBL_MAX)                                                 \
+520                                                                             \
+521   develop(bool, ExitEscapeAnalysisOnTimeout, true,                          \
+522           &quot;Exit or throw assert in EA when it reaches time limit&quot;)          \
+523                                                                             \
+524   notproduct(bool, PrintEscapeAnalysis, false,                              \
+525           &quot;Print the results of escape analysis&quot;)                           \
+526                                                                             \
+527   product(bool, EliminateAllocations, true,                                 \
+528           &quot;Use escape analysis to eliminate allocations&quot;)                   \
+529                                                                             \
+530   notproduct(bool, PrintEliminateAllocations, false,                        \
+531           &quot;Print out when allocations are eliminated&quot;)                      \
+532                                                                             \
+533   product(intx, EliminateAllocationArraySizeLimit, 64,                      \
+534           &quot;Array size (number of elements) limit for scalar replacement&quot;)   \
+535           range(0, max_jint)                                                \
+536                                                                             \
+<span class="line-added">537   experimental(bool, UseStackAllocation, false,                             \</span>
+<span class="line-added">538           &quot;Leverage stack allocation to reduce heap pressure&quot;)              \</span>
+<span class="line-added">539                                                                             \</span>
+<span class="line-added">540   experimental(bool, UseStackAllocationRuntime, false,                      \</span>
+<span class="line-added">541           &quot;Enable the stack allocation runtime code in oopmap&quot;)             \</span>
+<span class="line-added">542                                                                             \</span>
+<span class="line-added">543   notproduct(bool, PrintStackAllocation, false,                             \</span>
+<span class="line-added">544           &quot;Print stack allocation debug information&quot;)                       \</span>
+<span class="line-added">545                                                                             \</span>
+546   product(bool, OptimizePtrCompare, true,                                   \
+547           &quot;Use escape analysis to optimize pointers compare&quot;)               \
+548                                                                             \
+549   notproduct(bool, PrintOptimizePtrCompare, false,                          \
+550           &quot;Print information about optimized pointers compare&quot;)             \
+551                                                                             \
+552   notproduct(bool, VerifyConnectionGraph , true,                            \
+553           &quot;Verify Connection Graph construction in Escape Analysis&quot;)        \
+554                                                                             \
+555   product(bool, UseOptoBiasInlining, true,                                  \
+556           &quot;(Deprecated) Generate biased locking code in C2 ideal graph&quot;)    \
+557                                                                             \
+558   product(bool, OptimizeStringConcat, true,                                 \
+559           &quot;Optimize the construction of Strings by StringBuilder&quot;)          \
+560                                                                             \
+561   notproduct(bool, PrintOptimizeStringConcat, false,                        \
+562           &quot;Print information about transformations performed on Strings&quot;)   \
+563                                                                             \
+564   product(intx, ValueSearchLimit, 1000,                                     \
+565           &quot;Recursion limit in PhaseMacroExpand::value_from_mem_phi&quot;)        \
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="buildOopMap.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

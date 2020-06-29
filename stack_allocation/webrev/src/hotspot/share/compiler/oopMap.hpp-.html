@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/compiler/oopMap.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_COMPILER_OOPMAP_HPP
+ 26 #define SHARE_COMPILER_OOPMAP_HPP
+ 27 
+ 28 #include &quot;code/compressedStream.hpp&quot;
+ 29 #include &quot;code/vmreg.hpp&quot;
+ 30 #include &quot;memory/allocation.hpp&quot;
+ 31 #include &quot;oops/oopsHierarchy.hpp&quot;
+ 32 #include &quot;utilities/growableArray.hpp&quot;
+ 33 
+ 34 // Interface for generating the frame map for compiled code.  A frame map
+ 35 // describes for a specific pc whether each register and frame stack slot is:
+ 36 //   Oop         - A GC root for current frame
+ 37 //   Dead        - Dead; can be Zapped for debugging
+ 38 //   CalleeXX    - Callee saved; also describes which caller register is saved
+ 39 //   DerivedXX   - A derived oop; original oop is described.
+ 40 //
+ 41 // OopMapValue describes a single OopMap entry
+ 42 
+ 43 class frame;
+ 44 class RegisterMap;
+ 45 class OopClosure;
+ 46 
+ 47 class OopMapValue: public StackObj {
+ 48   friend class VMStructs;
+ 49 private:
+ 50   short _value;
+ 51   int value() const                                 { return _value; }
+ 52   void set_value(int value)                         { _value = value; }
+ 53   short _content_reg;
+ 54 
+ 55 public:
+ 56   // Constants
+ 57   enum { type_bits                = 2,
+ 58          register_bits            = BitsPerShort - type_bits };
+ 59 
+ 60   enum { type_shift               = 0,
+ 61          register_shift           = type_bits };
+ 62 
+ 63   enum { type_mask                = right_n_bits(type_bits),
+ 64          type_mask_in_place       = type_mask &lt;&lt; type_shift,
+ 65          register_mask            = right_n_bits(register_bits),
+ 66          register_mask_in_place   = register_mask &lt;&lt; register_shift };
+ 67 
+ 68   enum oop_types {
+ 69          oop_value,
+ 70          narrowoop_value,
+ 71          callee_saved_value,
+ 72          derived_oop_value,
+ 73          unused_value = -1          // Only used as a sentinel value
+ 74   };
+ 75 
+ 76   // Constructors
+ 77   OopMapValue () { set_value(0); set_content_reg(VMRegImpl::Bad()); }
+ 78   OopMapValue (VMReg reg, oop_types t, VMReg reg2) {
+ 79     set_reg_type(reg, t);
+ 80     set_content_reg(reg2);
+ 81   }
+ 82 
+ 83  private:
+ 84     void set_reg_type(VMReg p, oop_types t) {
+ 85     set_value((p-&gt;value() &lt;&lt; register_shift) | t);
+ 86     assert(reg() == p, &quot;sanity check&quot; );
+ 87     assert(type() == t, &quot;sanity check&quot; );
+ 88   }
+ 89 
+ 90   void set_content_reg(VMReg r) {
+ 91     if (is_callee_saved()) {
+ 92       // This can never be a stack location, so we don&#39;t need to transform it.
+ 93       assert(r-&gt;is_reg(), &quot;Trying to callee save a stack location&quot;);
+ 94     } else if (is_derived_oop()) {
+ 95       assert (r-&gt;is_valid(), &quot;must have a valid VMReg&quot;);
+ 96     } else {
+ 97       assert (!r-&gt;is_valid(), &quot;valid VMReg not allowed&quot;);
+ 98     }
+ 99     _content_reg = r-&gt;value();
+100   }
+101 
+102  public:
+103   // Archiving
+104   void write_on(CompressedWriteStream* stream) {
+105     stream-&gt;write_int(value());
+106     if(is_callee_saved() || is_derived_oop()) {
+107       stream-&gt;write_int(content_reg()-&gt;value());
+108     }
+109   }
+110 
+111   void read_from(CompressedReadStream* stream) {
+112     set_value(stream-&gt;read_int());
+113     if (is_callee_saved() || is_derived_oop()) {
+114       set_content_reg(VMRegImpl::as_VMReg(stream-&gt;read_int(), true));
+115     }
+116   }
+117 
+118   // Querying
+119   bool is_oop()               { return mask_bits(value(), type_mask_in_place) == oop_value; }
+120   bool is_narrowoop()         { return mask_bits(value(), type_mask_in_place) == narrowoop_value; }
+121   bool is_callee_saved()      { return mask_bits(value(), type_mask_in_place) == callee_saved_value; }
+122   bool is_derived_oop()       { return mask_bits(value(), type_mask_in_place) == derived_oop_value; }
+123 
+124   VMReg reg() const { return VMRegImpl::as_VMReg(mask_bits(value(), register_mask_in_place) &gt;&gt; register_shift); }
+125   oop_types type() const      { return (oop_types)mask_bits(value(), type_mask_in_place); }
+126 
+127   static bool legal_vm_reg_name(VMReg p) {
+128     return (p-&gt;value()  == (p-&gt;value() &amp; register_mask));
+129   }
+130 
+131   VMReg content_reg() const       { return VMRegImpl::as_VMReg(_content_reg, true); }
+132 
+133   // Returns offset from sp.
+134   int stack_offset() {
+135     assert(reg()-&gt;is_stack(), &quot;must be stack location&quot;);
+136     return reg()-&gt;reg2stack();
+137   }
+138 
+139   void print_on(outputStream* st) const;
+140   void print() const;
+141 };
+142 
+143 
+144 class OopMap: public ResourceObj {
+145   friend class OopMapStream;
+146   friend class VMStructs;
+147  private:
+148   int  _pc_offset; // offset in the code that this OopMap corresponds to
+149   int  _omv_count; // number of OopMapValues in the stream
+150   CompressedWriteStream* _write_stream;
+151 
+152   debug_only( OopMapValue::oop_types* _locs_used; int _locs_length;)
+153 
+154   // Accessors
+155   int omv_count() const                       { return _omv_count; }
+156   void set_omv_count(int value)               { _omv_count = value; }
+157   void increment_count()                      { _omv_count++; }
+158   CompressedWriteStream* write_stream() const { return _write_stream; }
+159   void set_write_stream(CompressedWriteStream* value) { _write_stream = value; }
+160 
+161  private:
+162   enum DeepCopyToken { _deep_copy_token };
+163   OopMap(DeepCopyToken, OopMap* source);  // used only by deep_copy
+164 
+165   void set_xxx(VMReg reg, OopMapValue::oop_types x, VMReg optional);
+166 
+167  public:
+168   OopMap(int frame_size, int arg_count);
+169 
+170   // pc-offset handling
+171   int offset() const     { return _pc_offset; }
+172   void set_offset(int o) { _pc_offset = o; }
+173   int count() const { return _omv_count; }
+174   int data_size() const  { return write_stream()-&gt;position(); }
+175   address data() const { return write_stream()-&gt;buffer(); }
+176 
+177   // Construction
+178   // frame_size units are stack-slots (4 bytes) NOT intptr_t; we can name odd
+179   // slots to hold 4-byte values like ints and floats in the LP64 build.
+180   void set_oop  ( VMReg local);
+181   void set_narrowoop(VMReg local);
+182   void set_callee_saved( VMReg local, VMReg caller_machine_register );
+183   void set_derived_oop ( VMReg local, VMReg derived_from_local_register );
+184 
+185   int heap_size() const;
+186   void copy_data_to(address addr) const;
+187   OopMap* deep_copy();
+188 
+189   bool legal_vm_reg_name(VMReg local) {
+190      return OopMapValue::legal_vm_reg_name(local);
+191   }
+192 
+193   // Printing
+194   void print_on(outputStream* st) const;
+195   void print() const;
+196   bool equals(const OopMap* other) const;
+197 };
+198 
+199 
+200 class OopMapSet : public ResourceObj {
+201   friend class VMStructs;
+202  private:
+203   GrowableArray&lt;OopMap*&gt; _list;
+204 
+205   void add(OopMap* value) { _list.append(value); }
+206 
+207  public:
+208   OopMapSet();
+209 
+210   // returns the number of OopMaps in this OopMapSet
+211   int size() const            { return _list.length(); }
+212   // returns the OopMap at a given index
+213   OopMap* at(int index) const { return _list.at(index); }
+214 
+215   // Collect OopMaps.
+216   void add_gc_map(int pc, OopMap* map);
+217 
+218   // Methods oops_do() and all_do() filter out NULL oops and
+219   // oop == CompressedOops::base() before passing oops
+220   // to closures.
+221 
+222   // Iterates through frame for a compiled method
+223   static void oops_do            (const frame* fr,
+224                                   const RegisterMap* reg_map, OopClosure* f);
+225   static void update_register_map(const frame* fr, RegisterMap *reg_map);
+226 
+227   // Iterates through frame for a compiled method for dead ones and values, too
+228   static void all_do(const frame* fr, const RegisterMap* reg_map,
+229                      OopClosure* oop_fn,
+230                      void derived_oop_fn(oop* base, oop* derived),
+231                      OopClosure* value_fn);
+232 
+233   // Printing
+234   void print_on(outputStream* st) const;
+235   void print() const;
+236 };
+237 
+238 class ImmutableOopMapBuilder;
+239 
+240 class ImmutableOopMap {
+241   friend class OopMapStream;
+242   friend class VMStructs;
+243 #ifdef ASSERT
+244   friend class ImmutableOopMapBuilder;
+245 #endif
+246 private:
+247   int _count; // contains the number of entries in this OopMap
+248 
+249   address data_addr() const { return (address) this + sizeof(ImmutableOopMap); }
+250 public:
+251   ImmutableOopMap(const OopMap* oopmap);
+252 
+253   int count() const { return _count; }
+254 #ifdef ASSERT
+255   int nr_of_bytes() const; // this is an expensive operation, only used in debug builds
+256 #endif
+257 
+258   // Printing
+259   void print_on(outputStream* st) const;
+260   void print() const;
+261 };
+262 
+263 class ImmutableOopMapSet;
+264 class ImmutableOopMap;
+265 class OopMapSet;
+266 
+267 class ImmutableOopMapPair {
+268   friend class VMStructs;
+269 private:
+270   int _pc_offset; // program counter offset from the beginning of the method
+271   int _oopmap_offset; // offset in the data in the ImmutableOopMapSet where the ImmutableOopMap is located
+272 public:
+273   ImmutableOopMapPair(int pc_offset, int oopmap_offset) : _pc_offset(pc_offset), _oopmap_offset(oopmap_offset) {
+274     assert(pc_offset &gt;= 0 &amp;&amp; oopmap_offset &gt;= 0, &quot;check&quot;);
+275   }
+276   const ImmutableOopMap* get_from(const ImmutableOopMapSet* set) const;
+277 
+278   int pc_offset() const { return _pc_offset; }
+279   int oopmap_offset() const { return _oopmap_offset; }
+280 };
+281 
+282 class ImmutableOopMapSet {
+283   friend class VMStructs;
+284 private:
+285   int _count; // nr of ImmutableOopMapPairs in the Set
+286   int _size; // nr of bytes including ImmutableOopMapSet itself
+287 
+288   address data() const { return (address) this + sizeof(*this) + sizeof(ImmutableOopMapPair) * _count; }
+289 
+290 public:
+291   ImmutableOopMapSet(const OopMapSet* oopmap_set, int size) : _count(oopmap_set-&gt;size()), _size(size) {}
+292 
+293   ImmutableOopMap* oopmap_at_offset(int offset) const {
+294     assert(offset &gt;= 0 &amp;&amp; offset &lt; _size, &quot;must be within boundaries&quot;);
+295     address addr = data() + offset;
+296     return (ImmutableOopMap*) addr;
+297   }
+298 
+299   ImmutableOopMapPair* get_pairs() const { return (ImmutableOopMapPair*) ((address) this + sizeof(*this)); }
+300 
+301   static ImmutableOopMapSet* build_from(const OopMapSet* oopmap_set);
+302 
+303   const ImmutableOopMap* find_map_at_offset(int pc_offset) const;
+304 
+305   const ImmutableOopMapPair* pair_at(int index) const { assert(index &gt;= 0 &amp;&amp; index &lt; _count, &quot;check&quot;); return &amp;get_pairs()[index]; }
+306 
+307   int count() const { return _count; }
+308   int nr_of_bytes() const { return _size; }
+309 
+310   void print_on(outputStream* st) const;
+311   void print() const;
+312 };
+313 
+314 class OopMapStream : public StackObj {
+315  private:
+316   CompressedReadStream* _stream;
+317   int _size;
+318   int _position;
+319   bool _valid_omv;
+320   OopMapValue _omv;
+321   void find_next();
+322 
+323  public:
+324   OopMapStream(OopMap* oop_map);
+325   OopMapStream(const ImmutableOopMap* oop_map);
+326   bool is_done()                        { if(!_valid_omv) { find_next(); } return !_valid_omv; }
+327   void next()                           { find_next(); }
+328   OopMapValue current()                 { return _omv; }
+329 #ifdef ASSERT
+330   int stream_position() const           { return _stream-&gt;position(); }
+331 #endif
+332 };
+333 
+334 class ImmutableOopMapBuilder {
+335 private:
+336   class Mapping;
+337 
+338 private:
+339   const OopMapSet* _set;
+340   const OopMap* _empty;
+341   const OopMap* _last;
+342   int _empty_offset;
+343   int _last_offset;
+344   int _offset;
+345   int _required;
+346   Mapping* _mapping;
+347   ImmutableOopMapSet* _new_set;
+348 
+349   /* Used for bookkeeping when building ImmutableOopMaps */
+350   class Mapping : public ResourceObj {
+351   public:
+352     enum kind_t { OOPMAP_UNKNOWN = 0, OOPMAP_NEW = 1, OOPMAP_EMPTY = 2, OOPMAP_DUPLICATE = 3 };
+353 
+354     kind_t _kind;
+355     int _offset;
+356     int _size;
+357     const OopMap* _map;
+358     const OopMap* _other;
+359 
+360     Mapping() : _kind(OOPMAP_UNKNOWN), _offset(-1), _size(-1), _map(NULL) {}
+361 
+362     void set(kind_t kind, int offset, int size, const OopMap* map = 0, const OopMap* other = 0) {
+363       _kind = kind;
+364       _offset = offset;
+365       _size = size;
+366       _map = map;
+367       _other = other;
+368     }
+369   };
+370 
+371 public:
+372   ImmutableOopMapBuilder(const OopMapSet* set);
+373 
+374   int heap_size();
+375   ImmutableOopMapSet* build();
+376   ImmutableOopMapSet* generate_into(address buffer);
+377 private:
+378   bool is_empty(const OopMap* map) const {
+379     return map-&gt;count() == 0;
+380   }
+381 
+382   bool is_last_duplicate(const OopMap* map) {
+383     if (_last != NULL &amp;&amp; _last-&gt;count() &gt; 0 &amp;&amp; _last-&gt;equals(map)) {
+384       return true;
+385     }
+386     return false;
+387   }
+388 
+389 #ifdef ASSERT
+390   void verify(address buffer, int size, const ImmutableOopMapSet* set);
+391 #endif
+392 
+393   bool has_empty() const {
+394     return _empty_offset != -1;
+395   }
+396 
+397   int size_for(const OopMap* map) const;
+398   void fill_pair(ImmutableOopMapPair* pair, const OopMap* map, int offset, const ImmutableOopMapSet* set);
+399   int fill_map(ImmutableOopMapPair* pair, const OopMap* map, int offset, const ImmutableOopMapSet* set);
+400   void fill(ImmutableOopMapSet* set, int size);
+401 };
+402 
+403 
+404 // Derived pointer support. This table keeps track of all derived points on a
+405 // stack.  It is cleared before each scavenge/GC.  During the traversal of all
+406 // oops, it is filled in with references to all locations that contains a
+407 // derived oop (assumed to be very few).  When the GC is complete, the derived
+408 // pointers are updated based on their base pointers new value and an offset.
+409 #if COMPILER2_OR_JVMCI
+410 class DerivedPointerTable : public AllStatic {
+411   friend class VMStructs;
+412  private:
+413   class Entry;
+414   static bool _active;                      // do not record pointers for verify pass etc.
+415 
+416  public:
+417   static void clear();                       // Called before scavenge/GC
+418   static void add(oop *derived, oop *base);  // Called during scavenge/GC
+419   static void update_pointers();             // Called after  scavenge/GC
+420   static bool is_empty();
+421   static bool is_active()                    { return _active; }
+422   static void set_active(bool value)         { _active = value; }
+423 };
+424 
+425 // A utility class to temporarily &quot;deactivate&quot; the DerivedPointerTable.
+426 // (Note: clients are responsible for any MT-safety issues)
+427 class DerivedPointerTableDeactivate: public StackObj {
+428  private:
+429   bool _active;
+430  public:
+431   DerivedPointerTableDeactivate() {
+432     _active = DerivedPointerTable::is_active();
+433     if (_active) {
+434       DerivedPointerTable::set_active(false);
+435     }
+436   }
+437 
+438   ~DerivedPointerTableDeactivate() {
+439     assert(!DerivedPointerTable::is_active(),
+440            &quot;Inconsistency: not MT-safe&quot;);
+441     if (_active) {
+442       DerivedPointerTable::set_active(true);
+443     }
+444   }
+445 };
+446 #endif // COMPILER2_OR_JVMCI
+447 
+448 #endif // SHARE_COMPILER_OOPMAP_HPP
+    </pre>
+  </body>
+</html>

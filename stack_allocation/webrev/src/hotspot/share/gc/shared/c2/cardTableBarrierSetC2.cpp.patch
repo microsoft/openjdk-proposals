@@ -1,0 +1,324 @@
+diff a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
+--- a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
++++ b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
+@@ -29,10 +29,11 @@
+ #include "gc/shared/c2/cardTableBarrierSetC2.hpp"
+ #include "opto/arraycopynode.hpp"
+ #include "opto/graphKit.hpp"
+ #include "opto/idealKit.hpp"
+ #include "opto/macro.hpp"
++#include "opto/rootnode.hpp"
+ #include "utilities/macros.hpp"
+ 
+ #define __ ideal.
+ 
+ Node* CardTableBarrierSetC2::byte_map_base_node(GraphKit* kit) const {
+@@ -55,12 +56,10 @@
+                                          Node* adr,
+                                          uint  adr_idx,
+                                          Node* val,
+                                          BasicType bt,
+                                          bool use_precise) const {
+-  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(BarrierSet::barrier_set());
+-  CardTable* ct = ctbs->card_table();
+   // No store check needed if we're storing a NULL or an old object
+   // (latter case is probably a string constant). The concurrent
+   // mark sweep garbage collector, however, needs to have all nonNull
+   // oop updates flagged via card-marks.
+   if (val != NULL && val->is_Con()) {
+@@ -88,10 +87,16 @@
+   // (Else it's an array (or unknown), and we want more precise card marks.)
+   assert(adr != NULL, "");
+ 
+   IdealKit ideal(kit, true);
+ 
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++
++  float likely = PROB_LIKELY_MAG(3);
++
+   // Convert the pointer to an int prior to doing math on it
+   Node* cast = __ CastPX(__ ctrl(), adr);
+ 
+   // Divide by card size
+   Node* card_offset = __ URShiftX( cast, __ ConI(CardTable::card_shift) );
+@@ -101,35 +106,48 @@
+ 
+   // Get the alias_index for raw card-mark memory
+   int adr_type = Compile::AliasIdxRaw;
+   Node*   zero = __ ConI(0); // Dirty card value
+ 
+-  if (UseCondCardMark) {
+-    if (ct->scanned_concurrently()) {
+-      kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
+-      __ sync_kit(kit);
+-    }
+-    // The classic GC reference write barrier is typically implemented
+-    // as a store into the global card mark table.  Unfortunately
+-    // unconditional stores can result in false sharing and excessive
+-    // coherence traffic as well as false transactional aborts.
+-    // UseCondCardMark enables MP "polite" conditional card mark
+-    // stores.  In theory we could relax the load from ctrl() to
+-    // no_ctrl, but that doesn't buy much latitude.
+-    Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);
+-    __ if_then(card_val, BoolTest::ne, zero);
+-  }
+-
+-  // Smash zero into card
+-  if(!ct->scanned_concurrently()) {
+-    __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);
+-  } else {
+-    // Specialized path for CM store barrier
+-    __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);
+-  }
+-
+-  if (UseCondCardMark) {
++  if (kit->C->do_stack_allocation()) {
++    // Stack allocation: cache CastP2XNode for later processing
++    state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++
++    Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++    Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++    Node* sub_off = __ SubL(cast, low_off);
++
++    __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
++
++      if (UseCondCardMark) {
++        if (ct->scanned_concurrently()) {
++          kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
++          __ sync_kit(kit);
++        }
++        // The classic GC reference write barrier is typically implemented
++        // as a store into the global card mark table.  Unfortunately
++        // unconditional stores can result in false sharing and excessive
++        // coherence traffic as well as false transactional aborts.
++        // UseCondCardMark enables MP "polite" conditional card mark
++        // stores.  In theory we could relax the load from ctrl() to
++        // no_ctrl, but that doesn't buy much latitude.
++        Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);
++        __ if_then(card_val, BoolTest::ne, zero);
++      }
++
++      // Smash zero into card
++      if(!ct->scanned_concurrently()) {
++        __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);
++      } else {
++        // Specialized path for CM store barrier
++        __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);
++      }
++
++      if (UseCondCardMark) {
++        __ end_if();
++      }
++  } if (kit->C->do_stack_allocation()) {
+     __ end_if();
+   }
+ 
+   // Final sync IdealKit and GraphKit.
+   kit->final_sync(ideal);
+@@ -166,13 +184,76 @@
+ 
+ bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {
+   return ModRefBarrierSetC2::is_gc_barrier_node(node) || node->Opcode() == Op_StoreCM;
+ }
+ 
++bool CardTableBarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN& igvn) const {
++  assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
++
++  // Must have a control node
++  if (node->in(0) == NULL) {
++    return false;
++  }
++
++  Node *addx_node = node->find_out_with(Op_AddX);
++  if (addx_node == NULL) {
++    return false;
++  }
++
++  Node *addx_out = addx_node->unique_out();
++  if (addx_out == NULL) {
++    return false;
++  }
++
++  CmpNode* cmp_node = addx_out->as_Cmp();
++  // the input to the CMPX is the card_table_top_offset constant
++  Node* cmp_node_in_2_node = cmp_node->in(2);
++  if (!cmp_node_in_2_node->is_Con()) {
++    return false;
++  }
++
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++  size_t constant = ct->byte_map_top_offset() - ct->byte_map_bottom_offset();
++
++  // Check that the input to this CMP node is the expected constant
++  const TypeX* otype = cmp_node_in_2_node->find_intptr_t_type();
++  if (otype != NULL && otype->is_con() &&
++      size_t(otype->get_con()) != constant) {
++    // Constant offset but not the card table size constant so just return
++    return false;
++  }
++
++  // we can't change the compare or the constant so create a new constant(0) and replace the variable
++  Node* cmp_node_in_1_node = cmp_node->in(1);
++  ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);
++  if (cmp_node_in_1_node->_idx == zeroConstant_node->_idx) {
++    // we can get here via different nodes - but we only want to change the input once
++    return false;
++  }
++
++  igvn.rehash_node_delayed(cmp_node);
++  int numReplaced = cmp_node->replace_edge(cmp_node_in_1_node, zeroConstant_node);
++  assert(numReplaced == 1, "Failed to replace the card_offset with Conx(0)");
++  igvn.replace_node(addx_node, igvn.C->top());
++
++  return true;
++}
++
+ void CardTableBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+   assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
+-  Node *shift = node->unique_out();
++  assert(node->outcnt() <= 2, "node->outcnt() <= 2");
++
++  // Certain loop optimisations may introduce a CastP2X node with
++  // ConvL2I in case of an AllocateArray op. Check for that case
++  // here and do not attempt to eliminate it as write barrier.
++  if (macro->C->do_stack_allocation() && !state()->is_a_barrier(static_cast<CastP2XNode*>(node))) {
++    return;
++  }
++
++  Node *shift = node->find_out_with(Op_URShiftX);
+   Node *addp = shift->unique_out();
+   for (DUIterator_Last jmin, j = addp->last_outs(jmin); j >= jmin; --j) {
+     Node *mem = addp->last_out(j);
+     if (UseCondCardMark && mem->is_Load()) {
+       assert(mem->Opcode() == Op_LoadB, "unexpected code shape");
+@@ -182,11 +263,126 @@
+       continue;
+     }
+     assert(mem->is_Store(), "store required");
+     macro->replace_node(mem, mem->in(MemNode::Memory));
+   }
++
++  if (macro->C->do_stack_allocation()) {
++    Node *addl_node = node->find_out_with(Op_AddL);
++    assert(addl_node != NULL, "stackallocation expects addl");
++
++    Node* cmp_node = addl_node->unique_out();
++    assert(cmp_node != NULL && cmp_node->is_Cmp(), "expected unique cmp node");
++
++    macro->replace_node(cmp_node, macro->makecon(TypeInt::CC_EQ));
++  }
++
++  // Stack allocation: remove this node from our cache so we don't process it later
++  state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
+ }
+ 
+ bool CardTableBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const {
+   bool is_oop = is_reference_type(type);
+   return is_oop && (!tightly_coupled_alloc || !use_ReduceInitialCardMarks());
+ }
++
++bool CardTableBarrierSetC2::expand_barriers(Compile* C, PhaseIterGVN& igvn) const {
++  // We need to process write barriers for extra checks in case we have stack allocation on
++  if (C->do_stack_allocation()) {
++    BarrierSetC2State* set_state = state();
++
++    for (int i = 0; i < set_state->enqueue_barriers_count(); i++) {
++      Node* n = set_state->enqueue_barrier(i);
++      process_barrier_node(n, igvn);
++    }
++
++    if (set_state->enqueue_barriers_count()) {
++      // this kicks in the dead code elimination we need to remove the redundant check
++      igvn.optimize();
++    }
++  }
++
++  return false;
++}
++
++Node* CardTableBarrierSetC2::step_over_gc_barrier(Node* c) const {
++  if (Compile::current()->do_stack_allocation() &&
++      !use_ReduceInitialCardMarks() &&
++      c != NULL && c->is_Region() && c->req() == 3) {
++
++    //                  [Proj] <----------- step over to here and return
++    //                    |
++    //               -----------
++    //              /           \
++    //             /             \
++    //            /             [CastP2X]
++    //            |            /
++    //            |           [AddL]
++    //            |          /
++    //            |         [CmpUL]
++    //            |        /
++    //            \      [Bool]
++    //             \    /
++    //              [If]
++    //            /     \
++    //  [IfFalse]        [IfTrue]
++    //         \        /
++    //          [Region] <---------------- c node
++
++    Node* if_bool = c->in(1);
++    assert(if_bool->is_IfTrue() || if_bool->is_IfFalse(), "Invalid gc graph pattern");
++    Node* if_node = if_bool->in(0);
++    Node* proj_node = if_node->in(0);
++    assert(proj_node->is_Proj(), "Invalid gc graph pattern");
++    return proj_node;
++  }
++  return c;
++}
++
++void CardTableBarrierSetC2::register_potential_barrier_node(Node* node) const {
++  if (node->Opcode() == Op_CastP2X) {
++    state()->add_enqueue_barrier(static_cast<CastP2XNode*>(node));
++  }
++}
++
++void CardTableBarrierSetC2::unregister_potential_barrier_node(Node* node) const {
++  if (node->Opcode() == Op_CastP2X) {
++    state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
++  }
++}
++
++BarrierSetC2State* CardTableBarrierSetC2::state() const {
++  BarrierSetC2State* ret = reinterpret_cast<BarrierSetC2State*>(Compile::current()->barrier_set_state());
++  assert(ret != NULL, "Sanity");
++  return ret;
++}
++
++void* CardTableBarrierSetC2::create_barrier_state(Arena* comp_arena) const {
++  return new(comp_arena) BarrierSetC2State(comp_arena);
++}
++
++BarrierSetC2State::BarrierSetC2State(Arena* comp_arena)
++  : _enqueue_barriers(new (comp_arena) GrowableArray<CastP2XNode*>(comp_arena, 8,  0, NULL)) {
++}
++
++int BarrierSetC2State::enqueue_barriers_count() const {
++  return _enqueue_barriers->length();
++}
++
++CastP2XNode* BarrierSetC2State::enqueue_barrier(int idx) const {
++  return _enqueue_barriers->at(idx);
++}
++
++void BarrierSetC2State::add_enqueue_barrier(CastP2XNode* n) {
++  assert(!_enqueue_barriers->contains(n), "duplicate entry in barrier list");
++  _enqueue_barriers->append(n);
++}
++
++void BarrierSetC2State::remove_enqueue_barrier(CastP2XNode* n) {
++  if (_enqueue_barriers->contains(n)) {
++    _enqueue_barriers->remove(n);
++  }
++}
++
++bool BarrierSetC2State::is_a_barrier(CastP2XNode* n) {
++  return _enqueue_barriers->contains(n);
++}

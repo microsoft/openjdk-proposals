@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/opto/idealKit.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="idealKit.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="loopnode.cpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/idealKit.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 125,10 ***</span>
+<span class="line-new-header">--- 125,14 ---</span>
+    Node* promote_to_phi(Node* n, Node* reg);// Promote &quot;n&quot; to a phi on region &quot;reg&quot;
+    bool was_promoted_to_phi(Node* n, Node* reg) {
+      return (n-&gt;is_Phi() &amp;&amp; n-&gt;in(0) == reg);
+    }
+    void declare(IdealVariable* v) { v-&gt;set_id(_var_ct++); }
+<span class="line-added">+ </span>
+<span class="line-added">+   void if_then_common(Node* bol, float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,</span>
+<span class="line-added">+                       bool push_new_state = true);</span>
+<span class="line-added">+ </span>
+    // This declares the position where vars are kept in the cvstate
+    // For some degree of consistency we use the TypeFunc enum to
+    // soak up spots in the inputs even though we only use early Control
+    // and Memory slots. (So far.)
+    static const uint first_var; // = TypeFunc::Parms + 1;
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 161,10 ***</span>
+<span class="line-new-header">--- 165,13 ---</span>
+    Node* value(IdealVariable&amp; v)         { return _cvstate-&gt;in(first_var + v.id()); }
+    void dead(IdealVariable&amp; v)           { set(v, (Node*)NULL); }
+    void if_then(Node* left, BoolTest::mask relop, Node* right,
+                 float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+                 bool push_new_state = true);
+<span class="line-added">+   void uif_then(Node* left, BoolTest::mask relop, Node* right,</span>
+<span class="line-added">+                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,</span>
+<span class="line-added">+                bool push_new_state = true);</span>
+    void else_();
+    void end_if();
+    void loop(GraphKit* gkit, int nargs, IdealVariable&amp; iv, Node* init, BoolTest::mask cmp, Node* limit,
+              float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+    void end_loop();
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 180,20 ***</span>
+<span class="line-new-header">--- 187,23 ---</span>
+    Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+    Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+  
+    Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+    Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
+<span class="line-added">+   Node* SubL(Node* l, Node* r) { return transform(new SubLNode(l, r)); }</span>
+    Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+    Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+    Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+    Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+    Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
+<span class="line-added">+   Node* CmpU(Node* l, Node* r) { return transform(new CmpUNode(l, r)); }</span>
+    Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+    void  increment(IdealVariable&amp; v, Node* j)  { set(v, AddI(value(v), j)); }
+    void  decrement(IdealVariable&amp; v, Node* j)  { set(v, SubI(value(v), j)); }
+  
+    Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
+<span class="line-added">+   Node* CmpUL(Node* l, Node* r) { return transform(new CmpULNode(l, r)); }</span>
+  
+    // TLS
+    Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+  
+    // Pointers
+</pre>
+<center><a href="idealKit.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="loopnode.cpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

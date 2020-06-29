@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/opto/compile.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+   1 /*
+   2  * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+   3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+   4  *
+   5  * This code is free software; you can redistribute it and/or modify it
+   6  * under the terms of the GNU General Public License version 2 only, as
+   7  * published by the Free Software Foundation.
+   8  *
+   9  * This code is distributed in the hope that it will be useful, but WITHOUT
+  10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  12  * version 2 for more details (a copy is included in the LICENSE file that
+  13  * accompanied this code).
+  14  *
+  15  * You should have received a copy of the GNU General Public License version
+  16  * 2 along with this work; if not, write to the Free Software Foundation,
+  17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  18  *
+  19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  20  * or visit www.oracle.com if you need additional information or have any
+  21  * questions.
+  22  *
+  23  */
+  24 
+  25 #ifndef SHARE_OPTO_COMPILE_HPP
+  26 #define SHARE_OPTO_COMPILE_HPP
+  27 
+  28 #include &quot;asm/codeBuffer.hpp&quot;
+  29 #include &quot;ci/compilerInterface.hpp&quot;
+  30 #include &quot;code/debugInfoRec.hpp&quot;
+  31 #include &quot;compiler/compilerOracle.hpp&quot;
+  32 #include &quot;compiler/compileBroker.hpp&quot;
+  33 #include &quot;compiler/compilerEvent.hpp&quot;
+  34 #include &quot;libadt/dict.hpp&quot;
+  35 #include &quot;libadt/vectset.hpp&quot;
+  36 #include &quot;memory/resourceArea.hpp&quot;
+  37 #include &quot;oops/methodData.hpp&quot;
+  38 #include &quot;opto/idealGraphPrinter.hpp&quot;
+  39 #include &quot;opto/phasetype.hpp&quot;
+  40 #include &quot;opto/phase.hpp&quot;
+  41 #include &quot;opto/regmask.hpp&quot;
+  42 #include &quot;runtime/deoptimization.hpp&quot;
+  43 #include &quot;runtime/timerTrace.hpp&quot;
+  44 #include &quot;runtime/vmThread.hpp&quot;
+  45 #include &quot;utilities/ticks.hpp&quot;
+  46 
+  47 class AddPNode;
+  48 class Block;
+  49 class Bundle;
+  50 class CallGenerator;
+  51 class CloneMap;
+  52 class ConnectionGraph;
+  53 class IdealGraphPrinter;
+  54 class InlineTree;
+  55 class Int_Array;
+  56 class Matcher;
+  57 class MachConstantNode;
+  58 class MachConstantBaseNode;
+  59 class MachNode;
+  60 class MachOper;
+  61 class MachSafePointNode;
+  62 class Node;
+  63 class Node_Array;
+  64 class Node_Notes;
+  65 class NodeCloneInfo;
+  66 class OptoReg;
+  67 class PhaseCFG;
+  68 class PhaseGVN;
+  69 class PhaseIterGVN;
+  70 class PhaseRegAlloc;
+  71 class PhaseCCP;
+  72 class PhaseCCP_DCE;
+  73 class PhaseOutput;
+  74 class RootNode;
+  75 class relocInfo;
+  76 class Scope;
+  77 class StartNode;
+  78 class SafePointNode;
+  79 class JVMState;
+  80 class Type;
+  81 class TypeData;
+  82 class TypeInt;
+  83 class TypePtr;
+  84 class TypeOopPtr;
+  85 class TypeFunc;
+  86 class TypeVect;
+  87 class Unique_Node_List;
+  88 class nmethod;
+  89 class WarmCallInfo;
+  90 class Node_Stack;
+  91 struct Final_Reshape_Counts;
+  92 
+  93 enum LoopOptsMode {
+  94   LoopOptsDefault,
+  95   LoopOptsNone,
+  96   LoopOptsMaxUnroll,
+  97   LoopOptsShenandoahExpand,
+  98   LoopOptsShenandoahPostExpand,
+  99   LoopOptsSkipSplitIf,
+ 100   LoopOptsVerify
+ 101 };
+ 102 
+ 103 typedef unsigned int node_idx_t;
+ 104 class NodeCloneInfo {
+ 105  private:
+ 106   uint64_t _idx_clone_orig;
+ 107  public:
+ 108 
+ 109   void set_idx(node_idx_t idx) {
+ 110     _idx_clone_orig = (_idx_clone_orig &amp; CONST64(0xFFFFFFFF00000000)) | idx;
+ 111   }
+ 112   node_idx_t idx() const { return (node_idx_t)(_idx_clone_orig &amp; 0xFFFFFFFF); }
+ 113 
+ 114   void set_gen(int generation) {
+ 115     uint64_t g = (uint64_t)generation &lt;&lt; 32;
+ 116     _idx_clone_orig = (_idx_clone_orig &amp; 0xFFFFFFFF) | g;
+ 117   }
+ 118   int gen() const { return (int)(_idx_clone_orig &gt;&gt; 32); }
+ 119 
+ 120   void set(uint64_t x) { _idx_clone_orig = x; }
+ 121   void set(node_idx_t x, int g) { set_idx(x); set_gen(g); }
+ 122   uint64_t get() const { return _idx_clone_orig; }
+ 123 
+ 124   NodeCloneInfo(uint64_t idx_clone_orig) : _idx_clone_orig(idx_clone_orig) {}
+ 125   NodeCloneInfo(node_idx_t x, int g) : _idx_clone_orig(0) { set(x, g); }
+ 126 
+ 127   void dump() const;
+ 128 };
+ 129 
+ 130 class CloneMap {
+ 131   friend class Compile;
+ 132  private:
+ 133   bool      _debug;
+ 134   Dict*     _dict;
+ 135   int       _clone_idx;   // current cloning iteration/generation in loop unroll
+ 136  public:
+ 137   void*     _2p(node_idx_t key)   const          { return (void*)(intptr_t)key; } // 2 conversion functions to make gcc happy
+ 138   node_idx_t _2_node_idx_t(const void* k) const  { return (node_idx_t)(intptr_t)k; }
+ 139   Dict*     dict()                const          { return _dict; }
+ 140   void insert(node_idx_t key, uint64_t val)      { assert(_dict-&gt;operator[](_2p(key)) == NULL, &quot;key existed&quot;); _dict-&gt;Insert(_2p(key), (void*)val); }
+ 141   void insert(node_idx_t key, NodeCloneInfo&amp; ci) { insert(key, ci.get()); }
+ 142   void remove(node_idx_t key)                    { _dict-&gt;Delete(_2p(key)); }
+ 143   uint64_t value(node_idx_t key)  const          { return (uint64_t)_dict-&gt;operator[](_2p(key)); }
+ 144   node_idx_t idx(node_idx_t key)  const          { return NodeCloneInfo(value(key)).idx(); }
+ 145   int gen(node_idx_t key)         const          { return NodeCloneInfo(value(key)).gen(); }
+ 146   int gen(const void* k)          const          { return gen(_2_node_idx_t(k)); }
+ 147   int max_gen()                   const;
+ 148   void clone(Node* old, Node* nnn, int gen);
+ 149   void verify_insert_and_clone(Node* old, Node* nnn, int gen);
+ 150   void dump(node_idx_t key)       const;
+ 151 
+ 152   int  clone_idx() const                         { return _clone_idx; }
+ 153   void set_clone_idx(int x)                      { _clone_idx = x; }
+ 154   bool is_debug()                 const          { return _debug; }
+ 155   void set_debug(bool debug)                     { _debug = debug; }
+ 156   static const char* debug_option_name;
+ 157 
+ 158   bool same_idx(node_idx_t k1, node_idx_t k2)  const { return idx(k1) == idx(k2); }
+ 159   bool same_gen(node_idx_t k1, node_idx_t k2)  const { return gen(k1) == gen(k2); }
+ 160 };
+ 161 
+ 162 //------------------------------Compile----------------------------------------
+ 163 // This class defines a top-level Compiler invocation.
+ 164 
+ 165 class Compile : public Phase {
+ 166   friend class VMStructs;
+ 167 
+ 168  public:
+ 169   // Fixed alias indexes.  (See also MergeMemNode.)
+ 170   enum {
+ 171     AliasIdxTop = 1,  // pseudo-index, aliases to nothing (used as sentinel value)
+ 172     AliasIdxBot = 2,  // pseudo-index, aliases to everything
+ 173     AliasIdxRaw = 3   // hard-wired index for TypeRawPtr::BOTTOM
+ 174   };
+ 175 
+ 176   // Variant of TraceTime(NULL, &amp;_t_accumulator, CITime);
+ 177   // Integrated with logging.  If logging is turned on, and CITimeVerbose is true,
+ 178   // then brackets are put into the log, with time stamps and node counts.
+ 179   // (The time collection itself is always conditionalized on CITime.)
+ 180   class TracePhase : public TraceTime {
+ 181    private:
+ 182     Compile*    C;
+ 183     CompileLog* _log;
+ 184     const char* _phase_name;
+ 185     bool _dolog;
+ 186    public:
+ 187     TracePhase(const char* name, elapsedTimer* accumulator);
+ 188     ~TracePhase();
+ 189   };
+ 190 
+ 191   // Information per category of alias (memory slice)
+ 192   class AliasType {
+ 193    private:
+ 194     friend class Compile;
+ 195 
+ 196     int             _index;         // unique index, used with MergeMemNode
+ 197     const TypePtr*  _adr_type;      // normalized address type
+ 198     ciField*        _field;         // relevant instance field, or null if none
+ 199     const Type*     _element;       // relevant array element type, or null if none
+ 200     bool            _is_rewritable; // false if the memory is write-once only
+ 201     int             _general_index; // if this is type is an instance, the general
+ 202                                     // type that this is an instance of
+ 203 
+ 204     void Init(int i, const TypePtr* at);
+ 205 
+ 206    public:
+ 207     int             index()         const { return _index; }
+ 208     const TypePtr*  adr_type()      const { return _adr_type; }
+ 209     ciField*        field()         const { return _field; }
+ 210     const Type*     element()       const { return _element; }
+ 211     bool            is_rewritable() const { return _is_rewritable; }
+ 212     bool            is_volatile()   const { return (_field ? _field-&gt;is_volatile() : false); }
+ 213     int             general_index() const { return (_general_index != 0) ? _general_index : _index; }
+ 214 
+ 215     void set_rewritable(bool z) { _is_rewritable = z; }
+ 216     void set_field(ciField* f) {
+ 217       assert(!_field,&quot;&quot;);
+ 218       _field = f;
+ 219       if (f-&gt;is_final() || f-&gt;is_stable()) {
+ 220         // In the case of @Stable, multiple writes are possible but may be assumed to be no-ops.
+ 221         _is_rewritable = false;
+ 222       }
+ 223     }
+ 224     void set_element(const Type* e) {
+ 225       assert(_element == NULL, &quot;&quot;);
+ 226       _element = e;
+ 227     }
+ 228 
+ 229     BasicType basic_type() const;
+ 230 
+ 231     void print_on(outputStream* st) PRODUCT_RETURN;
+ 232   };
+ 233 
+ 234   enum {
+ 235     logAliasCacheSize = 6,
+ 236     AliasCacheSize = (1&lt;&lt;logAliasCacheSize)
+ 237   };
+ 238   struct AliasCacheEntry { const TypePtr* _adr_type; int _index; };  // simple duple type
+ 239   enum {
+ 240     trapHistLength = MethodData::_trap_hist_limit
+ 241   };
+ 242 
+ 243  private:
+ 244   // Fixed parameters to this compilation.
+ 245   const int             _compile_id;
+ 246   const bool            _save_argument_registers; // save/restore arg regs for trampolines
+ 247   const bool            _subsume_loads;         // Load can be matched as part of a larger op.
+ 248   const bool            _do_escape_analysis;    // Do escape analysis.
+ 249   const bool            _eliminate_boxing;      // Do boxing elimination.
+ 250   ciMethod*             _method;                // The method being compiled.
+ 251   int                   _entry_bci;             // entry bci for osr methods.
+ 252   const TypeFunc*       _tf;                    // My kind of signature
+ 253   InlineTree*           _ilt;                   // Ditto (temporary).
+ 254   address               _stub_function;         // VM entry for stub being compiled, or NULL
+ 255   const char*           _stub_name;             // Name of stub or adapter being compiled, or NULL
+ 256   address               _stub_entry_point;      // Compile code entry for generated stub, or NULL
+ 257 
+ 258   // Control of this compilation.
+ 259   int                   _max_inline_size;       // Max inline size for this compilation
+ 260   int                   _freq_inline_size;      // Max hot method inline size for this compilation
+ 261   int                   _fixed_slots;           // count of frame slots not allocated by the register
+ 262                                                 // allocator i.e. locks, original deopt pc, etc.
+ 263   uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+ 264 
+ 265   int                   _major_progress;        // Count of something big happening
+ 266   bool                  _inlining_progress;     // progress doing incremental inlining?
+ 267   bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+ 268   bool                  _do_cleanup;            // Cleanup is needed before proceeding with incremental inlining
+ 269   bool                  _has_loops;             // True if the method _may_ have some loops
+ 270   bool                  _has_split_ifs;         // True if the method _may_ have some split-if
+ 271   bool                  _has_unsafe_access;     // True if the method _may_ produce faults in unsafe loads or stores.
+ 272   bool                  _has_stringbuilder;     // True StringBuffers or StringBuilders are allocated
+ 273   bool                  _has_boxed_value;       // True if a boxed object is allocated
+ 274   bool                  _has_reserved_stack_access; // True if the method or an inlined method is annotated with ReservedStackAccess
+ 275   uint                  _max_vector_size;       // Maximum size of generated vectors
+ 276   bool                  _clear_upper_avx;       // Clear upper bits of ymm registers using vzeroupper
+ 277   uint                  _trap_hist[trapHistLength];  // Cumulative traps
+ 278   bool                  _trap_can_recompile;    // Have we emitted a recompiling trap?
+ 279   uint                  _decompile_count;       // Cumulative decompilation counts.
+ 280   bool                  _do_inlining;           // True if we intend to do inlining
+ 281   bool                  _do_scheduling;         // True if we intend to do scheduling
+ 282   bool                  _do_freq_based_layout;  // True if we intend to do frequency based block layout
+ 283   bool                  _do_count_invocations;  // True if we generate code to count invocations
+ 284   bool                  _do_method_data_update; // True if we generate code to update MethodData*s
+ 285   bool                  _do_vector_loop;        // True if allowed to execute loop in parallel iterations
+ 286   bool                  _use_cmove;             // True if CMove should be used without profitability analysis
+ 287   bool                  _age_code;              // True if we need to profile code age (decrement the aging counter)
+ 288   int                   _AliasLevel;            // Locally-adjusted version of AliasLevel flag.
+ 289   bool                  _print_assembly;        // True if we should dump assembly code for this compilation
+ 290   bool                  _print_inlining;        // True if we should print inlining for this compilation
+ 291   bool                  _print_intrinsics;      // True if we should print intrinsics for this compilation
+ 292 #ifndef PRODUCT
+ 293   bool                  _trace_opto_output;
+ 294   bool                  _print_ideal;
+ 295   bool                  _parsed_irreducible_loop; // True if ciTypeFlow detected irreducible loops during parsing
+ 296 #endif
+ 297   bool                  _has_irreducible_loop;  // Found irreducible loops
+ 298   // JSR 292
+ 299   bool                  _has_method_handle_invokes; // True if this method has MethodHandle invokes.
+ 300   RTMState              _rtm_state;             // State of Restricted Transactional Memory usage
+ 301   int                   _loop_opts_cnt;         // loop opts round
+ 302   bool                  _clinit_barrier_on_entry; // True if clinit barrier is needed on nmethod entry
+ 303 
+ 304   // Compilation environment.
+ 305   Arena                 _comp_arena;            // Arena with lifetime equivalent to Compile
+ 306   void*                 _barrier_set_state;     // Potential GC barrier state for Compile
+ 307   ciEnv*                _env;                   // CI interface
+ 308   DirectiveSet*         _directive;             // Compiler directive
+ 309   CompileLog*           _log;                   // from CompilerThread
+ 310   const char*           _failure_reason;        // for record_failure/failing pattern
+ 311   GrowableArray&lt;CallGenerator*&gt;* _intrinsics;   // List of intrinsics.
+ 312   GrowableArray&lt;Node*&gt;* _macro_nodes;           // List of nodes which need to be expanded before matching.
+ 313   GrowableArray&lt;Node*&gt;* _predicate_opaqs;       // List of Opaque1 nodes for the loop predicates.
+ 314   GrowableArray&lt;Node*&gt;* _expensive_nodes;       // List of nodes that are expensive to compute and that we&#39;d better not let the GVN freely common
+ 315   GrowableArray&lt;Node*&gt;* _range_check_casts;     // List of CastII nodes with a range check dependency
+ 316   GrowableArray&lt;Node*&gt;* _opaque4_nodes;         // List of Opaque4 nodes that have a default value
+ 317   ConnectionGraph*      _congraph;
+ 318 #ifndef PRODUCT
+ 319   IdealGraphPrinter*    _printer;
+ 320   static IdealGraphPrinter* _debug_file_printer;
+ 321   static IdealGraphPrinter* _debug_network_printer;
+ 322 #endif
+ 323 
+ 324 
+ 325   // Node management
+ 326   uint                  _unique;                // Counter for unique Node indices
+ 327   VectorSet             _dead_node_list;        // Set of dead nodes
+ 328   uint                  _dead_node_count;       // Number of dead nodes; VectorSet::Size() is O(N).
+ 329                                                 // So use this to keep count and make the call O(1).
+ 330   DEBUG_ONLY( Unique_Node_List* _modified_nodes; )  // List of nodes which inputs were modified
+ 331 
+ 332   debug_only(static int _debug_idx;)            // Monotonic counter (not reset), use -XX:BreakAtNode=&lt;idx&gt;
+ 333   Arena                 _node_arena;            // Arena for new-space Nodes
+ 334   Arena                 _old_arena;             // Arena for old-space Nodes, lifetime during xform
+ 335   RootNode*             _root;                  // Unique root of compilation, or NULL after bail-out.
+ 336   Node*                 _top;                   // Unique top node.  (Reset by various phases.)
+ 337 
+ 338   Node*                 _immutable_memory;      // Initial memory state
+ 339 
+ 340   Node*                 _recent_alloc_obj;
+ 341   Node*                 _recent_alloc_ctl;
+ 342 
+ 343   // Constant table
+ 344   MachConstantBaseNode* _mach_constant_base_node;  // Constant table base node singleton.
+ 345 
+ 346 
+ 347   // Blocked array of debugging and profiling information,
+ 348   // tracked per node.
+ 349   enum { _log2_node_notes_block_size = 8,
+ 350          _node_notes_block_size = (1&lt;&lt;_log2_node_notes_block_size)
+ 351   };
+ 352   GrowableArray&lt;Node_Notes*&gt;* _node_note_array;
+ 353   Node_Notes*           _default_node_notes;  // default notes for new nodes
+ 354 
+ 355   // After parsing and every bulk phase we hang onto the Root instruction.
+ 356   // The RootNode instruction is where the whole program begins.  It produces
+ 357   // the initial Control and BOTTOM for everybody else.
+ 358 
+ 359   // Type management
+ 360   Arena                 _Compile_types;         // Arena for all types
+ 361   Arena*                _type_arena;            // Alias for _Compile_types except in Initialize_shared()
+ 362   Dict*                 _type_dict;             // Intern table
+ 363   CloneMap              _clone_map;             // used for recording history of cloned nodes
+ 364   size_t                _type_last_size;        // Last allocation size (see Type::operator new/delete)
+ 365   ciMethod*             _last_tf_m;             // Cache for
+ 366   const TypeFunc*       _last_tf;               //  TypeFunc::make
+ 367   AliasType**           _alias_types;           // List of alias types seen so far.
+ 368   int                   _num_alias_types;       // Logical length of _alias_types
+ 369   int                   _max_alias_types;       // Physical length of _alias_types
+ 370   AliasCacheEntry       _alias_cache[AliasCacheSize]; // Gets aliases w/o data structure walking
+ 371 
+ 372   // Parsing, optimization
+ 373   PhaseGVN*             _initial_gvn;           // Results of parse-time PhaseGVN
+ 374   Unique_Node_List*     _for_igvn;              // Initial work-list for next round of Iterative GVN
+ 375   WarmCallInfo*         _warm_calls;            // Sorted work-list for heat-based inlining.
+ 376 
+ 377   GrowableArray&lt;CallGenerator*&gt; _late_inlines;        // List of CallGenerators to be revisited after
+ 378                                                       // main parsing has finished.
+ 379   GrowableArray&lt;CallGenerator*&gt; _string_late_inlines; // same but for string operations
+ 380 
+ 381   GrowableArray&lt;CallGenerator*&gt; _boxing_late_inlines; // same but for boxing operations
+ 382 
+ 383   int                           _late_inlines_pos;    // Where in the queue should the next late inlining candidate go (emulate depth first inlining)
+ 384   uint                          _number_of_mh_late_inlines; // number of method handle late inlining still pending
+ 385 
+ 386 
+ 387   // Inlining may not happen in parse order which would make
+ 388   // PrintInlining output confusing. Keep track of PrintInlining
+ 389   // pieces in order.
+ 390   class PrintInliningBuffer : public ResourceObj {
+ 391    private:
+ 392     CallGenerator* _cg;
+ 393     stringStream* _ss;
+ 394 
+ 395    public:
+ 396     PrintInliningBuffer()
+ 397       : _cg(NULL) { _ss = new stringStream(); }
+ 398 
+ 399     void freeStream() { _ss-&gt;~stringStream(); _ss = NULL; }
+ 400 
+ 401     stringStream* ss() const { return _ss; }
+ 402     CallGenerator* cg() const { return _cg; }
+ 403     void set_cg(CallGenerator* cg) { _cg = cg; }
+ 404   };
+ 405 
+ 406   stringStream* _print_inlining_stream;
+ 407   GrowableArray&lt;PrintInliningBuffer&gt;* _print_inlining_list;
+ 408   int _print_inlining_idx;
+ 409   char* _print_inlining_output;
+ 410 
+ 411   // Only keep nodes in the expensive node list that need to be optimized
+ 412   void cleanup_expensive_nodes(PhaseIterGVN &amp;igvn);
+ 413   // Use for sorting expensive nodes to bring similar nodes together
+ 414   static int cmp_expensive_nodes(Node** n1, Node** n2);
+ 415   // Expensive nodes list already sorted?
+ 416   bool expensive_nodes_sorted() const;
+ 417   // Remove the speculative part of types and clean up the graph
+ 418   void remove_speculative_types(PhaseIterGVN &amp;igvn);
+ 419 
+ 420   void* _replay_inline_data; // Pointer to data loaded from file
+ 421 
+ 422   void print_inlining_stream_free();
+ 423   void print_inlining_init();
+ 424   void print_inlining_reinit();
+ 425   void print_inlining_commit();
+ 426   void print_inlining_push();
+ 427   PrintInliningBuffer&amp; print_inlining_current();
+ 428 
+ 429   void log_late_inline_failure(CallGenerator* cg, const char* msg);
+ 430 
+ 431  public:
+ 432 
+ 433   void* barrier_set_state() const { return _barrier_set_state; }
+ 434 
+ 435   outputStream* print_inlining_stream() const {
+ 436     assert(print_inlining() || print_intrinsics(), &quot;PrintInlining off?&quot;);
+ 437     return _print_inlining_stream;
+ 438   }
+ 439 
+ 440   void print_inlining_update(CallGenerator* cg);
+ 441   void print_inlining_update_delayed(CallGenerator* cg);
+ 442   void print_inlining_move_to(CallGenerator* cg);
+ 443   void print_inlining_assert_ready();
+ 444   void print_inlining_reset();
+ 445 
+ 446   void print_inlining(ciMethod* method, int inline_level, int bci, const char* msg = NULL) {
+ 447     stringStream ss;
+ 448     CompileTask::print_inlining_inner(&amp;ss, method, inline_level, bci, msg);
+ 449     print_inlining_stream()-&gt;print(&quot;%s&quot;, ss.as_string());
+ 450   }
+ 451 
+ 452 #ifndef PRODUCT
+ 453   IdealGraphPrinter* printer() { return _printer; }
+ 454 #endif
+ 455 
+ 456   void log_late_inline(CallGenerator* cg);
+ 457   void log_inline_id(CallGenerator* cg);
+ 458   void log_inline_failure(const char* msg);
+ 459 
+ 460   void* replay_inline_data() const { return _replay_inline_data; }
+ 461 
+ 462   // Dump inlining replay data to the stream.
+ 463   void dump_inline_data(outputStream* out);
+ 464 
+ 465  private:
+ 466   // Matching, CFG layout, allocation, code generation
+ 467   PhaseCFG*             _cfg;                   // Results of CFG finding
+ 468   int                   _java_calls;            // Number of java calls in the method
+ 469   int                   _inner_loops;           // Number of inner loops in the method
+ 470   Matcher*              _matcher;               // Engine to map ideal to machine instructions
+ 471   PhaseRegAlloc*        _regalloc;              // Results of register allocation.
+ 472   RegMask               _FIRST_STACK_mask;      // All stack slots usable for spills (depends on frame layout)
+ 473   Arena*                _indexSet_arena;        // control IndexSet allocation within PhaseChaitin
+ 474   void*                 _indexSet_free_block_list; // free list of IndexSet bit blocks
+ 475   int                   _interpreter_frame_size;
+ 476 
+ 477   PhaseOutput*          _output;
+ 478 
+ 479   void reshape_address(AddPNode* n);
+ 480 
+ 481  public:
+ 482   // Accessors
+ 483 
+ 484   // The Compile instance currently active in this (compiler) thread.
+ 485   static Compile* current() {
+ 486     return (Compile*) ciEnv::current()-&gt;compiler_data();
+ 487   }
+ 488 
+ 489   int interpreter_frame_size() const            { return _interpreter_frame_size; }
+ 490 
+ 491   PhaseOutput*      output() const              { return _output; }
+ 492   void              set_output(PhaseOutput* o)  { _output = o; }
+ 493 
+ 494   // ID for this compilation.  Useful for setting breakpoints in the debugger.
+ 495   int               compile_id() const          { return _compile_id; }
+ 496   DirectiveSet*     directive() const           { return _directive; }
+ 497 
+ 498   // Does this compilation allow instructions to subsume loads?  User
+ 499   // instructions that subsume a load may result in an unschedulable
+ 500   // instruction sequence.
+ 501   bool              subsume_loads() const       { return _subsume_loads; }
+ 502   /** Do escape analysis. */
+ 503   bool              do_escape_analysis() const  { return _do_escape_analysis; }
+ 504   /** Do boxing elimination. */
+ 505   bool              eliminate_boxing() const    { return _eliminate_boxing; }
+ 506   /** Do aggressive boxing elimination. */
+ 507   bool              aggressive_unboxing() const { return _eliminate_boxing &amp;&amp; AggressiveUnboxing; }
+ 508   bool              save_argument_registers() const { return _save_argument_registers; }
+ 509 
+ 510 
+ 511   // Other fixed compilation parameters.
+ 512   ciMethod*         method() const              { return _method; }
+ 513   int               entry_bci() const           { return _entry_bci; }
+ 514   bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+ 515   bool              is_method_compilation() const { return (_method != NULL &amp;&amp; !_method-&gt;flags().is_native()); }
+ 516   const TypeFunc*   tf() const                  { assert(_tf!=NULL, &quot;&quot;); return _tf; }
+ 517   void         init_tf(const TypeFunc* tf)      { assert(_tf==NULL, &quot;&quot;); _tf = tf; }
+ 518   InlineTree*       ilt() const                 { return _ilt; }
+ 519   address           stub_function() const       { return _stub_function; }
+ 520   const char*       stub_name() const           { return _stub_name; }
+ 521   address           stub_entry_point() const    { return _stub_entry_point; }
+ 522   void          set_stub_entry_point(address z) { _stub_entry_point = z; }
+ 523 
+ 524   // Control of this compilation.
+ 525   int               fixed_slots() const         { assert(_fixed_slots &gt;= 0, &quot;&quot;);         return _fixed_slots; }
+ 526   void          set_fixed_slots(int n)          { _fixed_slots = n; }
+ 527   int               major_progress() const      { return _major_progress; }
+ 528   void          set_inlining_progress(bool z)   { _inlining_progress = z; }
+ 529   int               inlining_progress() const   { return _inlining_progress; }
+ 530   void          set_inlining_incrementally(bool z) { _inlining_incrementally = z; }
+ 531   int               inlining_incrementally() const { return _inlining_incrementally; }
+ 532   void          set_do_cleanup(bool z)          { _do_cleanup = z; }
+ 533   int               do_cleanup() const          { return _do_cleanup; }
+ 534   void          set_major_progress()            { _major_progress++; }
+ 535   void          restore_major_progress(int progress) { _major_progress += progress; }
+ 536   void        clear_major_progress()            { _major_progress = 0; }
+ 537   int               max_inline_size() const     { return _max_inline_size; }
+ 538   void          set_freq_inline_size(int n)     { _freq_inline_size = n; }
+ 539   int               freq_inline_size() const    { return _freq_inline_size; }
+ 540   void          set_max_inline_size(int n)      { _max_inline_size = n; }
+ 541   bool              has_loops() const           { return _has_loops; }
+ 542   void          set_has_loops(bool z)           { _has_loops = z; }
+ 543   bool              has_split_ifs() const       { return _has_split_ifs; }
+ 544   void          set_has_split_ifs(bool z)       { _has_split_ifs = z; }
+ 545   bool              has_unsafe_access() const   { return _has_unsafe_access; }
+ 546   void          set_has_unsafe_access(bool z)   { _has_unsafe_access = z; }
+ 547   bool              has_stringbuilder() const   { return _has_stringbuilder; }
+ 548   void          set_has_stringbuilder(bool z)   { _has_stringbuilder = z; }
+ 549   bool              has_boxed_value() const     { return _has_boxed_value; }
+ 550   void          set_has_boxed_value(bool z)     { _has_boxed_value = z; }
+ 551   bool              has_reserved_stack_access() const { return _has_reserved_stack_access; }
+ 552   void          set_has_reserved_stack_access(bool z) { _has_reserved_stack_access = z; }
+ 553   uint              max_vector_size() const     { return _max_vector_size; }
+ 554   void          set_max_vector_size(uint s)     { _max_vector_size = s; }
+ 555   bool              clear_upper_avx() const     { return _clear_upper_avx; }
+ 556   void          set_clear_upper_avx(bool s)     { _clear_upper_avx = s; }
+ 557   void          set_trap_count(uint r, uint c)  { assert(r &lt; trapHistLength, &quot;oob&quot;);        _trap_hist[r] = c; }
+ 558   uint              trap_count(uint r) const    { assert(r &lt; trapHistLength, &quot;oob&quot;); return _trap_hist[r]; }
+ 559   bool              trap_can_recompile() const  { return _trap_can_recompile; }
+ 560   void          set_trap_can_recompile(bool z)  { _trap_can_recompile = z; }
+ 561   uint              decompile_count() const     { return _decompile_count; }
+ 562   void          set_decompile_count(uint c)     { _decompile_count = c; }
+ 563   bool              allow_range_check_smearing() const;
+ 564   bool              do_inlining() const         { return _do_inlining; }
+ 565   void          set_do_inlining(bool z)         { _do_inlining = z; }
+ 566   bool              do_scheduling() const       { return _do_scheduling; }
+ 567   void          set_do_scheduling(bool z)       { _do_scheduling = z; }
+ 568   bool              do_freq_based_layout() const{ return _do_freq_based_layout; }
+ 569   void          set_do_freq_based_layout(bool z){ _do_freq_based_layout = z; }
+ 570   bool              do_count_invocations() const{ return _do_count_invocations; }
+ 571   void          set_do_count_invocations(bool z){ _do_count_invocations = z; }
+ 572   bool              do_method_data_update() const { return _do_method_data_update; }
+ 573   void          set_do_method_data_update(bool z) { _do_method_data_update = z; }
+ 574   bool              do_vector_loop() const      { return _do_vector_loop; }
+ 575   void          set_do_vector_loop(bool z)      { _do_vector_loop = z; }
+ 576   bool              use_cmove() const           { return _use_cmove; }
+ 577   void          set_use_cmove(bool z)           { _use_cmove = z; }
+ 578   bool              age_code() const             { return _age_code; }
+ 579   void          set_age_code(bool z)             { _age_code = z; }
+ 580   int               AliasLevel() const           { return _AliasLevel; }
+ 581   bool              print_assembly() const       { return _print_assembly; }
+ 582   void          set_print_assembly(bool z)       { _print_assembly = z; }
+ 583   bool              print_inlining() const       { return _print_inlining; }
+ 584   void          set_print_inlining(bool z)       { _print_inlining = z; }
+ 585   bool              print_intrinsics() const     { return _print_intrinsics; }
+ 586   void          set_print_intrinsics(bool z)     { _print_intrinsics = z; }
+ 587   RTMState          rtm_state()  const           { return _rtm_state; }
+ 588   void          set_rtm_state(RTMState s)        { _rtm_state = s; }
+ 589   bool              use_rtm() const              { return (_rtm_state &amp; NoRTM) == 0; }
+ 590   bool          profile_rtm() const              { return _rtm_state == ProfileRTM; }
+ 591   uint              max_node_limit() const       { return (uint)_max_node_limit; }
+ 592   void          set_max_node_limit(uint n)       { _max_node_limit = n; }
+ 593   bool              clinit_barrier_on_entry()       { return _clinit_barrier_on_entry; }
+ 594   void          set_clinit_barrier_on_entry(bool z) { _clinit_barrier_on_entry = z; }
+ 595 
+ 596   // check the CompilerOracle for special behaviours for this compile
+ 597   bool          method_has_option(const char * option) {
+ 598     return method() != NULL &amp;&amp; method()-&gt;has_option(option);
+ 599   }
+ 600 
+ 601 #ifndef PRODUCT
+ 602   bool          trace_opto_output() const       { return _trace_opto_output; }
+ 603   bool          print_ideal() const             { return _print_ideal; }
+ 604   bool              parsed_irreducible_loop() const { return _parsed_irreducible_loop; }
+ 605   void          set_parsed_irreducible_loop(bool z) { _parsed_irreducible_loop = z; }
+ 606   int _in_dump_cnt;  // Required for dumping ir nodes.
+ 607 #endif
+ 608   bool              has_irreducible_loop() const { return _has_irreducible_loop; }
+ 609   void          set_has_irreducible_loop(bool z) { _has_irreducible_loop = z; }
+ 610 
+ 611   // JSR 292
+ 612   bool              has_method_handle_invokes() const { return _has_method_handle_invokes;     }
+ 613   void          set_has_method_handle_invokes(bool z) {        _has_method_handle_invokes = z; }
+ 614 
+ 615   Ticks _latest_stage_start_counter;
+ 616 
+ 617   void begin_method(int level = 1) {
+ 618 #ifndef PRODUCT
+ 619     if (_method != NULL &amp;&amp; should_print(level)) {
+ 620       _printer-&gt;begin_method();
+ 621     }
+ 622 #endif
+ 623     C-&gt;_latest_stage_start_counter.stamp();
+ 624   }
+ 625 
+ 626   bool should_print(int level = 1) {
+ 627 #ifndef PRODUCT
+ 628     if (PrintIdealGraphLevel &lt; 0) { // disabled by the user
+ 629       return false;
+ 630     }
+ 631 
+ 632     bool need = directive()-&gt;IGVPrintLevelOption &gt;= level;
+ 633     if (need &amp;&amp; !_printer) {
+ 634       _printer = IdealGraphPrinter::printer();
+ 635       assert(_printer != NULL, &quot;_printer is NULL when we need it!&quot;);
+ 636       _printer-&gt;set_compile(this);
+ 637     }
+ 638     return need;
+ 639 #else
+ 640     return false;
+ 641 #endif
+ 642   }
+ 643 
+ 644   void print_method(CompilerPhaseType cpt, int level = 1, int idx = 0);
+ 645 
+ 646 #ifndef PRODUCT
+ 647   void igv_print_method_to_file(const char* phase_name = &quot;Debug&quot;, bool append = false);
+ 648   void igv_print_method_to_network(const char* phase_name = &quot;Debug&quot;);
+ 649   static IdealGraphPrinter* debug_file_printer() { return _debug_file_printer; }
+ 650   static IdealGraphPrinter* debug_network_printer() { return _debug_network_printer; }
+ 651 #endif
+ 652 
+ 653   void end_method(int level = 1);
+ 654 
+ 655   int           macro_count()             const { return _macro_nodes-&gt;length(); }
+ 656   int           predicate_count()         const { return _predicate_opaqs-&gt;length();}
+ 657   int           expensive_count()         const { return _expensive_nodes-&gt;length(); }
+ 658   Node*         macro_node(int idx)       const { return _macro_nodes-&gt;at(idx); }
+ 659   Node*         predicate_opaque1_node(int idx) const { return _predicate_opaqs-&gt;at(idx);}
+ 660   Node*         expensive_node(int idx)   const { return _expensive_nodes-&gt;at(idx); }
+ 661   ConnectionGraph* congraph()                   { return _congraph;}
+ 662   void set_congraph(ConnectionGraph* congraph)  { _congraph = congraph;}
+ 663   void add_macro_node(Node * n) {
+ 664     //assert(n-&gt;is_macro(), &quot;must be a macro node&quot;);
+ 665     assert(!_macro_nodes-&gt;contains(n), &quot;duplicate entry in expand list&quot;);
+ 666     _macro_nodes-&gt;append(n);
+ 667   }
+ 668   void remove_macro_node(Node * n) {
+ 669     // this function may be called twice for a node so check
+ 670     // that the node is in the array before attempting to remove it
+ 671     if (_macro_nodes-&gt;contains(n))
+ 672       _macro_nodes-&gt;remove(n);
+ 673     // remove from _predicate_opaqs list also if it is there
+ 674     if (predicate_count() &gt; 0 &amp;&amp; _predicate_opaqs-&gt;contains(n)){
+ 675       _predicate_opaqs-&gt;remove(n);
+ 676     }
+ 677   }
+ 678   void add_expensive_node(Node * n);
+ 679   void remove_expensive_node(Node * n) {
+ 680     if (_expensive_nodes-&gt;contains(n)) {
+ 681       _expensive_nodes-&gt;remove(n);
+ 682     }
+ 683   }
+ 684   void add_predicate_opaq(Node * n) {
+ 685     assert(!_predicate_opaqs-&gt;contains(n), &quot;duplicate entry in predicate opaque1&quot;);
+ 686     assert(_macro_nodes-&gt;contains(n), &quot;should have already been in macro list&quot;);
+ 687     _predicate_opaqs-&gt;append(n);
+ 688   }
+ 689 
+ 690   // Range check dependent CastII nodes that can be removed after loop optimizations
+ 691   void add_range_check_cast(Node* n);
+ 692   void remove_range_check_cast(Node* n) {
+ 693     if (_range_check_casts-&gt;contains(n)) {
+ 694       _range_check_casts-&gt;remove(n);
+ 695     }
+ 696   }
+ 697   Node* range_check_cast_node(int idx) const { return _range_check_casts-&gt;at(idx);  }
+ 698   int   range_check_cast_count()       const { return _range_check_casts-&gt;length(); }
+ 699   // Remove all range check dependent CastIINodes.
+ 700   void  remove_range_check_casts(PhaseIterGVN &amp;igvn);
+ 701 
+ 702   void add_opaque4_node(Node* n);
+ 703   void remove_opaque4_node(Node* n) {
+ 704     if (_opaque4_nodes-&gt;contains(n)) {
+ 705       _opaque4_nodes-&gt;remove(n);
+ 706     }
+ 707   }
+ 708   Node* opaque4_node(int idx) const { return _opaque4_nodes-&gt;at(idx);  }
+ 709   int   opaque4_count()       const { return _opaque4_nodes-&gt;length(); }
+ 710   void  remove_opaque4_nodes(PhaseIterGVN &amp;igvn);
+ 711 
+ 712   void sort_macro_nodes();
+ 713 
+ 714   // remove the opaque nodes that protect the predicates so that the unused checks and
+ 715   // uncommon traps will be eliminated from the graph.
+ 716   void cleanup_loop_predicates(PhaseIterGVN &amp;igvn);
+ 717   bool is_predicate_opaq(Node * n) {
+ 718     return _predicate_opaqs-&gt;contains(n);
+ 719   }
+ 720 
+ 721   // Are there candidate expensive nodes for optimization?
+ 722   bool should_optimize_expensive_nodes(PhaseIterGVN &amp;igvn);
+ 723   // Check whether n1 and n2 are similar
+ 724   static int cmp_expensive_nodes(Node* n1, Node* n2);
+ 725   // Sort expensive nodes to locate similar expensive nodes
+ 726   void sort_expensive_nodes();
+ 727 
+ 728   // Compilation environment.
+ 729   Arena*      comp_arena()           { return &amp;_comp_arena; }
+ 730   ciEnv*      env() const            { return _env; }
+ 731   CompileLog* log() const            { return _log; }
+ 732   bool        failing() const        { return _env-&gt;failing() || _failure_reason != NULL; }
+ 733   const char* failure_reason() const { return (_env-&gt;failing()) ? _env-&gt;failure_reason() : _failure_reason; }
+ 734 
+ 735   bool failure_reason_is(const char* r) const {
+ 736     return (r == _failure_reason) || (r != NULL &amp;&amp; _failure_reason != NULL &amp;&amp; strcmp(r, _failure_reason) == 0);
+ 737   }
+ 738 
+ 739   void record_failure(const char* reason);
+ 740   void record_method_not_compilable(const char* reason) {
+ 741     // Bailouts cover &quot;all_tiers&quot; when TieredCompilation is off.
+ 742     env()-&gt;record_method_not_compilable(reason, !TieredCompilation);
+ 743     // Record failure reason.
+ 744     record_failure(reason);
+ 745   }
+ 746   bool check_node_count(uint margin, const char* reason) {
+ 747     if (live_nodes() + margin &gt; max_node_limit()) {
+ 748       record_method_not_compilable(reason);
+ 749       return true;
+ 750     } else {
+ 751       return false;
+ 752     }
+ 753   }
+ 754 
+ 755   // Node management
+ 756   uint         unique() const              { return _unique; }
+ 757   uint         next_unique()               { return _unique++; }
+ 758   void         set_unique(uint i)          { _unique = i; }
+ 759   static int   debug_idx()                 { return debug_only(_debug_idx)+0; }
+ 760   static void  set_debug_idx(int i)        { debug_only(_debug_idx = i); }
+ 761   Arena*       node_arena()                { return &amp;_node_arena; }
+ 762   Arena*       old_arena()                 { return &amp;_old_arena; }
+ 763   RootNode*    root() const                { return _root; }
+ 764   void         set_root(RootNode* r)       { _root = r; }
+ 765   StartNode*   start() const;              // (Derived from root.)
+ 766   void         init_start(StartNode* s);
+ 767   Node*        immutable_memory();
+ 768 
+ 769   Node*        recent_alloc_ctl() const    { return _recent_alloc_ctl; }
+ 770   Node*        recent_alloc_obj() const    { return _recent_alloc_obj; }
+ 771   void         set_recent_alloc(Node* ctl, Node* obj) {
+ 772                                                   _recent_alloc_ctl = ctl;
+ 773                                                   _recent_alloc_obj = obj;
+ 774                                            }
+ 775   void         record_dead_node(uint idx)  { if (_dead_node_list.test_set(idx)) return;
+ 776                                              _dead_node_count++;
+ 777                                            }
+ 778   void         reset_dead_node_list()      { _dead_node_list.reset();
+ 779                                              _dead_node_count = 0;
+ 780                                            }
+ 781   uint          live_nodes() const         {
+ 782     int  val = _unique - _dead_node_count;
+ 783     assert (val &gt;= 0, &quot;number of tracked dead nodes %d more than created nodes %d&quot;, _unique, _dead_node_count);
+ 784             return (uint) val;
+ 785                                            }
+ 786 #ifdef ASSERT
+ 787   uint         count_live_nodes_by_graph_walk();
+ 788   void         print_missing_nodes();
+ 789 #endif
+ 790 
+ 791   // Record modified nodes to check that they are put on IGVN worklist
+ 792   void         record_modified_node(Node* n) NOT_DEBUG_RETURN;
+ 793   void         remove_modified_node(Node* n) NOT_DEBUG_RETURN;
+ 794   DEBUG_ONLY( Unique_Node_List*   modified_nodes() const { return _modified_nodes; } )
+ 795 
+ 796   MachConstantBaseNode*     mach_constant_base_node();
+ 797   bool                  has_mach_constant_base_node() const { return _mach_constant_base_node != NULL; }
+ 798   // Generated by adlc, true if CallNode requires MachConstantBase.
+ 799   bool                      needs_clone_jvms();
+ 800 
+ 801   // Handy undefined Node
+ 802   Node*             top() const                 { return _top; }
+ 803 
+ 804   // these are used by guys who need to know about creation and transformation of top:
+ 805   Node*             cached_top_node()           { return _top; }
+ 806   void          set_cached_top_node(Node* tn);
+ 807 
+ 808   GrowableArray&lt;Node_Notes*&gt;* node_note_array() const { return _node_note_array; }
+ 809   void set_node_note_array(GrowableArray&lt;Node_Notes*&gt;* arr) { _node_note_array = arr; }
+ 810   Node_Notes* default_node_notes() const        { return _default_node_notes; }
+ 811   void    set_default_node_notes(Node_Notes* n) { _default_node_notes = n; }
+ 812 
+ 813   Node_Notes*       node_notes_at(int idx) {
+ 814     return locate_node_notes(_node_note_array, idx, false);
+ 815   }
+ 816   inline bool   set_node_notes_at(int idx, Node_Notes* value);
+ 817 
+ 818   // Copy notes from source to dest, if they exist.
+ 819   // Overwrite dest only if source provides something.
+ 820   // Return true if information was moved.
+ 821   bool copy_node_notes_to(Node* dest, Node* source);
+ 822 
+ 823   // Workhorse function to sort out the blocked Node_Notes array:
+ 824   inline Node_Notes* locate_node_notes(GrowableArray&lt;Node_Notes*&gt;* arr,
+ 825                                        int idx, bool can_grow = false);
+ 826 
+ 827   void grow_node_notes(GrowableArray&lt;Node_Notes*&gt;* arr, int grow_by);
+ 828 
+ 829   // Type management
+ 830   Arena*            type_arena()                { return _type_arena; }
+ 831   Dict*             type_dict()                 { return _type_dict; }
+ 832   size_t            type_last_size()            { return _type_last_size; }
+ 833   int               num_alias_types()           { return _num_alias_types; }
+ 834 
+ 835   void          init_type_arena()                       { _type_arena = &amp;_Compile_types; }
+ 836   void          set_type_arena(Arena* a)                { _type_arena = a; }
+ 837   void          set_type_dict(Dict* d)                  { _type_dict = d; }
+ 838   void          set_type_last_size(size_t sz)           { _type_last_size = sz; }
+ 839 
+ 840   const TypeFunc* last_tf(ciMethod* m) {
+ 841     return (m == _last_tf_m) ? _last_tf : NULL;
+ 842   }
+ 843   void set_last_tf(ciMethod* m, const TypeFunc* tf) {
+ 844     assert(m != NULL || tf == NULL, &quot;&quot;);
+ 845     _last_tf_m = m;
+ 846     _last_tf = tf;
+ 847   }
+ 848 
+ 849   AliasType*        alias_type(int                idx)  { assert(idx &lt; num_alias_types(), &quot;oob&quot;); return _alias_types[idx]; }
+ 850   AliasType*        alias_type(const TypePtr* adr_type, ciField* field = NULL) { return find_alias_type(adr_type, false, field); }
+ 851   bool         have_alias_type(const TypePtr* adr_type);
+ 852   AliasType*        alias_type(ciField*         field);
+ 853 
+ 854   int               get_alias_index(const TypePtr* at)  { return alias_type(at)-&gt;index(); }
+ 855   const TypePtr*    get_adr_type(uint aidx)             { return alias_type(aidx)-&gt;adr_type(); }
+ 856   int               get_general_index(uint aidx)        { return alias_type(aidx)-&gt;general_index(); }
+ 857 
+ 858   // Building nodes
+ 859   void              rethrow_exceptions(JVMState* jvms);
+ 860   void              return_values(JVMState* jvms);
+ 861   JVMState*         build_start_state(StartNode* start, const TypeFunc* tf);
+ 862 
+ 863   // Decide how to build a call.
+ 864   // The profile factor is a discount to apply to this site&#39;s interp. profile.
+ 865   CallGenerator*    call_generator(ciMethod* call_method, int vtable_index, bool call_does_dispatch,
+ 866                                    JVMState* jvms, bool allow_inline, float profile_factor, ciKlass* speculative_receiver_type = NULL,
+ 867                                    bool allow_intrinsics = true);
+ 868   bool should_delay_inlining(ciMethod* call_method, JVMState* jvms) {
+ 869     return should_delay_string_inlining(call_method, jvms) ||
+ 870            should_delay_boxing_inlining(call_method, jvms);
+ 871   }
+ 872   bool should_delay_string_inlining(ciMethod* call_method, JVMState* jvms);
+ 873   bool should_delay_boxing_inlining(ciMethod* call_method, JVMState* jvms);
+ 874 
+ 875   // Helper functions to identify inlining potential at call-site
+ 876   ciMethod* optimize_virtual_call(ciMethod* caller, int bci, ciInstanceKlass* klass,
+ 877                                   ciKlass* holder, ciMethod* callee,
+ 878                                   const TypeOopPtr* receiver_type, bool is_virtual,
+ 879                                   bool &amp;call_does_dispatch, int &amp;vtable_index,
+ 880                                   bool check_access = true);
+ 881   ciMethod* optimize_inlining(ciMethod* caller, int bci, ciInstanceKlass* klass,
+ 882                               ciMethod* callee, const TypeOopPtr* receiver_type,
+ 883                               bool check_access = true);
+ 884 
+ 885   // Report if there were too many traps at a current method and bci.
+ 886   // Report if a trap was recorded, and/or PerMethodTrapLimit was exceeded.
+ 887   // If there is no MDO at all, report no trap unless told to assume it.
+ 888   bool too_many_traps(ciMethod* method, int bci, Deoptimization::DeoptReason reason);
+ 889   // This version, unspecific to a particular bci, asks if
+ 890   // PerMethodTrapLimit was exceeded for all inlined methods seen so far.
+ 891   bool too_many_traps(Deoptimization::DeoptReason reason,
+ 892                       // Privately used parameter for logging:
+ 893                       ciMethodData* logmd = NULL);
+ 894   // Report if there were too many recompiles at a method and bci.
+ 895   bool too_many_recompiles(ciMethod* method, int bci, Deoptimization::DeoptReason reason);
+ 896   // Report if there were too many traps or recompiles at a method and bci.
+ 897   bool too_many_traps_or_recompiles(ciMethod* method, int bci, Deoptimization::DeoptReason reason) {
+ 898     return too_many_traps(method, bci, reason) ||
+ 899            too_many_recompiles(method, bci, reason);
+ 900   }
+ 901   // Return a bitset with the reasons where deoptimization is allowed,
+ 902   // i.e., where there were not too many uncommon traps.
+ 903   int _allowed_reasons;
+ 904   int      allowed_deopt_reasons() { return _allowed_reasons; }
+ 905   void set_allowed_deopt_reasons();
+ 906 
+ 907   // Parsing, optimization
+ 908   PhaseGVN*         initial_gvn()               { return _initial_gvn; }
+ 909   Unique_Node_List* for_igvn()                  { return _for_igvn; }
+ 910   inline void       record_for_igvn(Node* n);   // Body is after class Unique_Node_List.
+ 911   void          set_initial_gvn(PhaseGVN *gvn)           { _initial_gvn = gvn; }
+ 912   void          set_for_igvn(Unique_Node_List *for_igvn) { _for_igvn = for_igvn; }
+ 913 
+ 914   // Replace n by nn using initial_gvn, calling hash_delete and
+ 915   // record_for_igvn as needed.
+ 916   void gvn_replace_by(Node* n, Node* nn);
+ 917 
+ 918 
+ 919   void              identify_useful_nodes(Unique_Node_List &amp;useful);
+ 920   void              update_dead_node_list(Unique_Node_List &amp;useful);
+ 921   void              remove_useless_nodes (Unique_Node_List &amp;useful);
+ 922 
+ 923   WarmCallInfo*     warm_calls() const          { return _warm_calls; }
+ 924   void          set_warm_calls(WarmCallInfo* l) { _warm_calls = l; }
+ 925   WarmCallInfo* pop_warm_call();
+ 926 
+ 927   // Record this CallGenerator for inlining at the end of parsing.
+ 928   void              add_late_inline(CallGenerator* cg)        {
+ 929     _late_inlines.insert_before(_late_inlines_pos, cg);
+ 930     _late_inlines_pos++;
+ 931   }
+ 932 
+ 933   void              prepend_late_inline(CallGenerator* cg)    {
+ 934     _late_inlines.insert_before(0, cg);
+ 935   }
+ 936 
+ 937   void              add_string_late_inline(CallGenerator* cg) {
+ 938     _string_late_inlines.push(cg);
+ 939   }
+ 940 
+ 941   void              add_boxing_late_inline(CallGenerator* cg) {
+ 942     _boxing_late_inlines.push(cg);
+ 943   }
+ 944 
+ 945   void remove_useless_late_inlines(GrowableArray&lt;CallGenerator*&gt;* inlines, Unique_Node_List &amp;useful);
+ 946 
+ 947   void process_print_inlining();
+ 948   void dump_print_inlining();
+ 949 
+ 950   bool over_inlining_cutoff() const {
+ 951     if (!inlining_incrementally()) {
+ 952       return unique() &gt; (uint)NodeCountInliningCutoff;
+ 953     } else {
+ 954       // Give some room for incremental inlining algorithm to &quot;breathe&quot;
+ 955       // and avoid thrashing when live node count is close to the limit.
+ 956       // Keep in mind that live_nodes() isn&#39;t accurate during inlining until
+ 957       // dead node elimination step happens (see Compile::inline_incrementally).
+ 958       return live_nodes() &gt; (uint)LiveNodeCountInliningCutoff * 11 / 10;
+ 959     }
+ 960   }
+ 961 
+ 962   void inc_number_of_mh_late_inlines() { _number_of_mh_late_inlines++; }
+ 963   void dec_number_of_mh_late_inlines() { assert(_number_of_mh_late_inlines &gt; 0, &quot;_number_of_mh_late_inlines &lt; 0 !&quot;); _number_of_mh_late_inlines--; }
+ 964   bool has_mh_late_inlines() const     { return _number_of_mh_late_inlines &gt; 0; }
+ 965 
+ 966   bool inline_incrementally_one();
+ 967   void inline_incrementally_cleanup(PhaseIterGVN&amp; igvn);
+ 968   void inline_incrementally(PhaseIterGVN&amp; igvn);
+ 969   void inline_string_calls(bool parse_time);
+ 970   void inline_boxing_calls(PhaseIterGVN&amp; igvn);
+ 971   bool optimize_loops(PhaseIterGVN&amp; igvn, LoopOptsMode mode);
+ 972   void remove_root_to_sfpts_edges(PhaseIterGVN&amp; igvn);
+ 973 
+ 974   // Matching, CFG layout, allocation, code generation
+ 975   PhaseCFG*         cfg()                       { return _cfg; }
+ 976   bool              has_java_calls() const      { return _java_calls &gt; 0; }
+ 977   int               java_calls() const          { return _java_calls; }
+ 978   int               inner_loops() const         { return _inner_loops; }
+ 979   Matcher*          matcher()                   { return _matcher; }
+ 980   PhaseRegAlloc*    regalloc()                  { return _regalloc; }
+ 981   RegMask&amp;          FIRST_STACK_mask()          { return _FIRST_STACK_mask; }
+ 982   Arena*            indexSet_arena()            { return _indexSet_arena; }
+ 983   void*             indexSet_free_block_list()  { return _indexSet_free_block_list; }
+ 984   DebugInformationRecorder* debug_info()        { return env()-&gt;debug_info(); }
+ 985 
+ 986   void  update_interpreter_frame_size(int size) {
+ 987     if (_interpreter_frame_size &lt; size) {
+ 988       _interpreter_frame_size = size;
+ 989     }
+ 990   }
+ 991 
+ 992   void          set_matcher(Matcher* m)                 { _matcher = m; }
+ 993 //void          set_regalloc(PhaseRegAlloc* ra)           { _regalloc = ra; }
+ 994   void          set_indexSet_arena(Arena* a)            { _indexSet_arena = a; }
+ 995   void          set_indexSet_free_block_list(void* p)   { _indexSet_free_block_list = p; }
+ 996 
+ 997   void  set_java_calls(int z) { _java_calls  = z; }
+ 998   void set_inner_loops(int z) { _inner_loops = z; }
+ 999 
+1000   Dependencies* dependencies() { return env()-&gt;dependencies(); }
+1001 
+1002   // Major entry point.  Given a Scope, compile the associated method.
+1003   // For normal compilations, entry_bci is InvocationEntryBci.  For on stack
+1004   // replacement, entry_bci indicates the bytecode for which to compile a
+1005   // continuation.
+1006   Compile(ciEnv* ci_env, ciMethod* target,
+1007           int entry_bci, bool subsume_loads, bool do_escape_analysis,
+1008           bool eliminate_boxing, DirectiveSet* directive);
+1009 
+1010   // Second major entry point.  From the TypeFunc signature, generate code
+1011   // to pass arguments from the Java calling convention to the C calling
+1012   // convention.
+1013   Compile(ciEnv* ci_env, const TypeFunc *(*gen)(),
+1014           address stub_function, const char *stub_name,
+1015           int is_fancy_jump, bool pass_tls,
+1016           bool save_arg_registers, bool return_pc, DirectiveSet* directive);
+1017 
+1018   // From the TypeFunc signature, generate code to pass arguments
+1019   // from Compiled calling convention to Interpreter&#39;s calling convention
+1020   void Generate_Compiled_To_Interpreter_Graph(const TypeFunc *tf, address interpreter_entry);
+1021 
+1022   // From the TypeFunc signature, generate code to pass arguments
+1023   // from Interpreter&#39;s calling convention to Compiler&#39;s calling convention
+1024   void Generate_Interpreter_To_Compiled_Graph(const TypeFunc *tf);
+1025 
+1026   // Are we compiling a method?
+1027   bool has_method() { return method() != NULL; }
+1028 
+1029   // Maybe print some information about this compile.
+1030   void print_compile_messages();
+1031 
+1032   // Final graph reshaping, a post-pass after the regular optimizer is done.
+1033   bool final_graph_reshaping();
+1034 
+1035   // returns true if adr is completely contained in the given alias category
+1036   bool must_alias(const TypePtr* adr, int alias_idx);
+1037 
+1038   // returns true if adr overlaps with the given alias category
+1039   bool can_alias(const TypePtr* adr, int alias_idx);
+1040 
+1041   // If &quot;objs&quot; contains an ObjectValue whose id is &quot;id&quot;, returns it, else NULL.
+1042   static ObjectValue* sv_for_node_id(GrowableArray&lt;ScopeValue*&gt; *objs, int id);
+1043 
+1044   // Stack slots that may be unused by the calling convention but must
+1045   // otherwise be preserved.  On Intel this includes the return address.
+1046   // On PowerPC it includes the 4 words holding the old TOC &amp; LR glue.
+1047   uint in_preserve_stack_slots();
+1048 
+1049   // &quot;Top of Stack&quot; slots that may be unused by the calling convention but must
+1050   // otherwise be preserved.
+1051   // On Intel these are not necessary and the value can be zero.
+1052   // On Sparc this describes the words reserved for storing a register window
+1053   // when an interrupt occurs.
+1054   static uint out_preserve_stack_slots();
+1055 
+1056   // Number of outgoing stack slots killed above the out_preserve_stack_slots
+1057   // for calls to C.  Supports the var-args backing area for register parms.
+1058   uint varargs_C_out_slots_killed() const;
+1059 
+1060   // Number of Stack Slots consumed by a synchronization entry
+1061   int sync_stack_slots() const;
+1062 
+1063   // Compute the name of old_SP.  See &lt;arch&gt;.ad for frame layout.
+1064   OptoReg::Name compute_old_SP();
+1065 
+1066  private:
+1067   // Phase control:
+1068   void Init(int aliaslevel);                     // Prepare for a single compilation
+1069   int  Inline_Warm();                            // Find more inlining work.
+1070   void Finish_Warm();                            // Give up on further inlines.
+1071   void Optimize();                               // Given a graph, optimize it
+1072   void Code_Gen();                               // Generate code from a graph
+1073 
+1074   // Management of the AliasType table.
+1075   void grow_alias_types();
+1076   AliasCacheEntry* probe_alias_cache(const TypePtr* adr_type);
+1077   const TypePtr *flatten_alias_type(const TypePtr* adr_type) const;
+1078   AliasType* find_alias_type(const TypePtr* adr_type, bool no_create, ciField* field);
+1079 
+1080   void verify_top(Node*) const PRODUCT_RETURN;
+1081 
+1082   // Intrinsic setup.
+1083   void           register_library_intrinsics();                            // initializer
+1084   CallGenerator* make_vm_intrinsic(ciMethod* m, bool is_virtual);          // constructor
+1085   int            intrinsic_insertion_index(ciMethod* m, bool is_virtual, bool&amp; found);  // helper
+1086   CallGenerator* find_intrinsic(ciMethod* m, bool is_virtual);             // query fn
+1087   void           register_intrinsic(CallGenerator* cg);                    // update fn
+1088 
+1089 #ifndef PRODUCT
+1090   static juint  _intrinsic_hist_count[vmIntrinsics::ID_LIMIT];
+1091   static jubyte _intrinsic_hist_flags[vmIntrinsics::ID_LIMIT];
+1092 #endif
+1093   // Function calls made by the public function final_graph_reshaping.
+1094   // No need to be made public as they are not called elsewhere.
+1095   void final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &amp;frc);
+1096   void final_graph_reshaping_main_switch(Node* n, Final_Reshape_Counts&amp; frc, uint nop);
+1097   void final_graph_reshaping_walk( Node_Stack &amp;nstack, Node *root, Final_Reshape_Counts &amp;frc );
+1098   void eliminate_redundant_card_marks(Node* n);
+1099 
+1100   // Logic cone optimization.
+1101   void optimize_logic_cones(PhaseIterGVN &amp;igvn);
+1102   void collect_logic_cone_roots(Unique_Node_List&amp; list);
+1103   void process_logic_cone_root(PhaseIterGVN &amp;igvn, Node* n, VectorSet&amp; visited);
+1104   bool compute_logic_cone(Node* n, Unique_Node_List&amp; partition, Unique_Node_List&amp; inputs);
+1105   uint compute_truth_table(Unique_Node_List&amp; partition, Unique_Node_List&amp; inputs);
+1106   uint eval_macro_logic_op(uint func, uint op1, uint op2, uint op3);
+1107   Node* xform_to_MacroLogicV(PhaseIterGVN &amp;igvn, const TypeVect* vt, Unique_Node_List&amp; partitions, Unique_Node_List&amp; inputs);
+1108 
+1109  public:
+1110 
+1111   // Note:  Histogram array size is about 1 Kb.
+1112   enum {                        // flag bits:
+1113     _intrinsic_worked = 1,      // succeeded at least once
+1114     _intrinsic_failed = 2,      // tried it but it failed
+1115     _intrinsic_disabled = 4,    // was requested but disabled (e.g., -XX:-InlineUnsafeOps)
+1116     _intrinsic_virtual = 8,     // was seen in the virtual form (rare)
+1117     _intrinsic_both = 16        // was seen in the non-virtual form (usual)
+1118   };
+1119   // Update histogram.  Return boolean if this is a first-time occurrence.
+1120   static bool gather_intrinsic_statistics(vmIntrinsics::ID id,
+1121                                           bool is_virtual, int flags) PRODUCT_RETURN0;
+1122   static void print_intrinsic_statistics() PRODUCT_RETURN;
+1123 
+1124   // Graph verification code
+1125   // Walk the node list, verifying that there is a one-to-one
+1126   // correspondence between Use-Def edges and Def-Use edges
+1127   // The option no_dead_code enables stronger checks that the
+1128   // graph is strongly connected from root in both directions.
+1129   void verify_graph_edges(bool no_dead_code = false) PRODUCT_RETURN;
+1130 
+1131   // End-of-run dumps.
+1132   static void print_statistics() PRODUCT_RETURN;
+1133 
+1134   // Verify ADLC assumptions during startup
+1135   static void adlc_verification() PRODUCT_RETURN;
+1136 
+1137   // Definitions of pd methods
+1138   static void pd_compiler2_init();
+1139 
+1140   // Static parse-time type checking logic for gen_subtype_check:
+1141   enum { SSC_always_false, SSC_always_true, SSC_easy_test, SSC_full_test };
+1142   int static_subtype_check(ciKlass* superk, ciKlass* subk);
+1143 
+1144   static Node* conv_I2X_index(PhaseGVN* phase, Node* offset, const TypeInt* sizetype,
+1145                               // Optional control dependency (for example, on range check)
+1146                               Node* ctrl = NULL);
+1147 
+1148   // Convert integer value to a narrowed long type dependent on ctrl (for example, a range check)
+1149   static Node* constrained_convI2L(PhaseGVN* phase, Node* value, const TypeInt* itype, Node* ctrl);
+1150 
+1151   // Auxiliary method for randomized fuzzing/stressing
+1152   static bool randomized_select(int count);
+1153 
+1154   // supporting clone_map
+1155   CloneMap&amp;     clone_map();
+1156   void          set_clone_map(Dict* d);
+1157 
+1158   bool needs_clinit_barrier(ciField* ik,         ciMethod* accessing_method);
+1159   bool needs_clinit_barrier(ciMethod* ik,        ciMethod* accessing_method);
+1160   bool needs_clinit_barrier(ciInstanceKlass* ik, ciMethod* accessing_method);
+1161 
+1162 #ifdef IA32
+1163  private:
+1164   bool _select_24_bit_instr;   // We selected an instruction with a 24-bit result
+1165   bool _in_24_bit_fp_mode;     // We are emitting instructions with 24-bit results
+1166 
+1167   // Remember if this compilation changes hardware mode to 24-bit precision.
+1168   void set_24_bit_selection_and_mode(bool selection, bool mode) {
+1169     _select_24_bit_instr = selection;
+1170     _in_24_bit_fp_mode   = mode;
+1171   }
+1172 
+1173  public:
+1174   bool select_24_bit_instr() const { return _select_24_bit_instr; }
+1175   bool in_24_bit_fp_mode() const   { return _in_24_bit_fp_mode; }
+1176 #endif // IA32
+1177 #ifdef ASSERT
+1178   bool _type_verify_symmetry;
+1179 #endif
+1180 };
+1181 
+1182 #endif // SHARE_OPTO_COMPILE_HPP
+    </pre>
+  </body>
+</html>

@@ -1,0 +1,3451 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/opto/macro.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+    <script type="text/javascript" src="../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>   1 /*
+   2  * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+   3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+   4  *
+   5  * This code is free software; you can redistribute it and/or modify it
+   6  * under the terms of the GNU General Public License version 2 only, as
+   7  * published by the Free Software Foundation.
+   8  *
+   9  * This code is distributed in the hope that it will be useful, but WITHOUT
+  10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  12  * version 2 for more details (a copy is included in the LICENSE file that
+  13  * accompanied this code).
+  14  *
+  15  * You should have received a copy of the GNU General Public License version
+  16  * 2 along with this work; if not, write to the Free Software Foundation,
+  17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  18  *
+  19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  20  * or visit www.oracle.com if you need additional information or have any
+  21  * questions.
+  22  *
+  23  */
+  24 
+  25 #include &quot;precompiled.hpp&quot;
+  26 #include &quot;compiler/compileLog.hpp&quot;
+  27 #include &quot;gc/shared/collectedHeap.inline.hpp&quot;
+  28 #include &quot;libadt/vectset.hpp&quot;
+  29 #include &quot;memory/universe.hpp&quot;
+  30 #include &quot;opto/addnode.hpp&quot;
+  31 #include &quot;opto/arraycopynode.hpp&quot;
+  32 #include &quot;opto/callnode.hpp&quot;
+  33 #include &quot;opto/castnode.hpp&quot;
+  34 #include &quot;opto/cfgnode.hpp&quot;
+  35 #include &quot;opto/compile.hpp&quot;
+  36 #include &quot;opto/convertnode.hpp&quot;
+  37 #include &quot;opto/graphKit.hpp&quot;
+  38 #include &quot;opto/intrinsicnode.hpp&quot;
+  39 #include &quot;opto/locknode.hpp&quot;
+  40 #include &quot;opto/loopnode.hpp&quot;
+  41 #include &quot;opto/macro.hpp&quot;
+  42 #include &quot;opto/memnode.hpp&quot;
+  43 #include &quot;opto/narrowptrnode.hpp&quot;
+  44 #include &quot;opto/node.hpp&quot;
+  45 #include &quot;opto/opaquenode.hpp&quot;
+  46 #include &quot;opto/phaseX.hpp&quot;
+  47 #include &quot;opto/rootnode.hpp&quot;
+  48 #include &quot;opto/runtime.hpp&quot;
+  49 #include &quot;opto/subnode.hpp&quot;
+  50 #include &quot;opto/subtypenode.hpp&quot;
+  51 #include &quot;opto/type.hpp&quot;
+  52 #include &quot;runtime/sharedRuntime.hpp&quot;
+  53 #include &quot;utilities/macros.hpp&quot;
+  54 #include &quot;utilities/powerOfTwo.hpp&quot;
+  55 #if INCLUDE_G1GC
+  56 #include &quot;gc/g1/g1ThreadLocalData.hpp&quot;
+  57 #endif // INCLUDE_G1GC
+  58 #if INCLUDE_SHENANDOAHGC
+  59 #include &quot;gc/shenandoah/c2/shenandoahBarrierSetC2.hpp&quot;
+  60 #endif
+  61 
+  62 
+  63 //
+  64 // Replace any references to &quot;oldref&quot; in inputs to &quot;use&quot; with &quot;newref&quot;.
+  65 // Returns the number of replacements made.
+  66 //
+  67 int PhaseMacroExpand::replace_input(Node *use, Node *oldref, Node *newref) {
+  68   int nreplacements = 0;
+  69   uint req = use-&gt;req();
+  70   for (uint j = 0; j &lt; use-&gt;len(); j++) {
+  71     Node *uin = use-&gt;in(j);
+  72     if (uin == oldref) {
+  73       if (j &lt; req)
+  74         use-&gt;set_req(j, newref);
+  75       else
+  76         use-&gt;set_prec(j, newref);
+  77       nreplacements++;
+  78     } else if (j &gt;= req &amp;&amp; uin == NULL) {
+  79       break;
+  80     }
+  81   }
+  82   return nreplacements;
+  83 }
+  84 
+  85 void PhaseMacroExpand::migrate_outs(Node *old, Node *target) {
+  86   assert(old != NULL, &quot;sanity&quot;);
+  87   for (DUIterator_Fast imax, i = old-&gt;fast_outs(imax); i &lt; imax; i++) {
+  88     Node* use = old-&gt;fast_out(i);
+  89     _igvn.rehash_node_delayed(use);
+  90     imax -= replace_input(use, old, target);
+  91     // back up iterator
+  92     --i;
+  93   }
+  94   assert(old-&gt;outcnt() == 0, &quot;all uses must be deleted&quot;);
+  95 }
+  96 
+  97 void PhaseMacroExpand::copy_call_debug_info(CallNode *oldcall, CallNode * newcall) {
+  98   // Copy debug information and adjust JVMState information
+  99   uint old_dbg_start = oldcall-&gt;tf()-&gt;domain()-&gt;cnt();
+ 100   uint new_dbg_start = newcall-&gt;tf()-&gt;domain()-&gt;cnt();
+ 101   int jvms_adj  = new_dbg_start - old_dbg_start;
+ 102   assert (new_dbg_start == newcall-&gt;req(), &quot;argument count mismatch&quot;);
+ 103 
+ 104   // SafePointScalarObject node could be referenced several times in debug info.
+ 105   // Use Dict to record cloned nodes.
+ 106   Dict* sosn_map = new Dict(cmpkey,hashkey);
+ 107   for (uint i = old_dbg_start; i &lt; oldcall-&gt;req(); i++) {
+ 108     Node* old_in = oldcall-&gt;in(i);
+ 109     // Clone old SafePointScalarObjectNodes, adjusting their field contents.
+ 110     if (old_in != NULL &amp;&amp; old_in-&gt;is_SafePointScalarObject()) {
+ 111       SafePointScalarObjectNode* old_sosn = old_in-&gt;as_SafePointScalarObject();
+ 112       uint old_unique = C-&gt;unique();
+ 113       Node* new_in = old_sosn-&gt;clone(sosn_map);
+ 114       if (old_unique != C-&gt;unique()) { // New node?
+ 115         new_in-&gt;set_req(0, C-&gt;root()); // reset control edge
+ 116         new_in = transform_later(new_in); // Register new node.
+ 117       }
+ 118       old_in = new_in;
+ 119     }
+ 120     newcall-&gt;add_req(old_in);
+ 121   }
+ 122 
+ 123   // JVMS may be shared so clone it before we modify it
+ 124   newcall-&gt;set_jvms(oldcall-&gt;jvms() != NULL ? oldcall-&gt;jvms()-&gt;clone_deep(C) : NULL);
+ 125   for (JVMState *jvms = newcall-&gt;jvms(); jvms != NULL; jvms = jvms-&gt;caller()) {
+ 126     jvms-&gt;set_map(newcall);
+ 127     jvms-&gt;set_locoff(jvms-&gt;locoff()+jvms_adj);
+ 128     jvms-&gt;set_stkoff(jvms-&gt;stkoff()+jvms_adj);
+ 129     jvms-&gt;set_monoff(jvms-&gt;monoff()+jvms_adj);
+ 130     jvms-&gt;set_scloff(jvms-&gt;scloff()+jvms_adj);
+ 131     jvms-&gt;set_endoff(jvms-&gt;endoff()+jvms_adj);
+ 132   }
+ 133 }
+ 134 
+ 135 Node* PhaseMacroExpand::opt_bits_test(Node* ctrl, Node* region, int edge, Node* word, int mask, int bits, bool return_fast_path) {
+ 136   Node* cmp;
+ 137   if (mask != 0) {
+ 138     Node* and_node = transform_later(new AndXNode(word, MakeConX(mask)));
+ 139     cmp = transform_later(new CmpXNode(and_node, MakeConX(bits)));
+ 140   } else {
+ 141     cmp = word;
+ 142   }
+ 143   Node* bol = transform_later(new BoolNode(cmp, BoolTest::ne));
+ 144   IfNode* iff = new IfNode( ctrl, bol, PROB_MIN, COUNT_UNKNOWN );
+ 145   transform_later(iff);
+ 146 
+ 147   // Fast path taken.
+ 148   Node *fast_taken = transform_later(new IfFalseNode(iff));
+ 149 
+ 150   // Fast path not-taken, i.e. slow path
+ 151   Node *slow_taken = transform_later(new IfTrueNode(iff));
+ 152 
+ 153   if (return_fast_path) {
+ 154     region-&gt;init_req(edge, slow_taken); // Capture slow-control
+ 155     return fast_taken;
+ 156   } else {
+ 157     region-&gt;init_req(edge, fast_taken); // Capture fast-control
+ 158     return slow_taken;
+ 159   }
+ 160 }
+ 161 
+ 162 //--------------------copy_predefined_input_for_runtime_call--------------------
+ 163 void PhaseMacroExpand::copy_predefined_input_for_runtime_call(Node * ctrl, CallNode* oldcall, CallNode* call) {
+ 164   // Set fixed predefined input arguments
+ 165   call-&gt;init_req( TypeFunc::Control, ctrl );
+ 166   call-&gt;init_req( TypeFunc::I_O    , oldcall-&gt;in( TypeFunc::I_O) );
+ 167   call-&gt;init_req( TypeFunc::Memory , oldcall-&gt;in( TypeFunc::Memory ) ); // ?????
+ 168   call-&gt;init_req( TypeFunc::ReturnAdr, oldcall-&gt;in( TypeFunc::ReturnAdr ) );
+ 169   call-&gt;init_req( TypeFunc::FramePtr, oldcall-&gt;in( TypeFunc::FramePtr ) );
+ 170 }
+ 171 
+ 172 //------------------------------make_slow_call---------------------------------
+ 173 CallNode* PhaseMacroExpand::make_slow_call(CallNode *oldcall, const TypeFunc* slow_call_type,
+ 174                                            address slow_call, const char* leaf_name, Node* slow_path,
+ 175                                            Node* parm0, Node* parm1, Node* parm2) {
+ 176 
+ 177   // Slow-path call
+ 178  CallNode *call = leaf_name
+ 179    ? (CallNode*)new CallLeafNode      ( slow_call_type, slow_call, leaf_name, TypeRawPtr::BOTTOM )
+ 180    : (CallNode*)new CallStaticJavaNode( slow_call_type, slow_call, OptoRuntime::stub_name(slow_call), oldcall-&gt;jvms()-&gt;bci(), TypeRawPtr::BOTTOM );
+ 181 
+ 182   // Slow path call has no side-effects, uses few values
+ 183   copy_predefined_input_for_runtime_call(slow_path, oldcall, call );
+ 184   if (parm0 != NULL)  call-&gt;init_req(TypeFunc::Parms+0, parm0);
+ 185   if (parm1 != NULL)  call-&gt;init_req(TypeFunc::Parms+1, parm1);
+ 186   if (parm2 != NULL)  call-&gt;init_req(TypeFunc::Parms+2, parm2);
+ 187   copy_call_debug_info(oldcall, call);
+ 188   call-&gt;set_cnt(PROB_UNLIKELY_MAG(4));  // Same effect as RC_UNCOMMON.
+ 189   _igvn.replace_node(oldcall, call);
+ 190   transform_later(call);
+ 191 
+ 192   return call;
+ 193 }
+ 194 
+ 195 void PhaseMacroExpand::extract_call_projections(CallNode *call) {
+ 196   _fallthroughproj = NULL;
+ 197   _fallthroughcatchproj = NULL;
+ 198   _ioproj_fallthrough = NULL;
+ 199   _ioproj_catchall = NULL;
+ 200   _catchallcatchproj = NULL;
+ 201   _memproj_fallthrough = NULL;
+ 202   _memproj_catchall = NULL;
+ 203   _resproj = NULL;
+ 204   for (DUIterator_Fast imax, i = call-&gt;fast_outs(imax); i &lt; imax; i++) {
+ 205     ProjNode *pn = call-&gt;fast_out(i)-&gt;as_Proj();
+ 206     switch (pn-&gt;_con) {
+ 207       case TypeFunc::Control:
+ 208       {
+ 209         // For Control (fallthrough) and I_O (catch_all_index) we have CatchProj -&gt; Catch -&gt; Proj
+ 210         _fallthroughproj = pn;
+ 211         DUIterator_Fast jmax, j = pn-&gt;fast_outs(jmax);
+ 212         const Node *cn = pn-&gt;fast_out(j);
+ 213         if (cn-&gt;is_Catch()) {
+ 214           ProjNode *cpn = NULL;
+ 215           for (DUIterator_Fast kmax, k = cn-&gt;fast_outs(kmax); k &lt; kmax; k++) {
+ 216             cpn = cn-&gt;fast_out(k)-&gt;as_Proj();
+ 217             assert(cpn-&gt;is_CatchProj(), &quot;must be a CatchProjNode&quot;);
+ 218             if (cpn-&gt;_con == CatchProjNode::fall_through_index)
+ 219               _fallthroughcatchproj = cpn;
+ 220             else {
+ 221               assert(cpn-&gt;_con == CatchProjNode::catch_all_index, &quot;must be correct index.&quot;);
+ 222               _catchallcatchproj = cpn;
+ 223             }
+ 224           }
+ 225         }
+ 226         break;
+ 227       }
+ 228       case TypeFunc::I_O:
+ 229         if (pn-&gt;_is_io_use)
+ 230           _ioproj_catchall = pn;
+ 231         else
+ 232           _ioproj_fallthrough = pn;
+ 233         break;
+ 234       case TypeFunc::Memory:
+ 235         if (pn-&gt;_is_io_use)
+ 236           _memproj_catchall = pn;
+ 237         else
+ 238           _memproj_fallthrough = pn;
+ 239         break;
+ 240       case TypeFunc::Parms:
+ 241         _resproj = pn;
+ 242         break;
+ 243       default:
+ 244         assert(false, &quot;unexpected projection from allocation node.&quot;);
+ 245     }
+ 246   }
+ 247 
+ 248 }
+ 249 
+ 250 void PhaseMacroExpand::eliminate_gc_barrier(Node* p2x) {
+ 251   BarrierSetC2 *bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();
+ 252   bs-&gt;eliminate_gc_barrier(this, p2x);
+ 253 }
+ 254 
+ 255 // Search for a memory operation for the specified memory slice.
+ 256 static Node *scan_mem_chain(Node *mem, int alias_idx, int offset, Node *start_mem, Node *alloc, PhaseGVN *phase) {
+ 257   Node *orig_mem = mem;
+ 258   Node *alloc_mem = alloc-&gt;in(TypeFunc::Memory);
+ 259   const TypeOopPtr *tinst = phase-&gt;C-&gt;get_adr_type(alias_idx)-&gt;isa_oopptr();
+ 260   while (true) {
+ 261     if (mem == alloc_mem || mem == start_mem ) {
+ 262       return mem;  // hit one of our sentinels
+ 263     } else if (mem-&gt;is_MergeMem()) {
+ 264       mem = mem-&gt;as_MergeMem()-&gt;memory_at(alias_idx);
+ 265     } else if (mem-&gt;is_Proj() &amp;&amp; mem-&gt;as_Proj()-&gt;_con == TypeFunc::Memory) {
+ 266       Node *in = mem-&gt;in(0);
+ 267       // we can safely skip over safepoints, calls, locks and membars because we
+ 268       // already know that the object is safe to eliminate.
+ 269       if (in-&gt;is_Initialize() &amp;&amp; in-&gt;as_Initialize()-&gt;allocation() == alloc) {
+ 270         return in;
+ 271       } else if (in-&gt;is_Call()) {
+ 272         CallNode *call = in-&gt;as_Call();
+ 273         if (call-&gt;may_modify(tinst, phase)) {
+ 274           assert(call-&gt;is_ArrayCopy(), &quot;ArrayCopy is the only call node that doesn&#39;t make allocation escape&quot;);
+ 275           if (call-&gt;as_ArrayCopy()-&gt;modifies(offset, offset, phase, false)) {
+ 276             return in;
+ 277           }
+ 278         }
+ 279         mem = in-&gt;in(TypeFunc::Memory);
+ 280       } else if (in-&gt;is_MemBar()) {
+ 281         ArrayCopyNode* ac = NULL;
+ 282         if (ArrayCopyNode::may_modify(tinst, in-&gt;as_MemBar(), phase, ac)) {
+ 283           assert(ac != NULL &amp;&amp; ac-&gt;is_clonebasic(), &quot;Only basic clone is a non escaping clone&quot;);
+ 284           return ac;
+ 285         }
+ 286         mem = in-&gt;in(TypeFunc::Memory);
+ 287       } else {
+ 288         assert(false, &quot;unexpected projection&quot;);
+ 289       }
+ 290     } else if (mem-&gt;is_Store()) {
+ 291       const TypePtr* atype = mem-&gt;as_Store()-&gt;adr_type();
+ 292       int adr_idx = phase-&gt;C-&gt;get_alias_index(atype);
+ 293       if (adr_idx == alias_idx) {
+ 294         assert(atype-&gt;isa_oopptr(), &quot;address type must be oopptr&quot;);
+ 295         int adr_offset = atype-&gt;offset();
+ 296         uint adr_iid = atype-&gt;is_oopptr()-&gt;instance_id();
+ 297         // Array elements references have the same alias_idx
+ 298         // but different offset and different instance_id.
+ 299         if (adr_offset == offset &amp;&amp; adr_iid == alloc-&gt;_idx)
+ 300           return mem;
+ 301       } else {
+ 302         assert(adr_idx == Compile::AliasIdxRaw, &quot;address must match or be raw&quot;);
+ 303       }
+ 304       mem = mem-&gt;in(MemNode::Memory);
+ 305     } else if (mem-&gt;is_ClearArray()) {
+<a name="1" id="anc1"></a><span class="line-added"> 306       intptr_t offset;</span>
+<span class="line-added"> 307       AllocateNode* alloc = AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset);</span>
+<span class="line-added"> 308 </span>
+<span class="line-added"> 309       if (alloc == NULL) {</span>
+<span class="line-added"> 310         return start_mem;</span>
+<span class="line-added"> 311       }</span>
+<span class="line-added"> 312 </span>
+ 313       if (!ClearArrayNode::step_through(&amp;mem, alloc-&gt;_idx, phase)) {
+ 314         // Can not bypass initialization of the instance
+ 315         // we are looking.
+ 316         debug_only(intptr_t offset;)
+ 317         assert(alloc == AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset), &quot;sanity&quot;);
+ 318         InitializeNode* init = alloc-&gt;as_Allocate()-&gt;initialization();
+ 319         // We are looking for stored value, return Initialize node
+ 320         // or memory edge from Allocate node.
+ 321         if (init != NULL)
+ 322           return init;
+ 323         else
+ 324           return alloc-&gt;in(TypeFunc::Memory); // It will produce zero value (see callers).
+ 325       }
+ 326       // Otherwise skip it (the call updated &#39;mem&#39; value).
+ 327     } else if (mem-&gt;Opcode() == Op_SCMemProj) {
+ 328       mem = mem-&gt;in(0);
+ 329       Node* adr = NULL;
+ 330       if (mem-&gt;is_LoadStore()) {
+ 331         adr = mem-&gt;in(MemNode::Address);
+ 332       } else {
+ 333         assert(mem-&gt;Opcode() == Op_EncodeISOArray ||
+ 334                mem-&gt;Opcode() == Op_StrCompressedCopy, &quot;sanity&quot;);
+ 335         adr = mem-&gt;in(3); // Destination array
+ 336       }
+ 337       const TypePtr* atype = adr-&gt;bottom_type()-&gt;is_ptr();
+ 338       int adr_idx = phase-&gt;C-&gt;get_alias_index(atype);
+ 339       if (adr_idx == alias_idx) {
+ 340         DEBUG_ONLY(mem-&gt;dump();)
+ 341         assert(false, &quot;Object is not scalar replaceable if a LoadStore node accesses its field&quot;);
+ 342         return NULL;
+ 343       }
+ 344       mem = mem-&gt;in(MemNode::Memory);
+ 345    } else if (mem-&gt;Opcode() == Op_StrInflatedCopy) {
+ 346       Node* adr = mem-&gt;in(3); // Destination array
+ 347       const TypePtr* atype = adr-&gt;bottom_type()-&gt;is_ptr();
+ 348       int adr_idx = phase-&gt;C-&gt;get_alias_index(atype);
+ 349       if (adr_idx == alias_idx) {
+ 350         DEBUG_ONLY(mem-&gt;dump();)
+ 351         assert(false, &quot;Object is not scalar replaceable if a StrInflatedCopy node accesses its field&quot;);
+ 352         return NULL;
+ 353       }
+ 354       mem = mem-&gt;in(MemNode::Memory);
+ 355     } else {
+ 356       return mem;
+ 357     }
+ 358     assert(mem != orig_mem, &quot;dead memory loop&quot;);
+ 359   }
+ 360 }
+ 361 
+ 362 // Generate loads from source of the arraycopy for fields of
+ 363 // destination needed at a deoptimization point
+ 364 Node* PhaseMacroExpand::make_arraycopy_load(ArrayCopyNode* ac, intptr_t offset, Node* ctl, Node* mem, BasicType ft, const Type *ftype, AllocateNode *alloc) {
+ 365   BasicType bt = ft;
+ 366   const Type *type = ftype;
+ 367   if (ft == T_NARROWOOP) {
+ 368     bt = T_OBJECT;
+ 369     type = ftype-&gt;make_oopptr();
+ 370   }
+ 371   Node* res = NULL;
+ 372   if (ac-&gt;is_clonebasic()) {
+ 373     assert(ac-&gt;in(ArrayCopyNode::Src) != ac-&gt;in(ArrayCopyNode::Dest), &quot;clone source equals destination&quot;);
+ 374     Node* base = ac-&gt;in(ArrayCopyNode::Src);
+ 375     Node* adr = _igvn.transform(new AddPNode(base, base, MakeConX(offset)));
+ 376     const TypePtr* adr_type = _igvn.type(base)-&gt;is_ptr()-&gt;add_offset(offset);
+ 377     res = LoadNode::make(_igvn, ctl, mem, adr, adr_type, type, bt, MemNode::unordered, LoadNode::UnknownControl);
+ 378   } else {
+ 379     if (ac-&gt;modifies(offset, offset, &amp;_igvn, true)) {
+ 380       assert(ac-&gt;in(ArrayCopyNode::Dest) == alloc-&gt;result_cast(), &quot;arraycopy destination should be allocation&#39;s result&quot;);
+ 381       uint shift = exact_log2(type2aelembytes(bt));
+ 382       Node* src_pos = ac-&gt;in(ArrayCopyNode::SrcPos);
+ 383       Node* dest_pos = ac-&gt;in(ArrayCopyNode::DestPos);
+ 384       const TypeInt* src_pos_t = _igvn.type(src_pos)-&gt;is_int();
+ 385       const TypeInt* dest_pos_t = _igvn.type(dest_pos)-&gt;is_int();
+ 386 
+ 387       Node* adr = NULL;
+ 388       const TypePtr* adr_type = NULL;
+ 389       if (src_pos_t-&gt;is_con() &amp;&amp; dest_pos_t-&gt;is_con()) {
+ 390         intptr_t off = ((src_pos_t-&gt;get_con() - dest_pos_t-&gt;get_con()) &lt;&lt; shift) + offset;
+ 391         Node* base = ac-&gt;in(ArrayCopyNode::Src);
+ 392         adr = _igvn.transform(new AddPNode(base, base, MakeConX(off)));
+ 393         adr_type = _igvn.type(base)-&gt;is_ptr()-&gt;add_offset(off);
+ 394         if (ac-&gt;in(ArrayCopyNode::Src) == ac-&gt;in(ArrayCopyNode::Dest)) {
+ 395           // Don&#39;t emit a new load from src if src == dst but try to get the value from memory instead
+ 396           return value_from_mem(ac-&gt;in(TypeFunc::Memory), ctl, ft, ftype, adr_type-&gt;isa_oopptr(), alloc);
+ 397         }
+ 398       } else {
+ 399         Node* diff = _igvn.transform(new SubINode(ac-&gt;in(ArrayCopyNode::SrcPos), ac-&gt;in(ArrayCopyNode::DestPos)));
+ 400 #ifdef _LP64
+ 401         diff = _igvn.transform(new ConvI2LNode(diff));
+ 402 #endif
+ 403         diff = _igvn.transform(new LShiftXNode(diff, intcon(shift)));
+ 404 
+ 405         Node* off = _igvn.transform(new AddXNode(MakeConX(offset), diff));
+ 406         Node* base = ac-&gt;in(ArrayCopyNode::Src);
+ 407         adr = _igvn.transform(new AddPNode(base, base, off));
+ 408         adr_type = _igvn.type(base)-&gt;is_ptr()-&gt;add_offset(Type::OffsetBot);
+ 409         if (ac-&gt;in(ArrayCopyNode::Src) == ac-&gt;in(ArrayCopyNode::Dest)) {
+ 410           // Non constant offset in the array: we can&#39;t statically
+ 411           // determine the value
+ 412           return NULL;
+ 413         }
+ 414       }
+ 415       res = LoadNode::make(_igvn, ctl, mem, adr, adr_type, type, bt, MemNode::unordered, LoadNode::UnknownControl);
+ 416     }
+ 417   }
+ 418   if (res != NULL) {
+ 419     res = _igvn.transform(res);
+ 420     if (ftype-&gt;isa_narrowoop()) {
+ 421       // PhaseMacroExpand::scalar_replacement adds DecodeN nodes
+ 422       res = _igvn.transform(new EncodePNode(res, ftype));
+ 423     }
+ 424     return res;
+ 425   }
+ 426   return NULL;
+ 427 }
+ 428 
+ 429 //
+ 430 // Given a Memory Phi, compute a value Phi containing the values from stores
+ 431 // on the input paths.
+ 432 // Note: this function is recursive, its depth is limited by the &quot;level&quot; argument
+ 433 // Returns the computed Phi, or NULL if it cannot compute it.
+ 434 Node *PhaseMacroExpand::value_from_mem_phi(Node *mem, BasicType ft, const Type *phi_type, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level) {
+ 435   assert(mem-&gt;is_Phi(), &quot;sanity&quot;);
+ 436   int alias_idx = C-&gt;get_alias_index(adr_t);
+ 437   int offset = adr_t-&gt;offset();
+ 438   int instance_id = adr_t-&gt;instance_id();
+ 439 
+ 440   // Check if an appropriate value phi already exists.
+ 441   Node* region = mem-&gt;in(0);
+ 442   for (DUIterator_Fast kmax, k = region-&gt;fast_outs(kmax); k &lt; kmax; k++) {
+ 443     Node* phi = region-&gt;fast_out(k);
+ 444     if (phi-&gt;is_Phi() &amp;&amp; phi != mem &amp;&amp;
+ 445         phi-&gt;as_Phi()-&gt;is_same_inst_field(phi_type, (int)mem-&gt;_idx, instance_id, alias_idx, offset)) {
+ 446       return phi;
+ 447     }
+ 448   }
+ 449   // Check if an appropriate new value phi already exists.
+ 450   Node* new_phi = value_phis-&gt;find(mem-&gt;_idx);
+ 451   if (new_phi != NULL)
+ 452     return new_phi;
+ 453 
+ 454   if (level &lt;= 0) {
+ 455     return NULL; // Give up: phi tree too deep
+ 456   }
+ 457   Node *start_mem = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);
+ 458   Node *alloc_mem = alloc-&gt;in(TypeFunc::Memory);
+ 459 
+ 460   uint length = mem-&gt;req();
+ 461   GrowableArray &lt;Node *&gt; values(length, length, NULL);
+ 462 
+ 463   // create a new Phi for the value
+ 464   PhiNode *phi = new PhiNode(mem-&gt;in(0), phi_type, NULL, mem-&gt;_idx, instance_id, alias_idx, offset);
+ 465   transform_later(phi);
+ 466   value_phis-&gt;push(phi, mem-&gt;_idx);
+ 467 
+ 468   for (uint j = 1; j &lt; length; j++) {
+ 469     Node *in = mem-&gt;in(j);
+ 470     if (in == NULL || in-&gt;is_top()) {
+ 471       values.at_put(j, in);
+ 472     } else  {
+ 473       Node *val = scan_mem_chain(in, alias_idx, offset, start_mem, alloc, &amp;_igvn);
+ 474       if (val == start_mem || val == alloc_mem) {
+ 475         // hit a sentinel, return appropriate 0 value
+ 476         values.at_put(j, _igvn.zerocon(ft));
+ 477         continue;
+ 478       }
+ 479       if (val-&gt;is_Initialize()) {
+ 480         val = val-&gt;as_Initialize()-&gt;find_captured_store(offset, type2aelembytes(ft), &amp;_igvn);
+ 481       }
+ 482       if (val == NULL) {
+ 483         return NULL;  // can&#39;t find a value on this path
+ 484       }
+ 485       if (val == mem) {
+ 486         values.at_put(j, mem);
+ 487       } else if (val-&gt;is_Store()) {
+ 488         Node* n = val-&gt;in(MemNode::ValueIn);
+ 489         BarrierSetC2* bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();
+ 490         n = bs-&gt;step_over_gc_barrier(n);
+ 491         values.at_put(j, n);
+ 492       } else if(val-&gt;is_Proj() &amp;&amp; val-&gt;in(0) == alloc) {
+ 493         values.at_put(j, _igvn.zerocon(ft));
+ 494       } else if (val-&gt;is_Phi()) {
+ 495         val = value_from_mem_phi(val, ft, phi_type, adr_t, alloc, value_phis, level-1);
+ 496         if (val == NULL) {
+ 497           return NULL;
+ 498         }
+ 499         values.at_put(j, val);
+ 500       } else if (val-&gt;Opcode() == Op_SCMemProj) {
+ 501         assert(val-&gt;in(0)-&gt;is_LoadStore() ||
+ 502                val-&gt;in(0)-&gt;Opcode() == Op_EncodeISOArray ||
+ 503                val-&gt;in(0)-&gt;Opcode() == Op_StrCompressedCopy, &quot;sanity&quot;);
+ 504         assert(false, &quot;Object is not scalar replaceable if a LoadStore node accesses its field&quot;);
+ 505         return NULL;
+ 506       } else if (val-&gt;is_ArrayCopy()) {
+ 507         Node* res = make_arraycopy_load(val-&gt;as_ArrayCopy(), offset, val-&gt;in(0), val-&gt;in(TypeFunc::Memory), ft, phi_type, alloc);
+ 508         if (res == NULL) {
+ 509           return NULL;
+ 510         }
+ 511         values.at_put(j, res);
+ 512       } else {
+ 513 #ifdef ASSERT
+ 514         val-&gt;dump();
+ 515         assert(false, &quot;unknown node on this path&quot;);
+ 516 #endif
+ 517         return NULL;  // unknown node on this path
+ 518       }
+ 519     }
+ 520   }
+ 521   // Set Phi&#39;s inputs
+ 522   for (uint j = 1; j &lt; length; j++) {
+ 523     if (values.at(j) == mem) {
+ 524       phi-&gt;init_req(j, phi);
+ 525     } else {
+ 526       phi-&gt;init_req(j, values.at(j));
+ 527     }
+ 528   }
+ 529   return phi;
+ 530 }
+ 531 
+ 532 // Search the last value stored into the object&#39;s field.
+ 533 Node *PhaseMacroExpand::value_from_mem(Node *sfpt_mem, Node *sfpt_ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc) {
+ 534   assert(adr_t-&gt;is_known_instance_field(), &quot;instance required&quot;);
+ 535   int instance_id = adr_t-&gt;instance_id();
+ 536   assert((uint)instance_id == alloc-&gt;_idx, &quot;wrong allocation&quot;);
+ 537 
+ 538   int alias_idx = C-&gt;get_alias_index(adr_t);
+ 539   int offset = adr_t-&gt;offset();
+ 540   Node *start_mem = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);
+ 541   Node *alloc_ctrl = alloc-&gt;in(TypeFunc::Control);
+ 542   Node *alloc_mem = alloc-&gt;in(TypeFunc::Memory);
+ 543   Arena *a = Thread::current()-&gt;resource_area();
+ 544   VectorSet visited(a);
+ 545 
+ 546   bool done = sfpt_mem == alloc_mem;
+ 547   Node *mem = sfpt_mem;
+ 548   while (!done) {
+ 549     if (visited.test_set(mem-&gt;_idx)) {
+ 550       return NULL;  // found a loop, give up
+ 551     }
+ 552     mem = scan_mem_chain(mem, alias_idx, offset, start_mem, alloc, &amp;_igvn);
+ 553     if (mem == start_mem || mem == alloc_mem) {
+ 554       done = true;  // hit a sentinel, return appropriate 0 value
+ 555     } else if (mem-&gt;is_Initialize()) {
+ 556       mem = mem-&gt;as_Initialize()-&gt;find_captured_store(offset, type2aelembytes(ft), &amp;_igvn);
+ 557       if (mem == NULL) {
+ 558         done = true; // Something go wrong.
+ 559       } else if (mem-&gt;is_Store()) {
+ 560         const TypePtr* atype = mem-&gt;as_Store()-&gt;adr_type();
+ 561         assert(C-&gt;get_alias_index(atype) == Compile::AliasIdxRaw, &quot;store is correct memory slice&quot;);
+ 562         done = true;
+ 563       }
+ 564     } else if (mem-&gt;is_Store()) {
+ 565       const TypeOopPtr* atype = mem-&gt;as_Store()-&gt;adr_type()-&gt;isa_oopptr();
+ 566       assert(atype != NULL, &quot;address type must be oopptr&quot;);
+ 567       assert(C-&gt;get_alias_index(atype) == alias_idx &amp;&amp;
+ 568              atype-&gt;is_known_instance_field() &amp;&amp; atype-&gt;offset() == offset &amp;&amp;
+ 569              atype-&gt;instance_id() == instance_id, &quot;store is correct memory slice&quot;);
+ 570       done = true;
+ 571     } else if (mem-&gt;is_Phi()) {
+ 572       // try to find a phi&#39;s unique input
+ 573       Node *unique_input = NULL;
+ 574       Node *top = C-&gt;top();
+ 575       for (uint i = 1; i &lt; mem-&gt;req(); i++) {
+ 576         Node *n = scan_mem_chain(mem-&gt;in(i), alias_idx, offset, start_mem, alloc, &amp;_igvn);
+ 577         if (n == NULL || n == top || n == mem) {
+ 578           continue;
+ 579         } else if (unique_input == NULL) {
+ 580           unique_input = n;
+ 581         } else if (unique_input != n) {
+ 582           unique_input = top;
+ 583           break;
+ 584         }
+ 585       }
+ 586       if (unique_input != NULL &amp;&amp; unique_input != top) {
+ 587         mem = unique_input;
+ 588       } else {
+ 589         done = true;
+ 590       }
+ 591     } else if (mem-&gt;is_ArrayCopy()) {
+ 592       done = true;
+ 593     } else {
+ 594       assert(false, &quot;unexpected node&quot;);
+ 595     }
+ 596   }
+ 597   if (mem != NULL) {
+ 598     if (mem == start_mem || mem == alloc_mem) {
+ 599       // hit a sentinel, return appropriate 0 value
+ 600       return _igvn.zerocon(ft);
+ 601     } else if (mem-&gt;is_Store()) {
+ 602       Node* n = mem-&gt;in(MemNode::ValueIn);
+ 603       BarrierSetC2* bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();
+ 604       n = bs-&gt;step_over_gc_barrier(n);
+ 605       return n;
+ 606     } else if (mem-&gt;is_Phi()) {
+ 607       // attempt to produce a Phi reflecting the values on the input paths of the Phi
+ 608       Node_Stack value_phis(a, 8);
+ 609       Node * phi = value_from_mem_phi(mem, ft, ftype, adr_t, alloc, &amp;value_phis, ValueSearchLimit);
+ 610       if (phi != NULL) {
+ 611         return phi;
+ 612       } else {
+ 613         // Kill all new Phis
+ 614         while(value_phis.is_nonempty()) {
+ 615           Node* n = value_phis.node();
+ 616           _igvn.replace_node(n, C-&gt;top());
+ 617           value_phis.pop();
+ 618         }
+ 619       }
+ 620     } else if (mem-&gt;is_ArrayCopy()) {
+ 621       Node* ctl = mem-&gt;in(0);
+ 622       Node* m = mem-&gt;in(TypeFunc::Memory);
+ 623       if (sfpt_ctl-&gt;is_Proj() &amp;&amp; sfpt_ctl-&gt;as_Proj()-&gt;is_uncommon_trap_proj(Deoptimization::Reason_none)) {
+ 624         // pin the loads in the uncommon trap path
+ 625         ctl = sfpt_ctl;
+ 626         m = sfpt_mem;
+ 627       }
+ 628       return make_arraycopy_load(mem-&gt;as_ArrayCopy(), offset, ctl, m, ft, ftype, alloc);
+ 629     }
+ 630   }
+ 631   // Something go wrong.
+ 632   return NULL;
+ 633 }
+ 634 
+ 635 // Check the possibility of scalar replacement.
+ 636 bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints) {
+ 637   //  Scan the uses of the allocation to check for anything that would
+ 638   //  prevent us from eliminating it.
+ 639   NOT_PRODUCT( const char* fail_eliminate = NULL; )
+ 640   DEBUG_ONLY( Node* disq_node = NULL; )
+ 641   bool  can_eliminate = true;
+ 642 
+ 643   Node* res = alloc-&gt;result_cast();
+ 644   const TypeOopPtr* res_type = NULL;
+ 645   if (res == NULL) {
+ 646     // All users were eliminated.
+ 647   } else if (!res-&gt;is_CheckCastPP()) {
+ 648     NOT_PRODUCT(fail_eliminate = &quot;Allocation does not have unique CheckCastPP&quot;;)
+ 649     can_eliminate = false;
+ 650   } else {
+ 651     res_type = _igvn.type(res)-&gt;isa_oopptr();
+ 652     if (res_type == NULL) {
+ 653       NOT_PRODUCT(fail_eliminate = &quot;Neither instance or array allocation&quot;;)
+ 654       can_eliminate = false;
+ 655     } else if (res_type-&gt;isa_aryptr()) {
+ 656       int length = alloc-&gt;in(AllocateNode::ALength)-&gt;find_int_con(-1);
+ 657       if (length &lt; 0) {
+ 658         NOT_PRODUCT(fail_eliminate = &quot;Array&#39;s size is not constant&quot;;)
+ 659         can_eliminate = false;
+ 660       }
+ 661     }
+ 662   }
+ 663 
+ 664   if (can_eliminate &amp;&amp; res != NULL) {
+ 665     for (DUIterator_Fast jmax, j = res-&gt;fast_outs(jmax);
+ 666                                j &lt; jmax &amp;&amp; can_eliminate; j++) {
+ 667       Node* use = res-&gt;fast_out(j);
+ 668 
+ 669       if (use-&gt;is_AddP()) {
+ 670         const TypePtr* addp_type = _igvn.type(use)-&gt;is_ptr();
+ 671         int offset = addp_type-&gt;offset();
+ 672 
+ 673         if (offset == Type::OffsetTop || offset == Type::OffsetBot) {
+ 674           NOT_PRODUCT(fail_eliminate = &quot;Undefined field referrence&quot;;)
+ 675           can_eliminate = false;
+ 676           break;
+ 677         }
+ 678         for (DUIterator_Fast kmax, k = use-&gt;fast_outs(kmax);
+ 679                                    k &lt; kmax &amp;&amp; can_eliminate; k++) {
+ 680           Node* n = use-&gt;fast_out(k);
+ 681           if (!n-&gt;is_Store() &amp;&amp; n-&gt;Opcode() != Op_CastP2X
+ 682               SHENANDOAHGC_ONLY(&amp;&amp; (!UseShenandoahGC || !ShenandoahBarrierSetC2::is_shenandoah_wb_pre_call(n))) ) {
+ 683             DEBUG_ONLY(disq_node = n;)
+ 684             if (n-&gt;is_Load() || n-&gt;is_LoadStore()) {
+ 685               NOT_PRODUCT(fail_eliminate = &quot;Field load&quot;;)
+ 686             } else {
+ 687               NOT_PRODUCT(fail_eliminate = &quot;Not store field referrence&quot;;)
+ 688             }
+ 689             can_eliminate = false;
+ 690           }
+ 691         }
+ 692       } else if (use-&gt;is_ArrayCopy() &amp;&amp;
+ 693                  (use-&gt;as_ArrayCopy()-&gt;is_clonebasic() ||
+ 694                   use-&gt;as_ArrayCopy()-&gt;is_arraycopy_validated() ||
+ 695                   use-&gt;as_ArrayCopy()-&gt;is_copyof_validated() ||
+ 696                   use-&gt;as_ArrayCopy()-&gt;is_copyofrange_validated()) &amp;&amp;
+ 697                  use-&gt;in(ArrayCopyNode::Dest) == res) {
+ 698         // ok to eliminate
+ 699       } else if (use-&gt;is_SafePoint()) {
+ 700         SafePointNode* sfpt = use-&gt;as_SafePoint();
+ 701         if (sfpt-&gt;is_Call() &amp;&amp; sfpt-&gt;as_Call()-&gt;has_non_debug_use(res)) {
+ 702           // Object is passed as argument.
+ 703           DEBUG_ONLY(disq_node = use;)
+ 704           NOT_PRODUCT(fail_eliminate = &quot;Object is passed as argument&quot;;)
+ 705           can_eliminate = false;
+ 706         }
+ 707         Node* sfptMem = sfpt-&gt;memory();
+ 708         if (sfptMem == NULL || sfptMem-&gt;is_top()) {
+ 709           DEBUG_ONLY(disq_node = use;)
+ 710           NOT_PRODUCT(fail_eliminate = &quot;NULL or TOP memory&quot;;)
+ 711           can_eliminate = false;
+ 712         } else {
+ 713           safepoints.append_if_missing(sfpt);
+ 714         }
+ 715       } else if (use-&gt;Opcode() != Op_CastP2X) { // CastP2X is used by card mark
+ 716         if (use-&gt;is_Phi()) {
+ 717           if (use-&gt;outcnt() == 1 &amp;&amp; use-&gt;unique_out()-&gt;Opcode() == Op_Return) {
+ 718             NOT_PRODUCT(fail_eliminate = &quot;Object is return value&quot;;)
+ 719           } else {
+ 720             NOT_PRODUCT(fail_eliminate = &quot;Object is referenced by Phi&quot;;)
+ 721           }
+ 722           DEBUG_ONLY(disq_node = use;)
+ 723         } else {
+ 724           if (use-&gt;Opcode() == Op_Return) {
+ 725             NOT_PRODUCT(fail_eliminate = &quot;Object is return value&quot;;)
+ 726           }else {
+ 727             NOT_PRODUCT(fail_eliminate = &quot;Object is referenced by node&quot;;)
+ 728           }
+ 729           DEBUG_ONLY(disq_node = use;)
+ 730         }
+ 731         can_eliminate = false;
+ 732       }
+ 733     }
+ 734   }
+ 735 
+ 736 #ifndef PRODUCT
+<a name="2" id="anc2"></a><span class="line-modified"> 737   if (print_eliminate_allocations()) {</span>
+ 738     if (can_eliminate) {
+ 739       tty-&gt;print(&quot;Scalar &quot;);
+ 740       if (res == NULL)
+ 741         alloc-&gt;dump();
+ 742       else
+ 743         res-&gt;dump();
+ 744     } else if (alloc-&gt;_is_scalar_replaceable) {
+ 745       tty-&gt;print(&quot;NotScalar (%s)&quot;, fail_eliminate);
+ 746       if (res == NULL)
+ 747         alloc-&gt;dump();
+ 748       else
+ 749         res-&gt;dump();
+ 750 #ifdef ASSERT
+ 751       if (disq_node != NULL) {
+ 752           tty-&gt;print(&quot;  &gt;&gt;&gt;&gt; &quot;);
+ 753           disq_node-&gt;dump();
+ 754       }
+ 755 #endif /*ASSERT*/
+ 756     }
+ 757   }
+ 758 #endif
+ 759   return can_eliminate;
+ 760 }
+ 761 
+<a name="3" id="anc3"></a><span class="line-added"> 762 void PhaseMacroExpand::adjust_safepoint_jvms(SafePointNode* sfpt, Node* res, SafePointScalarObjectNode* sobj) {</span>
+<span class="line-added"> 763   JVMState *jvms = sfpt-&gt;jvms();</span>
+<span class="line-added"> 764   jvms-&gt;set_endoff(sfpt-&gt;req());</span>
+<span class="line-added"> 765 </span>
+<span class="line-added"> 766   // Now make a pass over the debug information replacing any references</span>
+<span class="line-added"> 767   // to the allocated object with &quot;sobj&quot;</span>
+<span class="line-added"> 768   int start = jvms-&gt;debug_start();</span>
+<span class="line-added"> 769   int end   = jvms-&gt;debug_end();</span>
+<span class="line-added"> 770   sfpt-&gt;replace_edges_in_range(res, sobj, start, end);</span>
+<span class="line-added"> 771   _igvn._worklist.push(sfpt);</span>
+<span class="line-added"> 772 }</span>
+<span class="line-added"> 773 </span>
+ 774 // Do scalar replacement.
+ 775 bool PhaseMacroExpand::scalar_replacement(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints) {
+ 776   GrowableArray &lt;SafePointNode *&gt; safepoints_done;
+ 777 
+ 778   ciKlass* klass = NULL;
+ 779   ciInstanceKlass* iklass = NULL;
+ 780   int nfields = 0;
+ 781   int array_base = 0;
+ 782   int element_size = 0;
+ 783   BasicType basic_elem_type = T_ILLEGAL;
+ 784   ciType* elem_type = NULL;
+ 785 
+ 786   Node* res = alloc-&gt;result_cast();
+ 787   assert(res == NULL || res-&gt;is_CheckCastPP(), &quot;unexpected AllocateNode result&quot;);
+ 788   const TypeOopPtr* res_type = NULL;
+ 789   if (res != NULL) { // Could be NULL when there are no users
+ 790     res_type = _igvn.type(res)-&gt;isa_oopptr();
+ 791   }
+ 792 
+ 793   if (res != NULL) {
+ 794     klass = res_type-&gt;klass();
+ 795     if (res_type-&gt;isa_instptr()) {
+ 796       // find the fields of the class which will be needed for safepoint debug information
+ 797       assert(klass-&gt;is_instance_klass(), &quot;must be an instance klass.&quot;);
+ 798       iklass = klass-&gt;as_instance_klass();
+ 799       nfields = iklass-&gt;nof_nonstatic_fields();
+ 800     } else {
+ 801       // find the array&#39;s elements which will be needed for safepoint debug information
+ 802       nfields = alloc-&gt;in(AllocateNode::ALength)-&gt;find_int_con(-1);
+ 803       assert(klass-&gt;is_array_klass() &amp;&amp; nfields &gt;= 0, &quot;must be an array klass.&quot;);
+ 804       elem_type = klass-&gt;as_array_klass()-&gt;element_type();
+ 805       basic_elem_type = elem_type-&gt;basic_type();
+ 806       array_base = arrayOopDesc::base_offset_in_bytes(basic_elem_type);
+ 807       element_size = type2aelembytes(basic_elem_type);
+ 808     }
+ 809   }
+ 810   //
+ 811   // Process the safepoint uses
+ 812   //
+ 813   while (safepoints.length() &gt; 0) {
+ 814     SafePointNode* sfpt = safepoints.pop();
+ 815     Node* mem = sfpt-&gt;memory();
+ 816     Node* ctl = sfpt-&gt;control();
+ 817     assert(sfpt-&gt;jvms() != NULL, &quot;missed JVMS&quot;);
+ 818     // Fields of scalar objs are referenced only at the end
+ 819     // of regular debuginfo at the last (youngest) JVMS.
+ 820     // Record relative start index.
+ 821     uint first_ind = (sfpt-&gt;req() - sfpt-&gt;jvms()-&gt;scloff());
+ 822     SafePointScalarObjectNode* sobj = new SafePointScalarObjectNode(res_type,
+ 823 #ifdef ASSERT
+ 824                                                  alloc,
+ 825 #endif
+ 826                                                  first_ind, nfields);
+ 827     sobj-&gt;init_req(0, C-&gt;root());
+ 828     transform_later(sobj);
+ 829 
+ 830     // Scan object&#39;s fields adding an input to the safepoint for each field.
+ 831     for (int j = 0; j &lt; nfields; j++) {
+ 832       intptr_t offset;
+ 833       ciField* field = NULL;
+ 834       if (iklass != NULL) {
+ 835         field = iklass-&gt;nonstatic_field_at(j);
+ 836         offset = field-&gt;offset();
+ 837         elem_type = field-&gt;type();
+ 838         basic_elem_type = field-&gt;layout_type();
+ 839       } else {
+ 840         offset = array_base + j * (intptr_t)element_size;
+ 841       }
+ 842 
+ 843       const Type *field_type;
+ 844       // The next code is taken from Parse::do_get_xxx().
+ 845       if (is_reference_type(basic_elem_type)) {
+ 846         if (!elem_type-&gt;is_loaded()) {
+ 847           field_type = TypeInstPtr::BOTTOM;
+ 848         } else if (field != NULL &amp;&amp; field-&gt;is_static_constant()) {
+ 849           // This can happen if the constant oop is non-perm.
+ 850           ciObject* con = field-&gt;constant_value().as_object();
+ 851           // Do not &quot;join&quot; in the previous type; it doesn&#39;t add value,
+ 852           // and may yield a vacuous result if the field is of interface type.
+ 853           field_type = TypeOopPtr::make_from_constant(con)-&gt;isa_oopptr();
+ 854           assert(field_type != NULL, &quot;field singleton type must be consistent&quot;);
+ 855         } else {
+ 856           field_type = TypeOopPtr::make_from_klass(elem_type-&gt;as_klass());
+ 857         }
+ 858         if (UseCompressedOops) {
+ 859           field_type = field_type-&gt;make_narrowoop();
+ 860           basic_elem_type = T_NARROWOOP;
+ 861         }
+ 862       } else {
+ 863         field_type = Type::get_const_basic_type(basic_elem_type);
+ 864       }
+ 865 
+ 866       const TypeOopPtr *field_addr_type = res_type-&gt;add_offset(offset)-&gt;isa_oopptr();
+ 867 
+ 868       Node *field_val = value_from_mem(mem, ctl, basic_elem_type, field_type, field_addr_type, alloc);
+ 869       if (field_val == NULL) {
+ 870         // We weren&#39;t able to find a value for this field,
+ 871         // give up on eliminating this allocation.
+ 872 
+ 873         // Remove any extra entries we added to the safepoint.
+ 874         uint last = sfpt-&gt;req() - 1;
+ 875         for (int k = 0;  k &lt; j; k++) {
+ 876           sfpt-&gt;del_req(last--);
+ 877         }
+ 878         _igvn._worklist.push(sfpt);
+ 879         // rollback processed safepoints
+ 880         while (safepoints_done.length() &gt; 0) {
+ 881           SafePointNode* sfpt_done = safepoints_done.pop();
+ 882           // remove any extra entries we added to the safepoint
+ 883           last = sfpt_done-&gt;req() - 1;
+ 884           for (int k = 0;  k &lt; nfields; k++) {
+ 885             sfpt_done-&gt;del_req(last--);
+ 886           }
+ 887           JVMState *jvms = sfpt_done-&gt;jvms();
+ 888           jvms-&gt;set_endoff(sfpt_done-&gt;req());
+ 889           // Now make a pass over the debug information replacing any references
+ 890           // to SafePointScalarObjectNode with the allocated object.
+ 891           int start = jvms-&gt;debug_start();
+ 892           int end   = jvms-&gt;debug_end();
+ 893           for (int i = start; i &lt; end; i++) {
+ 894             if (sfpt_done-&gt;in(i)-&gt;is_SafePointScalarObject()) {
+ 895               SafePointScalarObjectNode* scobj = sfpt_done-&gt;in(i)-&gt;as_SafePointScalarObject();
+ 896               if (scobj-&gt;first_index(jvms) == sfpt_done-&gt;req() &amp;&amp;
+ 897                   scobj-&gt;n_fields() == (uint)nfields) {
+ 898                 assert(scobj-&gt;alloc() == alloc, &quot;sanity&quot;);
+ 899                 sfpt_done-&gt;set_req(i, res);
+ 900               }
+ 901             }
+ 902           }
+ 903           _igvn._worklist.push(sfpt_done);
+ 904         }
+ 905 #ifndef PRODUCT
+<a name="4" id="anc4"></a><span class="line-modified"> 906         if (print_eliminate_allocations()) {</span>
+ 907           if (field != NULL) {
+ 908             tty-&gt;print(&quot;=== At SafePoint node %d can&#39;t find value of Field: &quot;,
+ 909                        sfpt-&gt;_idx);
+ 910             field-&gt;print();
+ 911             int field_idx = C-&gt;get_alias_index(field_addr_type);
+ 912             tty-&gt;print(&quot; (alias_idx=%d)&quot;, field_idx);
+ 913           } else { // Array&#39;s element
+ 914             tty-&gt;print(&quot;=== At SafePoint node %d can&#39;t find value of array element [%d]&quot;,
+ 915                        sfpt-&gt;_idx, j);
+ 916           }
+ 917           tty-&gt;print(&quot;, which prevents elimination of: &quot;);
+ 918           if (res == NULL)
+ 919             alloc-&gt;dump();
+ 920           else
+ 921             res-&gt;dump();
+ 922         }
+ 923 #endif
+ 924         return false;
+ 925       }
+ 926       if (UseCompressedOops &amp;&amp; field_type-&gt;isa_narrowoop()) {
+ 927         // Enable &quot;DecodeN(EncodeP(Allocate)) --&gt; Allocate&quot; transformation
+ 928         // to be able scalar replace the allocation.
+ 929         if (field_val-&gt;is_EncodeP()) {
+ 930           field_val = field_val-&gt;in(1);
+ 931         } else {
+ 932           field_val = transform_later(new DecodeNNode(field_val, field_val-&gt;get_ptr_type()));
+ 933         }
+ 934       }
+ 935       sfpt-&gt;add_req(field_val);
+ 936     }
+<a name="5" id="anc5"></a><span class="line-modified"> 937     adjust_safepoint_jvms(sfpt, res, sobj);</span>
+
+
+
+
+
+
+
+ 938     safepoints_done.append_if_missing(sfpt); // keep it for rollback
+ 939   }
+ 940   return true;
+ 941 }
+ 942 
+ 943 static void disconnect_projections(MultiNode* n, PhaseIterGVN&amp; igvn) {
+ 944   Node* ctl_proj = n-&gt;proj_out_or_null(TypeFunc::Control);
+ 945   Node* mem_proj = n-&gt;proj_out_or_null(TypeFunc::Memory);
+ 946   if (ctl_proj != NULL) {
+ 947     igvn.replace_node(ctl_proj, n-&gt;in(0));
+ 948   }
+ 949   if (mem_proj != NULL) {
+ 950     igvn.replace_node(mem_proj, n-&gt;in(TypeFunc::Memory));
+ 951   }
+ 952 }
+ 953 
+ 954 // Process users of eliminated allocation.
+ 955 void PhaseMacroExpand::process_users_of_allocation(CallNode *alloc) {
+ 956   Node* res = alloc-&gt;result_cast();
+ 957   if (res != NULL) {
+ 958     for (DUIterator_Last jmin, j = res-&gt;last_outs(jmin); j &gt;= jmin; ) {
+ 959       Node *use = res-&gt;last_out(j);
+ 960       uint oc1 = res-&gt;outcnt();
+ 961 
+ 962       if (use-&gt;is_AddP()) {
+ 963         for (DUIterator_Last kmin, k = use-&gt;last_outs(kmin); k &gt;= kmin; ) {
+ 964           Node *n = use-&gt;last_out(k);
+ 965           uint oc2 = use-&gt;outcnt();
+ 966           if (n-&gt;is_Store()) {
+ 967 #ifdef ASSERT
+ 968             // Verify that there is no dependent MemBarVolatile nodes,
+ 969             // they should be removed during IGVN, see MemBarNode::Ideal().
+ 970             for (DUIterator_Fast pmax, p = n-&gt;fast_outs(pmax);
+ 971                                        p &lt; pmax; p++) {
+ 972               Node* mb = n-&gt;fast_out(p);
+ 973               assert(mb-&gt;is_Initialize() || !mb-&gt;is_MemBar() ||
+ 974                      mb-&gt;req() &lt;= MemBarNode::Precedent ||
+ 975                      mb-&gt;in(MemBarNode::Precedent) != n,
+ 976                      &quot;MemBarVolatile should be eliminated for non-escaping object&quot;);
+ 977             }
+ 978 #endif
+ 979             _igvn.replace_node(n, n-&gt;in(MemNode::Memory));
+ 980           } else {
+ 981             eliminate_gc_barrier(n);
+ 982           }
+ 983           k -= (oc2 - use-&gt;outcnt());
+ 984         }
+ 985         _igvn.remove_dead_node(use);
+ 986       } else if (use-&gt;is_ArrayCopy()) {
+ 987         // Disconnect ArrayCopy node
+ 988         ArrayCopyNode* ac = use-&gt;as_ArrayCopy();
+ 989         if (ac-&gt;is_clonebasic()) {
+ 990           Node* membar_after = ac-&gt;proj_out(TypeFunc::Control)-&gt;unique_ctrl_out();
+ 991           disconnect_projections(ac, _igvn);
+ 992           assert(alloc-&gt;in(TypeFunc::Memory)-&gt;is_Proj() &amp;&amp; alloc-&gt;in(TypeFunc::Memory)-&gt;in(0)-&gt;Opcode() == Op_MemBarCPUOrder, &quot;mem barrier expected before allocation&quot;);
+ 993           Node* membar_before = alloc-&gt;in(TypeFunc::Memory)-&gt;in(0);
+ 994           disconnect_projections(membar_before-&gt;as_MemBar(), _igvn);
+ 995           if (membar_after-&gt;is_MemBar()) {
+ 996             disconnect_projections(membar_after-&gt;as_MemBar(), _igvn);
+ 997           }
+ 998         } else {
+ 999           assert(ac-&gt;is_arraycopy_validated() ||
+1000                  ac-&gt;is_copyof_validated() ||
+1001                  ac-&gt;is_copyofrange_validated(), &quot;unsupported&quot;);
+1002           CallProjections callprojs;
+1003           ac-&gt;extract_projections(&amp;callprojs, true);
+1004 
+1005           _igvn.replace_node(callprojs.fallthrough_ioproj, ac-&gt;in(TypeFunc::I_O));
+1006           _igvn.replace_node(callprojs.fallthrough_memproj, ac-&gt;in(TypeFunc::Memory));
+1007           _igvn.replace_node(callprojs.fallthrough_catchproj, ac-&gt;in(TypeFunc::Control));
+1008 
+1009           // Set control to top. IGVN will remove the remaining projections
+1010           ac-&gt;set_req(0, top());
+1011           ac-&gt;replace_edge(res, top());
+1012 
+1013           // Disconnect src right away: it can help find new
+1014           // opportunities for allocation elimination
+1015           Node* src = ac-&gt;in(ArrayCopyNode::Src);
+1016           ac-&gt;replace_edge(src, top());
+1017           // src can be top at this point if src and dest of the
+1018           // arraycopy were the same
+1019           if (src-&gt;outcnt() == 0 &amp;&amp; !src-&gt;is_top()) {
+1020             _igvn.remove_dead_node(src);
+1021           }
+1022         }
+1023         _igvn._worklist.push(ac);
+1024       } else {
+1025         eliminate_gc_barrier(use);
+1026       }
+1027       j -= (oc1 - res-&gt;outcnt());
+1028     }
+1029     assert(res-&gt;outcnt() == 0, &quot;all uses of allocated objects must be deleted&quot;);
+1030     _igvn.remove_dead_node(res);
+1031   }
+1032 
+<a name="6" id="anc6"></a><span class="line-added">1033   eliminate_unused_allocation_edges(alloc);</span>
+<span class="line-added">1034 }</span>
+<span class="line-added">1035 </span>
+<span class="line-added">1036 void PhaseMacroExpand::eliminate_unused_allocation_edges(CallNode* alloc) {</span>
+1037   //
+1038   // Process other users of allocation&#39;s projections
+1039   //
+1040   if (_resproj != NULL &amp;&amp; _resproj-&gt;outcnt() != 0) {
+1041     // First disconnect stores captured by Initialize node.
+1042     // If Initialize node is eliminated first in the following code,
+1043     // it will kill such stores and DUIterator_Last will assert.
+1044     for (DUIterator_Fast jmax, j = _resproj-&gt;fast_outs(jmax);  j &lt; jmax; j++) {
+1045       Node *use = _resproj-&gt;fast_out(j);
+1046       if (use-&gt;is_AddP()) {
+1047         // raw memory addresses used only by the initialization
+1048         _igvn.replace_node(use, C-&gt;top());
+1049         --j; --jmax;
+1050       }
+1051     }
+1052     for (DUIterator_Last jmin, j = _resproj-&gt;last_outs(jmin); j &gt;= jmin; ) {
+1053       Node *use = _resproj-&gt;last_out(j);
+1054       uint oc1 = _resproj-&gt;outcnt();
+1055       if (use-&gt;is_Initialize()) {
+1056         // Eliminate Initialize node.
+1057         InitializeNode *init = use-&gt;as_Initialize();
+1058         assert(init-&gt;outcnt() &lt;= 2, &quot;only a control and memory projection expected&quot;);
+1059         Node *ctrl_proj = init-&gt;proj_out_or_null(TypeFunc::Control);
+1060         if (ctrl_proj != NULL) {
+1061           _igvn.replace_node(ctrl_proj, init-&gt;in(TypeFunc::Control));
+1062 #ifdef ASSERT
+1063           Node* tmp = init-&gt;in(TypeFunc::Control);
+1064           assert(tmp == _fallthroughcatchproj, &quot;allocation control projection&quot;);
+1065 #endif
+1066         }
+1067         Node *mem_proj = init-&gt;proj_out_or_null(TypeFunc::Memory);
+1068         if (mem_proj != NULL) {
+1069           Node *mem = init-&gt;in(TypeFunc::Memory);
+1070 #ifdef ASSERT
+1071           if (mem-&gt;is_MergeMem()) {
+1072             assert(mem-&gt;in(TypeFunc::Memory) == _memproj_fallthrough, &quot;allocation memory projection&quot;);
+1073           } else {
+1074             assert(mem == _memproj_fallthrough, &quot;allocation memory projection&quot;);
+1075           }
+1076 #endif
+1077           _igvn.replace_node(mem_proj, mem);
+1078         }
+1079       } else  {
+1080         assert(false, &quot;only Initialize or AddP expected&quot;);
+1081       }
+1082       j -= (oc1 - _resproj-&gt;outcnt());
+1083     }
+1084   }
+1085   if (_fallthroughcatchproj != NULL) {
+1086     _igvn.replace_node(_fallthroughcatchproj, alloc-&gt;in(TypeFunc::Control));
+1087   }
+1088   if (_memproj_fallthrough != NULL) {
+1089     _igvn.replace_node(_memproj_fallthrough, alloc-&gt;in(TypeFunc::Memory));
+1090   }
+1091   if (_memproj_catchall != NULL) {
+1092     _igvn.replace_node(_memproj_catchall, C-&gt;top());
+1093   }
+1094   if (_ioproj_fallthrough != NULL) {
+1095     _igvn.replace_node(_ioproj_fallthrough, alloc-&gt;in(TypeFunc::I_O));
+1096   }
+1097   if (_ioproj_catchall != NULL) {
+1098     _igvn.replace_node(_ioproj_catchall, C-&gt;top());
+1099   }
+1100   if (_catchallcatchproj != NULL) {
+1101     _igvn.replace_node(_catchallcatchproj, C-&gt;top());
+1102   }
+1103 }
+1104 
+<a name="7" id="anc7"></a><span class="line-added">1105 #define STACK_REG_BUFFER 4</span>
+<span class="line-added">1106 </span>
+<span class="line-added">1107 bool PhaseMacroExpand::stack_allocation_location_representable(int slot_location) {</span>
+<span class="line-added">1108   // TODO This is likely not enough as there are values on the stack above the fixed slots</span>
+<span class="line-added">1109   // Revist to see if there is a better check</span>
+<span class="line-added">1110   OptoReg::Name stack_reg = OptoReg::stack2reg(slot_location + STACK_REG_BUFFER);</span>
+<span class="line-added">1111   if (RegMask::can_represent(stack_reg)) {</span>
+<span class="line-added">1112     return true;</span>
+<span class="line-added">1113   } else {</span>
+<span class="line-added">1114     return false;</span>
+<span class="line-added">1115   }</span>
+<span class="line-added">1116 }</span>
+<span class="line-added">1117 </span>
+<span class="line-added">1118 #undef STACK_REG_BUFFER</span>
+<span class="line-added">1119 </span>
+<span class="line-added">1120 int PhaseMacroExpand::next_stack_allocated_object(int num_slots) {</span>
+<span class="line-added">1121   int current = C-&gt;fixed_slots();</span>
+<span class="line-added">1122   int next    = current + num_slots;</span>
+<span class="line-added">1123   if (!stack_allocation_location_representable(next)) {</span>
+<span class="line-added">1124     return -1;</span>
+<span class="line-added">1125   }</span>
+<span class="line-added">1126   // Keep the toplevel high water mark current:</span>
+<span class="line-added">1127   if (C-&gt;fixed_slots() &lt; next) C-&gt;set_fixed_slots(next);</span>
+<span class="line-added">1128   return current;</span>
+<span class="line-added">1129 }</span>
+<span class="line-added">1130 </span>
+<span class="line-added">1131 bool PhaseMacroExpand::process_write_barriers_on_stack_allocated_objects(AllocateNode* alloc) {</span>
+<span class="line-added">1132   GrowableArray&lt;Node*&gt; barriers;</span>
+<span class="line-added">1133   Node *res = alloc-&gt;result_cast();</span>
+<span class="line-added">1134   assert(res != NULL, &quot;result node must not be null&quot;);</span>
+<span class="line-added">1135 </span>
+<span class="line-added">1136   // Find direct barriers on the stack allocated objects.</span>
+<span class="line-added">1137   // Those we can simply eliminate.</span>
+<span class="line-added">1138   for (DUIterator_Fast imax, i = res-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1139     Node *use = res-&gt;fast_out(i);</span>
+<span class="line-added">1140     if (use-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="line-added">1141       barriers.append_if_missing(use);</span>
+<span class="line-added">1142     } else if (use-&gt;is_AddP()) {</span>
+<span class="line-added">1143       for (DUIterator_Fast jmax, j = use-&gt;fast_outs(jmax); j &lt; jmax; j++) {</span>
+<span class="line-added">1144         Node *addp_out = use-&gt;fast_out(j);</span>
+<span class="line-added">1145         if (addp_out-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="line-added">1146           barriers.append_if_missing(addp_out);</span>
+<span class="line-added">1147         }</span>
+<span class="line-added">1148       }</span>
+<span class="line-added">1149     }</span>
+<span class="line-added">1150   }</span>
+<span class="line-added">1151 </span>
+<span class="line-added">1152   while (barriers.length() != 0) {</span>
+<span class="line-added">1153     eliminate_gc_barrier(barriers.pop());</span>
+<span class="line-added">1154   }</span>
+<span class="line-added">1155 </span>
+<span class="line-added">1156   // After removing the direct barriers result may no longer be used</span>
+<span class="line-added">1157   if (alloc-&gt;result_cast() == NULL) {</span>
+<span class="line-added">1158     return true;</span>
+<span class="line-added">1159   }</span>
+<span class="line-added">1160 </span>
+<span class="line-added">1161   // Next walk all uses of the allocate to discover the barriers that</span>
+<span class="line-added">1162   // might be reachable from our allocate. If the barrier is reachable</span>
+<span class="line-added">1163   // from stack allocated object, we unregister it, so that the check</span>
+<span class="line-added">1164   // elimination code doesn&#39;t run on it.</span>
+<span class="line-added">1165   VectorSet visited(Thread::current()-&gt;resource_area());</span>
+<span class="line-added">1166   GrowableArray&lt;Node*&gt; node_worklist;</span>
+<span class="line-added">1167 </span>
+<span class="line-added">1168   BarrierSetC2 *bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();</span>
+<span class="line-added">1169 </span>
+<span class="line-added">1170   node_worklist.push(res);</span>
+<span class="line-added">1171 </span>
+<span class="line-added">1172   while(node_worklist.length() != 0) {</span>
+<span class="line-added">1173     Node* n = node_worklist.pop();</span>
+<span class="line-added">1174 </span>
+<span class="line-added">1175     if (visited.test_set(n-&gt;_idx)) {</span>
+<span class="line-added">1176       continue;  // already processed</span>
+<span class="line-added">1177     }</span>
+<span class="line-added">1178 </span>
+<span class="line-added">1179     for (DUIterator_Fast imax, i = n-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1180       Node *use = n-&gt;fast_out(i);</span>
+<span class="line-added">1181       if (use-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="line-added">1182         bs-&gt;unregister_potential_barrier_node(use);</span>
+<span class="line-added">1183       } else if (use-&gt;is_Phi() ||</span>
+<span class="line-added">1184                  use-&gt;is_CheckCastPP() ||</span>
+<span class="line-added">1185                  use-&gt;is_EncodeP() ||</span>
+<span class="line-added">1186                  use-&gt;is_DecodeN() ||</span>
+<span class="line-added">1187                  use-&gt;is_SafePoint() ||</span>
+<span class="line-added">1188                  use-&gt;is_Proj() ||</span>
+<span class="line-added">1189                  (use-&gt;is_ConstraintCast() &amp;&amp; use-&gt;Opcode() == Op_CastPP)) {</span>
+<span class="line-added">1190         // Find barriers beyond our current result</span>
+<span class="line-added">1191         node_worklist.push(use);</span>
+<span class="line-added">1192       } else if (use-&gt;is_Store() &amp;&amp; use-&gt;Opcode() == Op_StoreP) {</span>
+<span class="line-added">1193         if (n != use-&gt;in(MemNode::ValueIn)) {</span>
+<span class="line-added">1194           continue;</span>
+<span class="line-added">1195         }</span>
+<span class="line-added">1196         // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.</span>
+<span class="line-added">1197         // Common up this code into a helper</span>
+<span class="line-added">1198         Node *memory = use-&gt;in(MemNode::Address);</span>
+<span class="line-added">1199         if (memory-&gt;is_AddP()) {</span>
+<span class="line-added">1200           Node *base = memory-&gt;in(AddPNode::Base);</span>
+<span class="line-added">1201           if (base-&gt;uncast()-&gt;is_top()) { // The AddP case #3 and #6 and #9.</span>
+<span class="line-added">1202             base = memory-&gt;in(AddPNode::Address);</span>
+<span class="line-added">1203             while (base-&gt;is_AddP()) {</span>
+<span class="line-added">1204               // Case #6 (unsafe access) may have several chained AddP nodes.</span>
+<span class="line-added">1205               assert(base-&gt;in(AddPNode::Base)-&gt;uncast()-&gt;is_top(), &quot;expected unsafe access address only&quot;);</span>
+<span class="line-added">1206               base = base-&gt;in(AddPNode::Address);</span>
+<span class="line-added">1207             }</span>
+<span class="line-added">1208             if (base-&gt;Opcode() == Op_CheckCastPP &amp;&amp;</span>
+<span class="line-added">1209                 base-&gt;bottom_type()-&gt;isa_rawptr() &amp;&amp;</span>
+<span class="line-added">1210                 _igvn.type(base-&gt;in(1))-&gt;isa_oopptr()) {</span>
+<span class="line-added">1211               base = base-&gt;in(1); // Case #9</span>
+<span class="line-added">1212             }</span>
+<span class="line-added">1213           }</span>
+<span class="line-added">1214           node_worklist.push(base);</span>
+<span class="line-added">1215         }</span>
+<span class="line-added">1216       } else if (use-&gt;is_AddP() ||</span>
+<span class="line-added">1217            (use-&gt;is_Load() &amp;&amp; use-&gt;Opcode() == Op_LoadP)) {</span>
+<span class="line-added">1218         // Find barriers for loads</span>
+<span class="line-added">1219         node_worklist.push(use);</span>
+<span class="line-added">1220       }</span>
+<span class="line-added">1221     }</span>
+<span class="line-added">1222   }</span>
+<span class="line-added">1223   return false;</span>
+<span class="line-added">1224 }</span>
+<span class="line-added">1225 </span>
+<span class="line-added">1226 bool PhaseMacroExpand::register_stack_allocated_object_with_safepoints(AllocateNode* alloc, Node* stack_oop) {</span>
+<span class="line-added">1227   VectorSet visited(Thread::current()-&gt;resource_area());</span>
+<span class="line-added">1228   GrowableArray&lt;Node*&gt; node_worklist;</span>
+<span class="line-added">1229   GrowableArray&lt;SafePointNode*&gt; temp;</span>
+<span class="line-added">1230   Dict* safepoint_map = new Dict(cmpkey, hashkey);</span>
+<span class="line-added">1231   bool found_non_direct_safepoint = false;</span>
+<span class="line-added">1232   Node *res = alloc-&gt;result_cast();</span>
+<span class="line-added">1233 </span>
+<span class="line-added">1234   assert(res != NULL, &quot;result node must not be null&quot;);</span>
+<span class="line-added">1235 </span>
+<span class="line-added">1236   node_worklist.push(res);</span>
+<span class="line-added">1237 </span>
+<span class="line-added">1238   while(node_worklist.length() != 0) {</span>
+<span class="line-added">1239     Node* n = node_worklist.pop();</span>
+<span class="line-added">1240 </span>
+<span class="line-added">1241     if (visited.test_set(n-&gt;_idx)) {</span>
+<span class="line-added">1242       continue;  // already processed</span>
+<span class="line-added">1243     }</span>
+<span class="line-added">1244 </span>
+<span class="line-added">1245     for (DUIterator_Fast imax, i = n-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1246       Node *use = n-&gt;fast_out(i);</span>
+<span class="line-added">1247       if (use-&gt;is_SafePoint()) {</span>
+<span class="line-added">1248         SafePointNode* sfpt = use-&gt;as_SafePoint();</span>
+<span class="line-added">1249         if (sfpt-&gt;jvms() != NULL) {</span>
+<span class="line-added">1250           temp.push(sfpt);</span>
+<span class="line-added">1251         }</span>
+<span class="line-added">1252       } else if (use-&gt;is_Phi() ||</span>
+<span class="line-added">1253           use-&gt;is_CheckCastPP() ||</span>
+<span class="line-added">1254           use-&gt;is_EncodeP() ||</span>
+<span class="line-added">1255           use-&gt;is_DecodeN() ||</span>
+<span class="line-added">1256           use-&gt;is_Proj() ||</span>
+<span class="line-added">1257           (use-&gt;Opcode() == Op_CastP2X) ||</span>
+<span class="line-added">1258           use-&gt;is_MergeMem() ||</span>
+<span class="line-added">1259           use-&gt;is_MemBar() ||</span>
+<span class="line-added">1260           (use-&gt;is_ConstraintCast() &amp;&amp; use-&gt;Opcode() == Op_CastPP)) {</span>
+<span class="line-added">1261         // Find safepoints beyond our current result</span>
+<span class="line-added">1262         node_worklist.push(use);</span>
+<span class="line-added">1263       } else if (use-&gt;is_Store() &amp;&amp; use-&gt;Opcode() == Op_StoreP) {</span>
+<span class="line-added">1264         node_worklist.push(use);</span>
+<span class="line-added">1265         if (n != use-&gt;in(MemNode::ValueIn)) {</span>
+<span class="line-added">1266           continue;</span>
+<span class="line-added">1267         }</span>
+<span class="line-added">1268         // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.</span>
+<span class="line-added">1269         // Common up this code into a helper</span>
+<span class="line-added">1270         Node *memory = use-&gt;in(MemNode::Address);</span>
+<span class="line-added">1271         if (memory-&gt;is_AddP()) {</span>
+<span class="line-added">1272           Node *base = memory-&gt;in(AddPNode::Base);</span>
+<span class="line-added">1273           if (base-&gt;uncast()-&gt;is_top()) { // The AddP case #3 and #6 and #9.</span>
+<span class="line-added">1274             base = memory-&gt;in(AddPNode::Address);</span>
+<span class="line-added">1275             while (base-&gt;is_AddP()) {</span>
+<span class="line-added">1276               // Case #6 (unsafe access) may have several chained AddP nodes.</span>
+<span class="line-added">1277               assert(base-&gt;in(AddPNode::Base)-&gt;uncast()-&gt;is_top(), &quot;expected unsafe access address only&quot;);</span>
+<span class="line-added">1278               base = base-&gt;in(AddPNode::Address);</span>
+<span class="line-added">1279             }</span>
+<span class="line-added">1280             if (base-&gt;Opcode() == Op_CheckCastPP &amp;&amp;</span>
+<span class="line-added">1281                 base-&gt;bottom_type()-&gt;isa_rawptr() &amp;&amp;</span>
+<span class="line-added">1282                 _igvn.type(base-&gt;in(1))-&gt;isa_oopptr()) {</span>
+<span class="line-added">1283               base = base-&gt;in(1); // Case #9</span>
+<span class="line-added">1284             }</span>
+<span class="line-added">1285           }</span>
+<span class="line-added">1286           node_worklist.push(base);</span>
+<span class="line-added">1287         }</span>
+<span class="line-added">1288       } else if (use-&gt;is_AddP() ||</span>
+<span class="line-added">1289         (use-&gt;is_Load() &amp;&amp; use-&gt;Opcode() == Op_LoadP)) {</span>
+<span class="line-added">1290         // Find safepoints for arrays</span>
+<span class="line-added">1291         node_worklist.push(use);</span>
+<span class="line-added">1292       }</span>
+<span class="line-added">1293     }</span>
+<span class="line-added">1294 </span>
+<span class="line-added">1295     while (temp.length() != 0) {</span>
+<span class="line-added">1296       SafePointNode* sfpt = temp.pop();</span>
+<span class="line-added">1297       if (res != n) {</span>
+<span class="line-added">1298         found_non_direct_safepoint = true;</span>
+<span class="line-added">1299       }</span>
+<span class="line-added">1300       handle_safepoint_for_stack_allocation(safepoint_map, alloc, stack_oop, n, sfpt);</span>
+<span class="line-added">1301     }</span>
+<span class="line-added">1302   }</span>
+<span class="line-added">1303 </span>
+<span class="line-added">1304   return found_non_direct_safepoint;</span>
+<span class="line-added">1305 }</span>
+<span class="line-added">1306 </span>
+<span class="line-added">1307 void PhaseMacroExpand::handle_safepoint_for_stack_allocation(Dict* safepoint_map, AllocateNode* alloc, Node* oop_node, Node* parent, SafePointNode* sfpt) {</span>
+<span class="line-added">1308   Node* res = alloc-&gt;result_cast();</span>
+<span class="line-added">1309   assert(res-&gt;is_CheckCastPP(), &quot;unexpected AllocateNode result&quot;);</span>
+<span class="line-added">1310   const TypeOopPtr* res_type = _igvn.type(res)-&gt;isa_oopptr();</span>
+<span class="line-added">1311   ciKlass* klass = res_type-&gt;klass();</span>
+<span class="line-added">1312   int nfields = 0;</span>
+<span class="line-added">1313   if (res_type-&gt;isa_instptr()) {</span>
+<span class="line-added">1314     // find the fields of the class which will be needed for safepoint debug information</span>
+<span class="line-added">1315     assert(klass-&gt;is_instance_klass(), &quot;must be an instance klass.&quot;);</span>
+<span class="line-added">1316     ciInstanceKlass* iklass = klass-&gt;as_instance_klass();</span>
+<span class="line-added">1317     nfields = iklass-&gt;nof_nonstatic_fields();</span>
+<span class="line-added">1318   } else {</span>
+<span class="line-added">1319     // find the array&#39;s elements which will be needed for safepoint debug information</span>
+<span class="line-added">1320     nfields = alloc-&gt;in(AllocateNode::ALength)-&gt;find_int_con(-1);</span>
+<span class="line-added">1321   }</span>
+<span class="line-added">1322 </span>
+<span class="line-added">1323   assert(nfields &gt;= 0, &quot;Sanity&quot;);</span>
+<span class="line-added">1324 </span>
+<span class="line-added">1325   SafePointScalarObjectNode* sobj = NULL;</span>
+<span class="line-added">1326   Node *result = (Node *)(*safepoint_map)[sfpt];</span>
+<span class="line-added">1327   if (result != NULL) {</span>
+<span class="line-added">1328     assert(result-&gt;is_SafePointScalarObject(), &quot;Has to be a safepointscalarobject&quot;);</span>
+<span class="line-added">1329     sobj = result-&gt;as_SafePointScalarObject();</span>
+<span class="line-added">1330   } else {</span>
+<span class="line-added">1331     //</span>
+<span class="line-added">1332     // Process the safepoint uses</span>
+<span class="line-added">1333     //</span>
+<span class="line-added">1334     Node* mem = sfpt-&gt;memory();</span>
+<span class="line-added">1335     Node* ctl = sfpt-&gt;control();</span>
+<span class="line-added">1336     assert(sfpt-&gt;jvms() != NULL, &quot;missed JVMS&quot;);</span>
+<span class="line-added">1337     // Fields of scalar objs are referenced only at the end</span>
+<span class="line-added">1338     // of regular debuginfo at the last (youngest) JVMS.</span>
+<span class="line-added">1339     // Record relative start index.</span>
+<span class="line-added">1340     uint first_ind = (sfpt-&gt;req() - sfpt-&gt;jvms()-&gt;scloff());</span>
+<span class="line-added">1341     sobj = new SafePointScalarObjectNode(res_type,</span>
+<span class="line-added">1342 #ifdef ASSERT</span>
+<span class="line-added">1343                                                 alloc,</span>
+<span class="line-added">1344 #endif</span>
+<span class="line-added">1345                                                 first_ind, nfields);</span>
+<span class="line-added">1346     sobj-&gt;init_req(0, C-&gt;root());</span>
+<span class="line-added">1347     sobj-&gt;add_req(oop_node);</span>
+<span class="line-added">1348     transform_later(sobj);</span>
+<span class="line-added">1349     sobj-&gt;set_stack_allocated(true);</span>
+<span class="line-added">1350 </span>
+<span class="line-added">1351     JVMState *jvms = sfpt-&gt;jvms();</span>
+<span class="line-added">1352     sfpt-&gt;add_req(sobj);</span>
+<span class="line-added">1353     jvms-&gt;set_endoff(sfpt-&gt;req());</span>
+<span class="line-added">1354     _igvn._worklist.push(sfpt);</span>
+<span class="line-added">1355     safepoint_map-&gt;Insert(sfpt, sobj);</span>
+<span class="line-added">1356   }</span>
+<span class="line-added">1357 </span>
+<span class="line-added">1358   if (parent == res) {</span>
+<span class="line-added">1359     adjust_safepoint_jvms(sfpt, parent, sobj);</span>
+<span class="line-added">1360   }</span>
+<span class="line-added">1361 }</span>
+<span class="line-added">1362 </span>
+<span class="line-added">1363 bool PhaseMacroExpand::can_stack_allocate(AllocateNode* alloc, Node* res, intptr_t size_of_object) {</span>
+<span class="line-added">1364   return ((res != NULL) &amp;&amp; alloc-&gt;_is_stack_allocateable &amp;&amp; (size_of_object != -1) &amp;&amp; should_stack_allocate());</span>
+<span class="line-added">1365 }</span>
+<span class="line-added">1366 </span>
+<span class="line-added">1367 void PhaseMacroExpand::estimate_stack_allocation_size(AllocateNode* alloc) {</span>
+<span class="line-added">1368   Node* res                  = alloc-&gt;result_cast();</span>
+<span class="line-added">1369   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="line-added">1370   intptr_t size_of_object    = _igvn.find_intptr_t_con(size_in_bytes, -1);</span>
+<span class="line-added">1371 </span>
+<span class="line-added">1372   if (alloc-&gt;_is_scalar_replaceable &amp;&amp; !alloc-&gt;_is_stack_allocateable) {</span>
+<span class="line-added">1373     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="line-added">1374     return;</span>
+<span class="line-added">1375   }</span>
+<span class="line-added">1376 </span>
+<span class="line-added">1377   bool can_sa = can_stack_allocate(alloc, res, size_of_object);</span>
+<span class="line-added">1378   if (alloc-&gt;_is_stack_allocateable &amp;&amp; !can_sa) {</span>
+<span class="line-added">1379     // If we marked the object as SA in EA and now we can not fail</span>
+<span class="line-added">1380     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="line-added">1381     return;</span>
+<span class="line-added">1382   }</span>
+<span class="line-added">1383 </span>
+<span class="line-added">1384   if (!alloc-&gt;_is_stack_allocateable) {</span>
+<span class="line-added">1385     // If we can not SA because EA said no then no need to count the size</span>
+<span class="line-added">1386     return;</span>
+<span class="line-added">1387   }</span>
+<span class="line-added">1388 </span>
+<span class="line-added">1389   int current = C-&gt;stack_allocated_slots();</span>
+<span class="line-added">1390   C-&gt;set_stack_allocated_slots(current + (size_of_object &gt;&gt; LogBytesPerInt));</span>
+<span class="line-added">1391 }</span>
+<span class="line-added">1392 </span>
+<span class="line-added">1393 // Do stack allocation</span>
+<span class="line-added">1394 bool PhaseMacroExpand::stack_allocation(AllocateNode* alloc) {</span>
+<span class="line-added">1395   Node* klass                = alloc-&gt;in(AllocateNode::KlassNode);</span>
+<span class="line-added">1396   const TypeKlassPtr* tklass = _igvn.type(klass)-&gt;is_klassptr();</span>
+<span class="line-added">1397   Node *length               = (alloc-&gt;is_AllocateArray()) ? alloc-&gt;in(AllocateNode::ALength) : NULL;</span>
+<span class="line-added">1398   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="line-added">1399   Node* res                  = alloc-&gt;result_cast();</span>
+<span class="line-added">1400   Node* ctrl                 = alloc-&gt;in(TypeFunc::Control);</span>
+<span class="line-added">1401   Node* mem                  = alloc-&gt;in(TypeFunc::Memory);</span>
+<span class="line-added">1402 </span>
+<span class="line-added">1403   intptr_t size_of_object = _igvn.find_intptr_t_con(size_in_bytes, -1);</span>
+<span class="line-added">1404 </span>
+<span class="line-added">1405   if (!can_stack_allocate(alloc, res, size_of_object)) {</span>
+<span class="line-added">1406     return false;</span>
+<span class="line-added">1407   }</span>
+<span class="line-added">1408 </span>
+<span class="line-added">1409   if (C-&gt;fail_stack_allocation_with_references()) {</span>
+<span class="line-added">1410     if (alloc-&gt;_is_referenced_stack_allocation) {</span>
+<span class="line-added">1411 #ifndef PRODUCT</span>
+<span class="line-added">1412       if (print_stack_allocation()) {</span>
+<span class="line-added">1413         tty-&gt;print_cr(&quot;---- Avoiding stack allocation on node %d because it is referenced by another alloc and SCR/SA failed in method %s&quot;, alloc-&gt;_idx, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="line-added">1414       }</span>
+<span class="line-added">1415 #endif</span>
+<span class="line-added">1416     return false;</span>
+<span class="line-added">1417     }</span>
+<span class="line-added">1418   }</span>
+<span class="line-added">1419 </span>
+<span class="line-added">1420   int next_stack_allocation_slot = next_stack_allocated_object(size_of_object &gt;&gt; LogBytesPerInt);</span>
+<span class="line-added">1421   if (next_stack_allocation_slot &lt; 0) {</span>
+<span class="line-added">1422 #ifndef PRODUCT</span>
+<span class="line-added">1423     if (print_stack_allocation()) {</span>
+<span class="line-added">1424       tty-&gt;print_cr(&quot;---- Avoiding stack allocation on node %d with size %ld for method %s because of insufficient stack space&quot;, alloc-&gt;_idx, size_of_object, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="line-added">1425     }</span>
+<span class="line-added">1426 #endif</span>
+<span class="line-added">1427     return false;</span>
+<span class="line-added">1428   }</span>
+<span class="line-added">1429 </span>
+<span class="line-added">1430   if (mem-&gt;is_MergeMem()) {</span>
+<span class="line-added">1431     mem = mem-&gt;as_MergeMem()-&gt;memory_at(Compile::AliasIdxRaw);</span>
+<span class="line-added">1432   }</span>
+<span class="line-added">1433 </span>
+<span class="line-added">1434   extract_call_projections(alloc);</span>
+<span class="line-added">1435 </span>
+<span class="line-added">1436   // Process barriers as this may result in result_cast() becoming NULL</span>
+<span class="line-added">1437   if (process_write_barriers_on_stack_allocated_objects(alloc)) {</span>
+<span class="line-added">1438 #ifndef PRODUCT</span>
+<span class="line-added">1439     if (print_stack_allocation()) {</span>
+<span class="line-added">1440       tty-&gt;print_cr(&quot;---- Allocation %d result_cast is no longer used so yank the alloc instead&quot;, alloc-&gt;_idx);</span>
+<span class="line-added">1441     }</span>
+<span class="line-added">1442 #endif</span>
+<span class="line-added">1443     InitializeNode* init = alloc-&gt;initialization();</span>
+<span class="line-added">1444     if (init != NULL) {</span>
+<span class="line-added">1445       init-&gt;remove(&amp;_igvn);</span>
+<span class="line-added">1446     }</span>
+<span class="line-added">1447     yank_alloc_node(alloc);</span>
+<span class="line-added">1448     return true;</span>
+<span class="line-added">1449   }</span>
+<span class="line-added">1450 </span>
+<span class="line-added">1451   assert(res == alloc-&gt;result_cast(), &quot;values much match&quot;);</span>
+<span class="line-added">1452 </span>
+<span class="line-added">1453   Node* stack_oop = transform_later(new BoxLockNode(next_stack_allocation_slot));</span>
+<span class="line-added">1454   Node* new_raw_mem = initialize_object(alloc, ctrl, mem, stack_oop, klass, length, size_in_bytes);</span>
+<span class="line-added">1455 </span>
+<span class="line-added">1456   bool non_direct_safepoints = register_stack_allocated_object_with_safepoints(alloc, stack_oop);</span>
+<span class="line-added">1457   if (non_direct_safepoints) {</span>
+<span class="line-added">1458     if (length != NULL) {</span>
+<span class="line-added">1459       stack_allocation_init_array_length_on_entry(alloc, length, stack_oop);</span>
+<span class="line-added">1460     }</span>
+<span class="line-added">1461 #ifndef PRODUCT</span>
+<span class="line-added">1462     stack_allocation_clear_object_data(alloc, stack_oop);</span>
+<span class="line-added">1463 #endif</span>
+<span class="line-added">1464   }</span>
+<span class="line-added">1465 </span>
+<span class="line-added">1466   _igvn.replace_node(_resproj, stack_oop);</span>
+<span class="line-added">1467 </span>
+<span class="line-added">1468   for (DUIterator_Fast imax, i = _memproj_fallthrough-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1469     Node *use = _memproj_fallthrough-&gt;fast_out(i);</span>
+<span class="line-added">1470     _igvn.rehash_node_delayed(use);</span>
+<span class="line-added">1471     imax -= replace_input(use, _memproj_fallthrough, new_raw_mem);</span>
+<span class="line-added">1472     // back up iterator</span>
+<span class="line-added">1473     --i;</span>
+<span class="line-added">1474   }</span>
+<span class="line-added">1475 </span>
+<span class="line-added">1476   eliminate_unused_allocation_edges(alloc);</span>
+<span class="line-added">1477 </span>
+<span class="line-added">1478   assert(_resproj-&gt;outcnt() == 0, &quot;all uses of the original allocate result projection must be deleted&quot;);</span>
+<span class="line-added">1479   _igvn.remove_dead_node(_resproj);</span>
+<span class="line-added">1480 </span>
+<span class="line-added">1481 #ifndef PRODUCT</span>
+<span class="line-added">1482   if (print_stack_allocation()) {</span>
+<span class="line-added">1483     tty-&gt;print_cr(&quot;++++ Performing stack allocation on node %d with size %ld for method %s&quot;, alloc-&gt;_idx, size_of_object, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="line-added">1484   }</span>
+<span class="line-added">1485 #endif</span>
+<span class="line-added">1486 </span>
+<span class="line-added">1487   return true;</span>
+<span class="line-added">1488 }</span>
+<span class="line-added">1489 </span>
+<span class="line-added">1490 /*</span>
+<span class="line-added">1491   Initialize stack allocated array length on entry to the method.</span>
+<span class="line-added">1492   This is required for de-opt so it can verify array lengths and so</span>
+<span class="line-added">1493   that GCs that happen after deopt will not crash for uninitialized</span>
+<span class="line-added">1494   arrays.</span>
+<span class="line-added">1495 */</span>
+<span class="line-added">1496 void PhaseMacroExpand::stack_allocation_init_array_length_on_entry(AllocateNode *alloc, Node *length, Node *stack_oop) {</span>
+<span class="line-added">1497   Node* start_mem = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="line-added">1498   assert(length != NULL, &quot;Length can not be NULL&quot;);</span>
+<span class="line-added">1499 </span>
+<span class="line-added">1500   if (C-&gt;is_osr_compilation()) {</span>
+<span class="line-added">1501     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1502       Node *child = start_mem-&gt;fast_out(i);</span>
+<span class="line-added">1503       if (child-&gt;is_CallLeaf() &amp;&amp; child-&gt;as_CallLeaf()-&gt;is_call_to_osr_migration_end()) {</span>
+<span class="line-added">1504         CallLeafNode* call_leaf = child-&gt;as_CallLeaf();</span>
+<span class="line-added">1505         start_mem = call_leaf-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="line-added">1506         break;</span>
+<span class="line-added">1507       }</span>
+<span class="line-added">1508     }</span>
+<span class="line-added">1509   }</span>
+<span class="line-added">1510   assert(start_mem != NULL, &quot;Must find start mem&quot;);</span>
+<span class="line-added">1511   Node* init_mem = start_mem;</span>
+<span class="line-added">1512 </span>
+<span class="line-added">1513   // need to set the length field for arrays for deopt</span>
+<span class="line-added">1514   init_mem = make_store(C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Control),</span>
+<span class="line-added">1515                         init_mem, stack_oop, arrayOopDesc::length_offset_in_bytes(),</span>
+<span class="line-added">1516                         length, T_INT);</span>
+<span class="line-added">1517 </span>
+<span class="line-added">1518 </span>
+<span class="line-added">1519   if (init_mem != start_mem) {</span>
+<span class="line-added">1520     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1521       Node *use = start_mem-&gt;fast_out(i);</span>
+<span class="line-added">1522       // Compressed refs can make a new store which adjusts the start</span>
+<span class="line-added">1523       // offet and it&#39;s sourced by start_mem. Make sure we don&#39;t make cycle.</span>
+<span class="line-added">1524       if (use == init_mem || (init_mem-&gt;find_edge(use) &gt;= 0)) {</span>
+<span class="line-added">1525         continue;</span>
+<span class="line-added">1526       }</span>
+<span class="line-added">1527       _igvn.rehash_node_delayed(use);</span>
+<span class="line-added">1528       imax -= replace_input(use, start_mem, init_mem);</span>
+<span class="line-added">1529       // back up iterator</span>
+<span class="line-added">1530       --i;</span>
+<span class="line-added">1531     }</span>
+<span class="line-added">1532   }</span>
+<span class="line-added">1533 }</span>
+<span class="line-added">1534 </span>
+<span class="line-added">1535 #ifndef PRODUCT</span>
+<span class="line-added">1536 /*</span>
+<span class="line-added">1537   Initialize SA object on entry to the method to ensure it is initialized</span>
+<span class="line-added">1538   before safepoints which may only be reachable through phis and the object</span>
+<span class="line-added">1539   may not actually have been initialized.</span>
+<span class="line-added">1540 */</span>
+<span class="line-added">1541 void PhaseMacroExpand::stack_allocation_clear_object_data(AllocateNode *alloc, Node *stack_oop) {</span>
+<span class="line-added">1542   Node* klass                = alloc-&gt;in(AllocateNode::KlassNode);</span>
+<span class="line-added">1543   Node *length               = (alloc-&gt;is_AllocateArray()) ? alloc-&gt;in(AllocateNode::ALength) : NULL;</span>
+<span class="line-added">1544   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="line-added">1545   Node* start_mem            = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="line-added">1546   if (C-&gt;is_osr_compilation()) {</span>
+<span class="line-added">1547     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1548       Node *child = start_mem-&gt;fast_out(i);</span>
+<span class="line-added">1549       if (child-&gt;is_CallLeaf() &amp;&amp; child-&gt;as_CallLeaf()-&gt;is_call_to_osr_migration_end()) {</span>
+<span class="line-added">1550         CallLeafNode* call_leaf = child-&gt;as_CallLeaf();</span>
+<span class="line-added">1551         start_mem = call_leaf-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="line-added">1552         break;</span>
+<span class="line-added">1553       }</span>
+<span class="line-added">1554     }</span>
+<span class="line-added">1555   }</span>
+<span class="line-added">1556   assert(start_mem != NULL, &quot;Must find start mem&quot;);</span>
+<span class="line-added">1557   int header_size = alloc-&gt;minimum_header_size();</span>
+<span class="line-added">1558   Node* init_mem = start_mem;</span>
+<span class="line-added">1559   if (length != NULL) {</span>
+<span class="line-added">1560     // conservatively small header size:</span>
+<span class="line-added">1561     header_size = arrayOopDesc::base_offset_in_bytes(T_BYTE);</span>
+<span class="line-added">1562     ciKlass* k = _igvn.type(klass)-&gt;is_klassptr()-&gt;klass();</span>
+<span class="line-added">1563     if (k-&gt;is_array_klass()) {   // we know the exact header size in most cases:</span>
+<span class="line-added">1564       header_size = Klass::layout_helper_header_size(k-&gt;layout_helper());</span>
+<span class="line-added">1565     }</span>
+<span class="line-added">1566   }</span>
+<span class="line-added">1567   init_mem = ClearArrayNode::clear_memory(C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Control),</span>
+<span class="line-added">1568                                           init_mem, stack_oop, header_size, size_in_bytes,</span>
+<span class="line-added">1569                                           &amp;_igvn);</span>
+<span class="line-added">1570   if (init_mem != start_mem) {</span>
+<span class="line-added">1571     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="line-added">1572       Node *use = start_mem-&gt;fast_out(i);</span>
+<span class="line-added">1573       // Compressed refs can make a new store which adjusts the start</span>
+<span class="line-added">1574       // offet and it&#39;s sourced by start_mem. Make sure we don&#39;t make cycle.</span>
+<span class="line-added">1575       if (use == init_mem || (init_mem-&gt;find_edge(use) &gt;= 0)) {</span>
+<span class="line-added">1576         continue;</span>
+<span class="line-added">1577       }</span>
+<span class="line-added">1578       _igvn.rehash_node_delayed(use);</span>
+<span class="line-added">1579       imax -= replace_input(use, start_mem, init_mem);</span>
+<span class="line-added">1580       // back up iterator</span>
+<span class="line-added">1581       --i;</span>
+<span class="line-added">1582     }</span>
+<span class="line-added">1583   }</span>
+<span class="line-added">1584 }</span>
+<span class="line-added">1585 #endif</span>
+<span class="line-added">1586 </span>
+1587 bool PhaseMacroExpand::eliminate_allocate_node(AllocateNode *alloc) {
+1588   // Don&#39;t do scalar replacement if the frame can be popped by JVMTI:
+1589   // if reallocation fails during deoptimization we&#39;ll pop all
+1590   // interpreter frames for this compiled frame and that won&#39;t play
+1591   // nice with JVMTI popframe.
+1592   if (!EliminateAllocations || JvmtiExport::can_pop_frame() || !alloc-&gt;_is_non_escaping) {
+1593     return false;
+1594   }
+1595   Node* klass = alloc-&gt;in(AllocateNode::KlassNode);
+1596   const TypeKlassPtr* tklass = _igvn.type(klass)-&gt;is_klassptr();
+1597   Node* res = alloc-&gt;result_cast();
+1598   // Eliminate boxing allocations which are not used
+1599   // regardless scalar replacable status.
+1600   bool boxing_alloc = C-&gt;eliminate_boxing() &amp;&amp;
+1601                       tklass-&gt;klass()-&gt;is_instance_klass()  &amp;&amp;
+1602                       tklass-&gt;klass()-&gt;as_instance_klass()-&gt;is_box_klass();
+1603   if (!alloc-&gt;_is_scalar_replaceable &amp;&amp; (!boxing_alloc || (res != NULL))) {
+1604     return false;
+1605   }
+1606 
+1607   extract_call_projections(alloc);
+1608 
+1609   GrowableArray &lt;SafePointNode *&gt; safepoints;
+1610   if (!can_eliminate_allocation(alloc, safepoints)) {
+1611     return false;
+1612   }
+1613 
+1614   if (!alloc-&gt;_is_scalar_replaceable) {
+1615     assert(res == NULL, &quot;sanity&quot;);
+1616     // We can only eliminate allocation if all debug info references
+1617     // are already replaced with SafePointScalarObject because
+1618     // we can&#39;t search for a fields value without instance_id.
+1619     if (safepoints.length() &gt; 0) {
+1620       return false;
+1621     }
+1622   }
+1623 
+1624   if (!scalar_replacement(alloc, safepoints)) {
+1625     return false;
+1626   }
+1627 
+1628   CompileLog* log = C-&gt;log();
+1629   if (log != NULL) {
+1630     log-&gt;head(&quot;eliminate_allocation type=&#39;%d&#39;&quot;,
+1631               log-&gt;identify(tklass-&gt;klass()));
+1632     JVMState* p = alloc-&gt;jvms();
+1633     while (p != NULL) {
+1634       log-&gt;elem(&quot;jvms bci=&#39;%d&#39; method=&#39;%d&#39;&quot;, p-&gt;bci(), log-&gt;identify(p-&gt;method()));
+1635       p = p-&gt;caller();
+1636     }
+1637     log-&gt;tail(&quot;eliminate_allocation&quot;);
+1638   }
+1639 
+1640   process_users_of_allocation(alloc);
+1641 
+1642 #ifndef PRODUCT
+<a name="8" id="anc8"></a><span class="line-modified">1643   if (print_eliminate_allocations()) {</span>
+1644     if (alloc-&gt;is_AllocateArray())
+1645       tty-&gt;print_cr(&quot;++++ Eliminated: %d AllocateArray&quot;, alloc-&gt;_idx);
+1646     else
+1647       tty-&gt;print_cr(&quot;++++ Eliminated: %d Allocate&quot;, alloc-&gt;_idx);
+1648   }
+1649 #endif
+1650 
+1651   return true;
+1652 }
+1653 
+1654 bool PhaseMacroExpand::eliminate_boxing_node(CallStaticJavaNode *boxing) {
+1655   // EA should remove all uses of non-escaping boxing node.
+1656   if (!C-&gt;eliminate_boxing() || boxing-&gt;proj_out_or_null(TypeFunc::Parms) != NULL) {
+1657     return false;
+1658   }
+1659 
+1660   assert(boxing-&gt;result_cast() == NULL, &quot;unexpected boxing node result&quot;);
+1661 
+1662   extract_call_projections(boxing);
+1663 
+1664   const TypeTuple* r = boxing-&gt;tf()-&gt;range();
+1665   assert(r-&gt;cnt() &gt; TypeFunc::Parms, &quot;sanity&quot;);
+1666   const TypeInstPtr* t = r-&gt;field_at(TypeFunc::Parms)-&gt;isa_instptr();
+1667   assert(t != NULL, &quot;sanity&quot;);
+1668 
+1669   CompileLog* log = C-&gt;log();
+1670   if (log != NULL) {
+1671     log-&gt;head(&quot;eliminate_boxing type=&#39;%d&#39;&quot;,
+1672               log-&gt;identify(t-&gt;klass()));
+1673     JVMState* p = boxing-&gt;jvms();
+1674     while (p != NULL) {
+1675       log-&gt;elem(&quot;jvms bci=&#39;%d&#39; method=&#39;%d&#39;&quot;, p-&gt;bci(), log-&gt;identify(p-&gt;method()));
+1676       p = p-&gt;caller();
+1677     }
+1678     log-&gt;tail(&quot;eliminate_boxing&quot;);
+1679   }
+1680 
+1681   process_users_of_allocation(boxing);
+1682 
+1683 #ifndef PRODUCT
+<a name="9" id="anc9"></a><span class="line-modified">1684   if (print_eliminate_allocations()) {</span>
+1685     tty-&gt;print(&quot;++++ Eliminated: %d &quot;, boxing-&gt;_idx);
+1686     boxing-&gt;method()-&gt;print_short_name(tty);
+1687     tty-&gt;cr();
+1688   }
+1689 #endif
+1690 
+1691   return true;
+1692 }
+1693 
+1694 //---------------------------set_eden_pointers-------------------------
+1695 void PhaseMacroExpand::set_eden_pointers(Node* &amp;eden_top_adr, Node* &amp;eden_end_adr) {
+1696   if (UseTLAB) {                // Private allocation: load from TLS
+1697     Node* thread = transform_later(new ThreadLocalNode());
+1698     int tlab_top_offset = in_bytes(JavaThread::tlab_top_offset());
+1699     int tlab_end_offset = in_bytes(JavaThread::tlab_end_offset());
+1700     eden_top_adr = basic_plus_adr(top()/*not oop*/, thread, tlab_top_offset);
+1701     eden_end_adr = basic_plus_adr(top()/*not oop*/, thread, tlab_end_offset);
+1702   } else {                      // Shared allocation: load from globals
+1703     CollectedHeap* ch = Universe::heap();
+1704     address top_adr = (address)ch-&gt;top_addr();
+1705     address end_adr = (address)ch-&gt;end_addr();
+1706     eden_top_adr = makecon(TypeRawPtr::make(top_adr));
+1707     eden_end_adr = basic_plus_adr(eden_top_adr, end_adr - top_adr);
+1708   }
+1709 }
+1710 
+1711 
+1712 Node* PhaseMacroExpand::make_load(Node* ctl, Node* mem, Node* base, int offset, const Type* value_type, BasicType bt) {
+1713   Node* adr = basic_plus_adr(base, offset);
+1714   const TypePtr* adr_type = adr-&gt;bottom_type()-&gt;is_ptr();
+1715   Node* value = LoadNode::make(_igvn, ctl, mem, adr, adr_type, value_type, bt, MemNode::unordered);
+1716   transform_later(value);
+1717   return value;
+1718 }
+1719 
+1720 
+1721 Node* PhaseMacroExpand::make_store(Node* ctl, Node* mem, Node* base, int offset, Node* value, BasicType bt) {
+1722   Node* adr = basic_plus_adr(base, offset);
+1723   mem = StoreNode::make(_igvn, ctl, mem, adr, NULL, value, bt, MemNode::unordered);
+1724   transform_later(mem);
+1725   return mem;
+1726 }
+1727 
+1728 //=============================================================================
+1729 //
+1730 //                              A L L O C A T I O N
+1731 //
+1732 // Allocation attempts to be fast in the case of frequent small objects.
+1733 // It breaks down like this:
+1734 //
+1735 // 1) Size in doublewords is computed.  This is a constant for objects and
+1736 // variable for most arrays.  Doubleword units are used to avoid size
+1737 // overflow of huge doubleword arrays.  We need doublewords in the end for
+1738 // rounding.
+1739 //
+1740 // 2) Size is checked for being &#39;too large&#39;.  Too-large allocations will go
+1741 // the slow path into the VM.  The slow path can throw any required
+1742 // exceptions, and does all the special checks for very large arrays.  The
+1743 // size test can constant-fold away for objects.  For objects with
+1744 // finalizers it constant-folds the otherway: you always go slow with
+1745 // finalizers.
+1746 //
+1747 // 3) If NOT using TLABs, this is the contended loop-back point.
+1748 // Load-Locked the heap top.  If using TLABs normal-load the heap top.
+1749 //
+1750 // 4) Check that heap top + size*8 &lt; max.  If we fail go the slow ` route.
+1751 // NOTE: &quot;top+size*8&quot; cannot wrap the 4Gig line!  Here&#39;s why: for largish
+1752 // &quot;size*8&quot; we always enter the VM, where &quot;largish&quot; is a constant picked small
+1753 // enough that there&#39;s always space between the eden max and 4Gig (old space is
+1754 // there so it&#39;s quite large) and large enough that the cost of entering the VM
+1755 // is dwarfed by the cost to initialize the space.
+1756 //
+1757 // 5) If NOT using TLABs, Store-Conditional the adjusted heap top back
+1758 // down.  If contended, repeat at step 3.  If using TLABs normal-store
+1759 // adjusted heap top back down; there is no contention.
+1760 //
+1761 // 6) If !ZeroTLAB then Bulk-clear the object/array.  Fill in klass &amp; mark
+1762 // fields.
+1763 //
+1764 // 7) Merge with the slow-path; cast the raw memory pointer to the correct
+1765 // oop flavor.
+1766 //
+1767 //=============================================================================
+1768 // FastAllocateSizeLimit value is in DOUBLEWORDS.
+1769 // Allocations bigger than this always go the slow route.
+1770 // This value must be small enough that allocation attempts that need to
+1771 // trigger exceptions go the slow route.  Also, it must be small enough so
+1772 // that heap_top + size_in_bytes does not wrap around the 4Gig limit.
+1773 //=============================================================================j//
+1774 // %%% Here is an old comment from parseHelper.cpp; is it outdated?
+1775 // The allocator will coalesce int-&gt;oop copies away.  See comment in
+1776 // coalesce.cpp about how this works.  It depends critically on the exact
+1777 // code shape produced here, so if you are changing this code shape
+1778 // make sure the GC info for the heap-top is correct in and around the
+1779 // slow-path call.
+1780 //
+1781 
+1782 void PhaseMacroExpand::expand_allocate_common(
+1783             AllocateNode* alloc, // allocation node to be expanded
+1784             Node* length,  // array length for an array allocation
+1785             const TypeFunc* slow_call_type, // Type of slow call
+1786             address slow_call_address  // Address of slow call
+1787     )
+1788 {
+1789   Node* ctrl = alloc-&gt;in(TypeFunc::Control);
+1790   Node* mem  = alloc-&gt;in(TypeFunc::Memory);
+1791   Node* i_o  = alloc-&gt;in(TypeFunc::I_O);
+1792   Node* size_in_bytes     = alloc-&gt;in(AllocateNode::AllocSize);
+1793   Node* klass_node        = alloc-&gt;in(AllocateNode::KlassNode);
+1794   Node* initial_slow_test = alloc-&gt;in(AllocateNode::InitialTest);
+1795   assert(ctrl != NULL, &quot;must have control&quot;);
+1796 
+1797   // We need a Region and corresponding Phi&#39;s to merge the slow-path and fast-path results.
+1798   // they will not be used if &quot;always_slow&quot; is set
+1799   enum { slow_result_path = 1, fast_result_path = 2 };
+1800   Node *result_region = NULL;
+1801   Node *result_phi_rawmem = NULL;
+1802   Node *result_phi_rawoop = NULL;
+1803   Node *result_phi_i_o = NULL;
+1804 
+1805   // The initial slow comparison is a size check, the comparison
+1806   // we want to do is a BoolTest::gt
+1807   bool expand_fast_path = true;
+1808   int tv = _igvn.find_int_con(initial_slow_test, -1);
+1809   if (tv &gt;= 0) {
+1810     // InitialTest has constant result
+1811     //   0 - can fit in TLAB
+1812     //   1 - always too big or negative
+1813     assert(tv &lt;= 1, &quot;0 or 1 if a constant&quot;);
+1814     expand_fast_path = (tv == 0);
+1815     initial_slow_test = NULL;
+1816   } else {
+1817     initial_slow_test = BoolNode::make_predicate(initial_slow_test, &amp;_igvn);
+1818   }
+1819 
+1820   if (C-&gt;env()-&gt;dtrace_alloc_probes() ||
+1821       (!UseTLAB &amp;&amp; !Universe::heap()-&gt;supports_inline_contig_alloc())) {
+1822     // Force slow-path allocation
+1823     expand_fast_path = false;
+1824     initial_slow_test = NULL;
+1825   }
+1826 
+1827   bool allocation_has_use = (alloc-&gt;result_cast() != NULL);
+1828   if (!allocation_has_use) {
+1829     InitializeNode* init = alloc-&gt;initialization();
+1830     if (init != NULL) {
+1831       init-&gt;remove(&amp;_igvn);
+1832     }
+1833     if (expand_fast_path &amp;&amp; (initial_slow_test == NULL)) {
+1834       // Remove allocation node and return.
+1835       // Size is a non-negative constant -&gt; no initial check needed -&gt; directly to fast path.
+1836       // Also, no usages -&gt; empty fast path -&gt; no fall out to slow path -&gt; nothing left.
+1837 #ifndef PRODUCT
+1838       if (PrintEliminateAllocations) {
+1839         tty-&gt;print(&quot;NotUsed &quot;);
+1840         Node* res = alloc-&gt;proj_out_or_null(TypeFunc::Parms);
+1841         if (res != NULL) {
+1842           res-&gt;dump();
+1843         } else {
+1844           alloc-&gt;dump();
+1845         }
+1846       }
+1847 #endif
+1848       yank_alloc_node(alloc);
+1849       return;
+1850     }
+1851   }
+1852 
+1853   enum { too_big_or_final_path = 1, need_gc_path = 2 };
+1854   Node *slow_region = NULL;
+1855   Node *toobig_false = ctrl;
+1856 
+1857   // generate the initial test if necessary
+1858   if (initial_slow_test != NULL ) {
+1859     assert (expand_fast_path, &quot;Only need test if there is a fast path&quot;);
+1860     slow_region = new RegionNode(3);
+1861 
+1862     // Now make the initial failure test.  Usually a too-big test but
+1863     // might be a TRUE for finalizers or a fancy class check for
+1864     // newInstance0.
+1865     IfNode *toobig_iff = new IfNode(ctrl, initial_slow_test, PROB_MIN, COUNT_UNKNOWN);
+1866     transform_later(toobig_iff);
+1867     // Plug the failing-too-big test into the slow-path region
+1868     Node *toobig_true = new IfTrueNode( toobig_iff );
+1869     transform_later(toobig_true);
+1870     slow_region    -&gt;init_req( too_big_or_final_path, toobig_true );
+1871     toobig_false = new IfFalseNode( toobig_iff );
+1872     transform_later(toobig_false);
+1873   } else {
+1874     // No initial test, just fall into next case
+1875     assert(allocation_has_use || !expand_fast_path, &quot;Should already have been handled&quot;);
+1876     toobig_false = ctrl;
+1877     debug_only(slow_region = NodeSentinel);
+1878   }
+1879 
+1880   // If we are here there are several possibilities
+1881   // - expand_fast_path is false - then only a slow path is expanded. That&#39;s it.
+1882   // no_initial_check means a constant allocation.
+1883   // - If check always evaluates to false -&gt; expand_fast_path is false (see above)
+1884   // - If check always evaluates to true -&gt; directly into fast path (but may bailout to slowpath)
+1885   // if !allocation_has_use the fast path is empty
+1886   // if !allocation_has_use &amp;&amp; no_initial_check
+1887   // - Then there are no fastpath that can fall out to slowpath -&gt; no allocation code at all.
+1888   //   removed by yank_alloc_node above.
+1889 
+1890   Node *slow_mem = mem;  // save the current memory state for slow path
+1891   // generate the fast allocation code unless we know that the initial test will always go slow
+1892   if (expand_fast_path) {
+1893     // Fast path modifies only raw memory.
+1894     if (mem-&gt;is_MergeMem()) {
+1895       mem = mem-&gt;as_MergeMem()-&gt;memory_at(Compile::AliasIdxRaw);
+1896     }
+1897 
+1898     // allocate the Region and Phi nodes for the result
+1899     result_region = new RegionNode(3);
+1900     result_phi_rawmem = new PhiNode(result_region, Type::MEMORY, TypeRawPtr::BOTTOM);
+1901     result_phi_i_o    = new PhiNode(result_region, Type::ABIO); // I/O is used for Prefetch
+1902 
+1903     // Grab regular I/O before optional prefetch may change it.
+1904     // Slow-path does no I/O so just set it to the original I/O.
+1905     result_phi_i_o-&gt;init_req(slow_result_path, i_o);
+1906 
+1907     // Name successful fast-path variables
+1908     Node* fast_oop_ctrl;
+1909     Node* fast_oop_rawmem;
+1910     if (allocation_has_use) {
+1911       Node* needgc_ctrl = NULL;
+1912       result_phi_rawoop = new PhiNode(result_region, TypeRawPtr::BOTTOM);
+1913 
+1914       intx prefetch_lines = length != NULL ? AllocatePrefetchLines : AllocateInstancePrefetchLines;
+1915       BarrierSetC2* bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();
+1916       Node* fast_oop = bs-&gt;obj_allocate(this, ctrl, mem, toobig_false, size_in_bytes, i_o, needgc_ctrl,
+1917                                         fast_oop_ctrl, fast_oop_rawmem,
+1918                                         prefetch_lines);
+1919 
+1920       if (initial_slow_test != NULL) {
+1921         // This completes all paths into the slow merge point
+1922         slow_region-&gt;init_req(need_gc_path, needgc_ctrl);
+1923         transform_later(slow_region);
+1924       } else {
+1925         // No initial slow path needed!
+1926         // Just fall from the need-GC path straight into the VM call.
+1927         slow_region = needgc_ctrl;
+1928       }
+1929 
+1930       InitializeNode* init = alloc-&gt;initialization();
+1931       fast_oop_rawmem = initialize_object(alloc,
+1932                                           fast_oop_ctrl, fast_oop_rawmem, fast_oop,
+1933                                           klass_node, length, size_in_bytes);
+1934       expand_initialize_membar(alloc, init, fast_oop_ctrl, fast_oop_rawmem);
+1935       expand_dtrace_alloc_probe(alloc, fast_oop, fast_oop_ctrl, fast_oop_rawmem);
+1936 
+1937       result_phi_rawoop-&gt;init_req(fast_result_path, fast_oop);
+1938     } else {
+1939       assert (initial_slow_test != NULL, &quot;sanity&quot;);
+1940       fast_oop_ctrl   = toobig_false;
+1941       fast_oop_rawmem = mem;
+1942       transform_later(slow_region);
+1943     }
+1944 
+1945     // Plug in the successful fast-path into the result merge point
+1946     result_region    -&gt;init_req(fast_result_path, fast_oop_ctrl);
+1947     result_phi_i_o   -&gt;init_req(fast_result_path, i_o);
+1948     result_phi_rawmem-&gt;init_req(fast_result_path, fast_oop_rawmem);
+1949   } else {
+1950     slow_region = ctrl;
+1951     result_phi_i_o = i_o; // Rename it to use in the following code.
+1952   }
+1953 
+1954   // Generate slow-path call
+1955   CallNode *call = new CallStaticJavaNode(slow_call_type, slow_call_address,
+1956                                OptoRuntime::stub_name(slow_call_address),
+1957                                alloc-&gt;jvms()-&gt;bci(),
+1958                                TypePtr::BOTTOM);
+1959   call-&gt;init_req(TypeFunc::Control,   slow_region);
+1960   call-&gt;init_req(TypeFunc::I_O,       top());    // does no i/o
+1961   call-&gt;init_req(TypeFunc::Memory,    slow_mem); // may gc ptrs
+1962   call-&gt;init_req(TypeFunc::ReturnAdr, alloc-&gt;in(TypeFunc::ReturnAdr));
+1963   call-&gt;init_req(TypeFunc::FramePtr,  alloc-&gt;in(TypeFunc::FramePtr));
+1964 
+1965   call-&gt;init_req(TypeFunc::Parms+0, klass_node);
+1966   if (length != NULL) {
+1967     call-&gt;init_req(TypeFunc::Parms+1, length);
+1968   }
+1969 
+1970   // Copy debug information and adjust JVMState information, then replace
+1971   // allocate node with the call
+1972   copy_call_debug_info((CallNode *) alloc,  call);
+1973   if (expand_fast_path) {
+1974     call-&gt;set_cnt(PROB_UNLIKELY_MAG(4));  // Same effect as RC_UNCOMMON.
+1975   } else {
+1976     // Hook i_o projection to avoid its elimination during allocation
+1977     // replacement (when only a slow call is generated).
+1978     call-&gt;set_req(TypeFunc::I_O, result_phi_i_o);
+1979   }
+1980   _igvn.replace_node(alloc, call);
+1981   transform_later(call);
+1982 
+1983   // Identify the output projections from the allocate node and
+1984   // adjust any references to them.
+1985   // The control and io projections look like:
+1986   //
+1987   //        v---Proj(ctrl) &lt;-----+   v---CatchProj(ctrl)
+1988   //  Allocate                   Catch
+1989   //        ^---Proj(io) &lt;-------+   ^---CatchProj(io)
+1990   //
+1991   //  We are interested in the CatchProj nodes.
+1992   //
+1993   extract_call_projections(call);
+1994 
+1995   // An allocate node has separate memory projections for the uses on
+1996   // the control and i_o paths. Replace the control memory projection with
+1997   // result_phi_rawmem (unless we are only generating a slow call when
+1998   // both memory projections are combined)
+1999   if (expand_fast_path &amp;&amp; _memproj_fallthrough != NULL) {
+2000     migrate_outs(_memproj_fallthrough, result_phi_rawmem);
+2001   }
+2002   // Now change uses of _memproj_catchall to use _memproj_fallthrough and delete
+2003   // _memproj_catchall so we end up with a call that has only 1 memory projection.
+2004   if (_memproj_catchall != NULL ) {
+2005     if (_memproj_fallthrough == NULL) {
+2006       _memproj_fallthrough = new ProjNode(call, TypeFunc::Memory);
+2007       transform_later(_memproj_fallthrough);
+2008     }
+2009     migrate_outs(_memproj_catchall, _memproj_fallthrough);
+2010     _igvn.remove_dead_node(_memproj_catchall);
+2011   }
+2012 
+2013   // An allocate node has separate i_o projections for the uses on the control
+2014   // and i_o paths. Always replace the control i_o projection with result i_o
+2015   // otherwise incoming i_o become dead when only a slow call is generated
+2016   // (it is different from memory projections where both projections are
+2017   // combined in such case).
+2018   if (_ioproj_fallthrough != NULL) {
+2019     migrate_outs(_ioproj_fallthrough, result_phi_i_o);
+2020   }
+2021   // Now change uses of _ioproj_catchall to use _ioproj_fallthrough and delete
+2022   // _ioproj_catchall so we end up with a call that has only 1 i_o projection.
+2023   if (_ioproj_catchall != NULL ) {
+2024     if (_ioproj_fallthrough == NULL) {
+2025       _ioproj_fallthrough = new ProjNode(call, TypeFunc::I_O);
+2026       transform_later(_ioproj_fallthrough);
+2027     }
+2028     migrate_outs(_ioproj_catchall, _ioproj_fallthrough);
+2029     _igvn.remove_dead_node(_ioproj_catchall);
+2030   }
+2031 
+2032   // if we generated only a slow call, we are done
+2033   if (!expand_fast_path) {
+2034     // Now we can unhook i_o.
+2035     if (result_phi_i_o-&gt;outcnt() &gt; 1) {
+2036       call-&gt;set_req(TypeFunc::I_O, top());
+2037     } else {
+2038       assert(result_phi_i_o-&gt;unique_ctrl_out() == call, &quot;sanity&quot;);
+2039       // Case of new array with negative size known during compilation.
+2040       // AllocateArrayNode::Ideal() optimization disconnect unreachable
+2041       // following code since call to runtime will throw exception.
+2042       // As result there will be no users of i_o after the call.
+2043       // Leave i_o attached to this call to avoid problems in preceding graph.
+2044     }
+2045     return;
+2046   }
+2047 
+2048   if (_fallthroughcatchproj != NULL) {
+2049     ctrl = _fallthroughcatchproj-&gt;clone();
+2050     transform_later(ctrl);
+2051     _igvn.replace_node(_fallthroughcatchproj, result_region);
+2052   } else {
+2053     ctrl = top();
+2054   }
+2055   Node *slow_result;
+2056   if (_resproj == NULL) {
+2057     // no uses of the allocation result
+2058     slow_result = top();
+2059   } else {
+2060     slow_result = _resproj-&gt;clone();
+2061     transform_later(slow_result);
+2062     _igvn.replace_node(_resproj, result_phi_rawoop);
+2063   }
+2064 
+2065   // Plug slow-path into result merge point
+2066   result_region-&gt;init_req( slow_result_path, ctrl);
+2067   transform_later(result_region);
+2068   if (allocation_has_use) {
+2069     result_phi_rawoop-&gt;init_req(slow_result_path, slow_result);
+2070     transform_later(result_phi_rawoop);
+2071   }
+2072   result_phi_rawmem-&gt;init_req(slow_result_path, _memproj_fallthrough);
+2073   transform_later(result_phi_rawmem);
+2074   transform_later(result_phi_i_o);
+2075   // This completes all paths into the result merge point
+2076 }
+2077 
+2078 // Remove alloc node that has no uses.
+2079 void PhaseMacroExpand::yank_alloc_node(AllocateNode* alloc) {
+2080   Node* ctrl = alloc-&gt;in(TypeFunc::Control);
+2081   Node* mem  = alloc-&gt;in(TypeFunc::Memory);
+2082   Node* i_o  = alloc-&gt;in(TypeFunc::I_O);
+2083 
+2084   extract_call_projections(alloc);
+2085   if (_resproj != NULL) {
+2086     for (DUIterator_Fast imax, i = _resproj-&gt;fast_outs(imax); i &lt; imax; i++) {
+2087       Node* use = _resproj-&gt;fast_out(i);
+2088       use-&gt;isa_MemBar()-&gt;remove(&amp;_igvn);
+2089       --imax;
+2090       --i; // back up iterator
+2091     }
+2092     assert(_resproj-&gt;outcnt() == 0, &quot;all uses must be deleted&quot;);
+2093     _igvn.remove_dead_node(_resproj);
+2094   }
+2095   if (_fallthroughcatchproj != NULL) {
+2096     migrate_outs(_fallthroughcatchproj, ctrl);
+2097     _igvn.remove_dead_node(_fallthroughcatchproj);
+2098   }
+2099   if (_catchallcatchproj != NULL) {
+2100     _igvn.rehash_node_delayed(_catchallcatchproj);
+2101     _catchallcatchproj-&gt;set_req(0, top());
+2102   }
+2103   if (_fallthroughproj != NULL) {
+2104     Node* catchnode = _fallthroughproj-&gt;unique_ctrl_out();
+2105     _igvn.remove_dead_node(catchnode);
+2106     _igvn.remove_dead_node(_fallthroughproj);
+2107   }
+2108   if (_memproj_fallthrough != NULL) {
+2109     migrate_outs(_memproj_fallthrough, mem);
+2110     _igvn.remove_dead_node(_memproj_fallthrough);
+2111   }
+2112   if (_ioproj_fallthrough != NULL) {
+2113     migrate_outs(_ioproj_fallthrough, i_o);
+2114     _igvn.remove_dead_node(_ioproj_fallthrough);
+2115   }
+2116   if (_memproj_catchall != NULL) {
+2117     _igvn.rehash_node_delayed(_memproj_catchall);
+2118     _memproj_catchall-&gt;set_req(0, top());
+2119   }
+2120   if (_ioproj_catchall != NULL) {
+2121     _igvn.rehash_node_delayed(_ioproj_catchall);
+2122     _ioproj_catchall-&gt;set_req(0, top());
+2123   }
+2124 #ifndef PRODUCT
+2125   if (PrintEliminateAllocations) {
+2126     if (alloc-&gt;is_AllocateArray()) {
+2127       tty-&gt;print_cr(&quot;++++ Eliminated: %d AllocateArray&quot;, alloc-&gt;_idx);
+2128     } else {
+2129       tty-&gt;print_cr(&quot;++++ Eliminated: %d Allocate&quot;, alloc-&gt;_idx);
+2130     }
+2131   }
+2132 #endif
+2133   _igvn.remove_dead_node(alloc);
+2134 }
+2135 
+2136 void PhaseMacroExpand::expand_initialize_membar(AllocateNode* alloc, InitializeNode* init,
+2137                                                 Node*&amp; fast_oop_ctrl, Node*&amp; fast_oop_rawmem) {
+2138   // If initialization is performed by an array copy, any required
+2139   // MemBarStoreStore was already added. If the object does not
+2140   // escape no need for a MemBarStoreStore. If the object does not
+2141   // escape in its initializer and memory barrier (MemBarStoreStore or
+2142   // stronger) is already added at exit of initializer, also no need
+2143   // for a MemBarStoreStore. Otherwise we need a MemBarStoreStore
+2144   // so that stores that initialize this object can&#39;t be reordered
+2145   // with a subsequent store that makes this object accessible by
+2146   // other threads.
+2147   // Other threads include java threads and JVM internal threads
+2148   // (for example concurrent GC threads). Current concurrent GC
+2149   // implementation: G1 will not scan newly created object,
+2150   // so it&#39;s safe to skip storestore barrier when allocation does
+2151   // not escape.
+2152   if (!alloc-&gt;does_not_escape_thread() &amp;&amp;
+2153     !alloc-&gt;is_allocation_MemBar_redundant() &amp;&amp;
+2154     (init == NULL || !init-&gt;is_complete_with_arraycopy())) {
+2155     if (init == NULL || init-&gt;req() &lt; InitializeNode::RawStores) {
+2156       // No InitializeNode or no stores captured by zeroing
+2157       // elimination. Simply add the MemBarStoreStore after object
+2158       // initialization.
+2159       MemBarNode* mb = MemBarNode::make(C, Op_MemBarStoreStore, Compile::AliasIdxBot);
+2160       transform_later(mb);
+2161 
+2162       mb-&gt;init_req(TypeFunc::Memory, fast_oop_rawmem);
+2163       mb-&gt;init_req(TypeFunc::Control, fast_oop_ctrl);
+2164       fast_oop_ctrl = new ProjNode(mb, TypeFunc::Control);
+2165       transform_later(fast_oop_ctrl);
+2166       fast_oop_rawmem = new ProjNode(mb, TypeFunc::Memory);
+2167       transform_later(fast_oop_rawmem);
+2168     } else {
+2169       // Add the MemBarStoreStore after the InitializeNode so that
+2170       // all stores performing the initialization that were moved
+2171       // before the InitializeNode happen before the storestore
+2172       // barrier.
+2173 
+2174       Node* init_ctrl = init-&gt;proj_out_or_null(TypeFunc::Control);
+2175       Node* init_mem = init-&gt;proj_out_or_null(TypeFunc::Memory);
+2176 
+2177       MemBarNode* mb = MemBarNode::make(C, Op_MemBarStoreStore, Compile::AliasIdxBot);
+2178       transform_later(mb);
+2179 
+2180       Node* ctrl = new ProjNode(init, TypeFunc::Control);
+2181       transform_later(ctrl);
+2182       Node* mem = new ProjNode(init, TypeFunc::Memory);
+2183       transform_later(mem);
+2184 
+2185       // The MemBarStoreStore depends on control and memory coming
+2186       // from the InitializeNode
+2187       mb-&gt;init_req(TypeFunc::Memory, mem);
+2188       mb-&gt;init_req(TypeFunc::Control, ctrl);
+2189 
+2190       ctrl = new ProjNode(mb, TypeFunc::Control);
+2191       transform_later(ctrl);
+2192       mem = new ProjNode(mb, TypeFunc::Memory);
+2193       transform_later(mem);
+2194 
+2195       // All nodes that depended on the InitializeNode for control
+2196       // and memory must now depend on the MemBarNode that itself
+2197       // depends on the InitializeNode
+2198       if (init_ctrl != NULL) {
+2199         _igvn.replace_node(init_ctrl, ctrl);
+2200       }
+2201       if (init_mem != NULL) {
+2202         _igvn.replace_node(init_mem, mem);
+2203       }
+2204     }
+2205   }
+2206 }
+2207 
+2208 void PhaseMacroExpand::expand_dtrace_alloc_probe(AllocateNode* alloc, Node* oop,
+2209                                                 Node*&amp; ctrl, Node*&amp; rawmem) {
+2210   if (C-&gt;env()-&gt;dtrace_extended_probes()) {
+2211     // Slow-path call
+2212     int size = TypeFunc::Parms + 2;
+2213     CallLeafNode *call = new CallLeafNode(OptoRuntime::dtrace_object_alloc_Type(),
+2214                                           CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_object_alloc_base),
+2215                                           &quot;dtrace_object_alloc&quot;,
+2216                                           TypeRawPtr::BOTTOM);
+2217 
+2218     // Get base of thread-local storage area
+2219     Node* thread = new ThreadLocalNode();
+2220     transform_later(thread);
+2221 
+2222     call-&gt;init_req(TypeFunc::Parms + 0, thread);
+2223     call-&gt;init_req(TypeFunc::Parms + 1, oop);
+2224     call-&gt;init_req(TypeFunc::Control, ctrl);
+2225     call-&gt;init_req(TypeFunc::I_O    , top()); // does no i/o
+2226     call-&gt;init_req(TypeFunc::Memory , ctrl);
+2227     call-&gt;init_req(TypeFunc::ReturnAdr, alloc-&gt;in(TypeFunc::ReturnAdr));
+2228     call-&gt;init_req(TypeFunc::FramePtr, alloc-&gt;in(TypeFunc::FramePtr));
+2229     transform_later(call);
+2230     ctrl = new ProjNode(call, TypeFunc::Control);
+2231     transform_later(ctrl);
+2232     rawmem = new ProjNode(call, TypeFunc::Memory);
+2233     transform_later(rawmem);
+2234   }
+2235 }
+2236 
+2237 // Helper for PhaseMacroExpand::expand_allocate_common.
+2238 // Initializes the newly-allocated storage.
+2239 Node*
+2240 PhaseMacroExpand::initialize_object(AllocateNode* alloc,
+2241                                     Node* control, Node* rawmem, Node* object,
+2242                                     Node* klass_node, Node* length,
+2243                                     Node* size_in_bytes) {
+2244   InitializeNode* init = alloc-&gt;initialization();
+2245   // Store the klass &amp; mark bits
+2246   Node* mark_node = alloc-&gt;make_ideal_mark(&amp;_igvn, object, control, rawmem);
+2247   if (!mark_node-&gt;is_Con()) {
+2248     transform_later(mark_node);
+2249   }
+2250   rawmem = make_store(control, rawmem, object, oopDesc::mark_offset_in_bytes(), mark_node, TypeX_X-&gt;basic_type());
+2251 
+2252   rawmem = make_store(control, rawmem, object, oopDesc::klass_offset_in_bytes(), klass_node, T_METADATA);
+2253   int header_size = alloc-&gt;minimum_header_size();  // conservatively small
+2254 
+2255   // Array length
+2256   if (length != NULL) {         // Arrays need length field
+2257     rawmem = make_store(control, rawmem, object, arrayOopDesc::length_offset_in_bytes(), length, T_INT);
+2258     // conservatively small header size:
+2259     header_size = arrayOopDesc::base_offset_in_bytes(T_BYTE);
+2260     ciKlass* k = _igvn.type(klass_node)-&gt;is_klassptr()-&gt;klass();
+2261     if (k-&gt;is_array_klass())    // we know the exact header size in most cases:
+2262       header_size = Klass::layout_helper_header_size(k-&gt;layout_helper());
+2263   }
+2264 
+2265   // Clear the object body, if necessary.
+2266   if (init == NULL) {
+2267     // The init has somehow disappeared; be cautious and clear everything.
+2268     //
+2269     // This can happen if a node is allocated but an uncommon trap occurs
+2270     // immediately.  In this case, the Initialize gets associated with the
+2271     // trap, and may be placed in a different (outer) loop, if the Allocate
+2272     // is in a loop.  If (this is rare) the inner loop gets unrolled, then
+2273     // there can be two Allocates to one Initialize.  The answer in all these
+2274     // edge cases is safety first.  It is always safe to clear immediately
+2275     // within an Allocate, and then (maybe or maybe not) clear some more later.
+2276     if (!(UseTLAB &amp;&amp; ZeroTLAB)) {
+2277       rawmem = ClearArrayNode::clear_memory(control, rawmem, object,
+2278                                             header_size, size_in_bytes,
+2279                                             &amp;_igvn);
+2280     }
+2281   } else {
+2282     if (!init-&gt;is_complete()) {
+2283       // Try to win by zeroing only what the init does not store.
+2284       // We can also try to do some peephole optimizations,
+2285       // such as combining some adjacent subword stores.
+2286       rawmem = init-&gt;complete_stores(control, rawmem, object,
+2287                                      header_size, size_in_bytes, &amp;_igvn);
+2288     }
+2289     // We have no more use for this link, since the AllocateNode goes away:
+2290     init-&gt;set_req(InitializeNode::RawAddress, top());
+2291     // (If we keep the link, it just confuses the register allocator,
+2292     // who thinks he sees a real use of the address by the membar.)
+2293   }
+2294 
+2295   return rawmem;
+2296 }
+2297 
+2298 // Generate prefetch instructions for next allocations.
+2299 Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*&amp; needgc_false,
+2300                                         Node*&amp; contended_phi_rawmem,
+2301                                         Node* old_eden_top, Node* new_eden_top,
+2302                                         intx lines) {
+2303    enum { fall_in_path = 1, pf_path = 2 };
+2304    if( UseTLAB &amp;&amp; AllocatePrefetchStyle == 2 ) {
+2305       // Generate prefetch allocation with watermark check.
+2306       // As an allocation hits the watermark, we will prefetch starting
+2307       // at a &quot;distance&quot; away from watermark.
+2308 
+2309       Node *pf_region = new RegionNode(3);
+2310       Node *pf_phi_rawmem = new PhiNode( pf_region, Type::MEMORY,
+2311                                                 TypeRawPtr::BOTTOM );
+2312       // I/O is used for Prefetch
+2313       Node *pf_phi_abio = new PhiNode( pf_region, Type::ABIO );
+2314 
+2315       Node *thread = new ThreadLocalNode();
+2316       transform_later(thread);
+2317 
+2318       Node *eden_pf_adr = new AddPNode( top()/*not oop*/, thread,
+2319                    _igvn.MakeConX(in_bytes(JavaThread::tlab_pf_top_offset())) );
+2320       transform_later(eden_pf_adr);
+2321 
+2322       Node *old_pf_wm = new LoadPNode(needgc_false,
+2323                                    contended_phi_rawmem, eden_pf_adr,
+2324                                    TypeRawPtr::BOTTOM, TypeRawPtr::BOTTOM,
+2325                                    MemNode::unordered);
+2326       transform_later(old_pf_wm);
+2327 
+2328       // check against new_eden_top
+2329       Node *need_pf_cmp = new CmpPNode( new_eden_top, old_pf_wm );
+2330       transform_later(need_pf_cmp);
+2331       Node *need_pf_bol = new BoolNode( need_pf_cmp, BoolTest::ge );
+2332       transform_later(need_pf_bol);
+2333       IfNode *need_pf_iff = new IfNode( needgc_false, need_pf_bol,
+2334                                        PROB_UNLIKELY_MAG(4), COUNT_UNKNOWN );
+2335       transform_later(need_pf_iff);
+2336 
+2337       // true node, add prefetchdistance
+2338       Node *need_pf_true = new IfTrueNode( need_pf_iff );
+2339       transform_later(need_pf_true);
+2340 
+2341       Node *need_pf_false = new IfFalseNode( need_pf_iff );
+2342       transform_later(need_pf_false);
+2343 
+2344       Node *new_pf_wmt = new AddPNode( top(), old_pf_wm,
+2345                                     _igvn.MakeConX(AllocatePrefetchDistance) );
+2346       transform_later(new_pf_wmt );
+2347       new_pf_wmt-&gt;set_req(0, need_pf_true);
+2348 
+2349       Node *store_new_wmt = new StorePNode(need_pf_true,
+2350                                        contended_phi_rawmem, eden_pf_adr,
+2351                                        TypeRawPtr::BOTTOM, new_pf_wmt,
+2352                                        MemNode::unordered);
+2353       transform_later(store_new_wmt);
+2354 
+2355       // adding prefetches
+2356       pf_phi_abio-&gt;init_req( fall_in_path, i_o );
+2357 
+2358       Node *prefetch_adr;
+2359       Node *prefetch;
+2360       uint step_size = AllocatePrefetchStepSize;
+2361       uint distance = 0;
+2362 
+2363       for ( intx i = 0; i &lt; lines; i++ ) {
+2364         prefetch_adr = new AddPNode( old_pf_wm, new_pf_wmt,
+2365                                             _igvn.MakeConX(distance) );
+2366         transform_later(prefetch_adr);
+2367         prefetch = new PrefetchAllocationNode( i_o, prefetch_adr );
+2368         transform_later(prefetch);
+2369         distance += step_size;
+2370         i_o = prefetch;
+2371       }
+2372       pf_phi_abio-&gt;set_req( pf_path, i_o );
+2373 
+2374       pf_region-&gt;init_req( fall_in_path, need_pf_false );
+2375       pf_region-&gt;init_req( pf_path, need_pf_true );
+2376 
+2377       pf_phi_rawmem-&gt;init_req( fall_in_path, contended_phi_rawmem );
+2378       pf_phi_rawmem-&gt;init_req( pf_path, store_new_wmt );
+2379 
+2380       transform_later(pf_region);
+2381       transform_later(pf_phi_rawmem);
+2382       transform_later(pf_phi_abio);
+2383 
+2384       needgc_false = pf_region;
+2385       contended_phi_rawmem = pf_phi_rawmem;
+2386       i_o = pf_phi_abio;
+2387    } else if( UseTLAB &amp;&amp; AllocatePrefetchStyle == 3 ) {
+2388       // Insert a prefetch instruction for each allocation.
+2389       // This code is used to generate 1 prefetch instruction per cache line.
+2390 
+2391       // Generate several prefetch instructions.
+2392       uint step_size = AllocatePrefetchStepSize;
+2393       uint distance = AllocatePrefetchDistance;
+2394 
+2395       // Next cache address.
+2396       Node *cache_adr = new AddPNode(old_eden_top, old_eden_top,
+2397                                      _igvn.MakeConX(step_size + distance));
+2398       transform_later(cache_adr);
+2399       cache_adr = new CastP2XNode(needgc_false, cache_adr);
+2400       transform_later(cache_adr);
+2401       // Address is aligned to execute prefetch to the beginning of cache line size
+2402       // (it is important when BIS instruction is used on SPARC as prefetch).
+2403       Node* mask = _igvn.MakeConX(~(intptr_t)(step_size-1));
+2404       cache_adr = new AndXNode(cache_adr, mask);
+2405       transform_later(cache_adr);
+2406       cache_adr = new CastX2PNode(cache_adr);
+2407       transform_later(cache_adr);
+2408 
+2409       // Prefetch
+2410       Node *prefetch = new PrefetchAllocationNode( contended_phi_rawmem, cache_adr );
+2411       prefetch-&gt;set_req(0, needgc_false);
+2412       transform_later(prefetch);
+2413       contended_phi_rawmem = prefetch;
+2414       Node *prefetch_adr;
+2415       distance = step_size;
+2416       for ( intx i = 1; i &lt; lines; i++ ) {
+2417         prefetch_adr = new AddPNode( cache_adr, cache_adr,
+2418                                             _igvn.MakeConX(distance) );
+2419         transform_later(prefetch_adr);
+2420         prefetch = new PrefetchAllocationNode( contended_phi_rawmem, prefetch_adr );
+2421         transform_later(prefetch);
+2422         distance += step_size;
+2423         contended_phi_rawmem = prefetch;
+2424       }
+2425    } else if( AllocatePrefetchStyle &gt; 0 ) {
+2426       // Insert a prefetch for each allocation only on the fast-path
+2427       Node *prefetch_adr;
+2428       Node *prefetch;
+2429       // Generate several prefetch instructions.
+2430       uint step_size = AllocatePrefetchStepSize;
+2431       uint distance = AllocatePrefetchDistance;
+2432       for ( intx i = 0; i &lt; lines; i++ ) {
+2433         prefetch_adr = new AddPNode( old_eden_top, new_eden_top,
+2434                                             _igvn.MakeConX(distance) );
+2435         transform_later(prefetch_adr);
+2436         prefetch = new PrefetchAllocationNode( i_o, prefetch_adr );
+2437         // Do not let it float too high, since if eden_top == eden_end,
+2438         // both might be null.
+2439         if( i == 0 ) { // Set control for first prefetch, next follows it
+2440           prefetch-&gt;init_req(0, needgc_false);
+2441         }
+2442         transform_later(prefetch);
+2443         distance += step_size;
+2444         i_o = prefetch;
+2445       }
+2446    }
+2447    return i_o;
+2448 }
+2449 
+2450 
+2451 void PhaseMacroExpand::expand_allocate(AllocateNode *alloc) {
+2452   expand_allocate_common(alloc, NULL,
+2453                          OptoRuntime::new_instance_Type(),
+2454                          OptoRuntime::new_instance_Java());
+2455 }
+2456 
+2457 void PhaseMacroExpand::expand_allocate_array(AllocateArrayNode *alloc) {
+2458   Node* length = alloc-&gt;in(AllocateNode::ALength);
+2459   InitializeNode* init = alloc-&gt;initialization();
+2460   Node* klass_node = alloc-&gt;in(AllocateNode::KlassNode);
+2461   ciKlass* k = _igvn.type(klass_node)-&gt;is_klassptr()-&gt;klass();
+2462   address slow_call_address;  // Address of slow call
+2463   if (init != NULL &amp;&amp; init-&gt;is_complete_with_arraycopy() &amp;&amp;
+2464       k-&gt;is_type_array_klass()) {
+2465     // Don&#39;t zero type array during slow allocation in VM since
+2466     // it will be initialized later by arraycopy in compiled code.
+2467     slow_call_address = OptoRuntime::new_array_nozero_Java();
+2468   } else {
+2469     slow_call_address = OptoRuntime::new_array_Java();
+2470   }
+2471   expand_allocate_common(alloc, length,
+2472                          OptoRuntime::new_array_Type(),
+2473                          slow_call_address);
+2474 }
+2475 
+2476 //-------------------mark_eliminated_box----------------------------------
+2477 //
+2478 // During EA obj may point to several objects but after few ideal graph
+2479 // transformations (CCP) it may point to only one non escaping object
+2480 // (but still using phi), corresponding locks and unlocks will be marked
+2481 // for elimination. Later obj could be replaced with a new node (new phi)
+2482 // and which does not have escape information. And later after some graph
+2483 // reshape other locks and unlocks (which were not marked for elimination
+2484 // before) are connected to this new obj (phi) but they still will not be
+2485 // marked for elimination since new obj has no escape information.
+2486 // Mark all associated (same box and obj) lock and unlock nodes for
+2487 // elimination if some of them marked already.
+2488 void PhaseMacroExpand::mark_eliminated_box(Node* oldbox, Node* obj) {
+2489   if (oldbox-&gt;as_BoxLock()-&gt;is_eliminated())
+2490     return; // This BoxLock node was processed already.
+2491 
+2492   // New implementation (EliminateNestedLocks) has separate BoxLock
+2493   // node for each locked region so mark all associated locks/unlocks as
+2494   // eliminated even if different objects are referenced in one locked region
+2495   // (for example, OSR compilation of nested loop inside locked scope).
+2496   if (EliminateNestedLocks ||
+2497       oldbox-&gt;as_BoxLock()-&gt;is_simple_lock_region(NULL, obj)) {
+2498     // Box is used only in one lock region. Mark this box as eliminated.
+2499     _igvn.hash_delete(oldbox);
+2500     oldbox-&gt;as_BoxLock()-&gt;set_eliminated(); // This changes box&#39;s hash value
+2501      _igvn.hash_insert(oldbox);
+2502 
+2503     for (uint i = 0; i &lt; oldbox-&gt;outcnt(); i++) {
+2504       Node* u = oldbox-&gt;raw_out(i);
+2505       if (u-&gt;is_AbstractLock() &amp;&amp; !u-&gt;as_AbstractLock()-&gt;is_non_esc_obj()) {
+2506         AbstractLockNode* alock = u-&gt;as_AbstractLock();
+2507         // Check lock&#39;s box since box could be referenced by Lock&#39;s debug info.
+2508         if (alock-&gt;box_node() == oldbox) {
+2509           // Mark eliminated all related locks and unlocks.
+2510 #ifdef ASSERT
+2511           alock-&gt;log_lock_optimization(C, &quot;eliminate_lock_set_non_esc4&quot;);
+2512 #endif
+2513           alock-&gt;set_non_esc_obj();
+2514         }
+2515       }
+2516     }
+2517     return;
+2518   }
+2519 
+2520   // Create new &quot;eliminated&quot; BoxLock node and use it in monitor debug info
+2521   // instead of oldbox for the same object.
+2522   BoxLockNode* newbox = oldbox-&gt;clone()-&gt;as_BoxLock();
+2523 
+2524   // Note: BoxLock node is marked eliminated only here and it is used
+2525   // to indicate that all associated lock and unlock nodes are marked
+2526   // for elimination.
+2527   newbox-&gt;set_eliminated();
+2528   transform_later(newbox);
+2529 
+2530   // Replace old box node with new box for all users of the same object.
+2531   for (uint i = 0; i &lt; oldbox-&gt;outcnt();) {
+2532     bool next_edge = true;
+2533 
+2534     Node* u = oldbox-&gt;raw_out(i);
+2535     if (u-&gt;is_AbstractLock()) {
+2536       AbstractLockNode* alock = u-&gt;as_AbstractLock();
+2537       if (alock-&gt;box_node() == oldbox &amp;&amp; alock-&gt;obj_node()-&gt;eqv_uncast(obj)) {
+2538         // Replace Box and mark eliminated all related locks and unlocks.
+2539 #ifdef ASSERT
+2540         alock-&gt;log_lock_optimization(C, &quot;eliminate_lock_set_non_esc5&quot;);
+2541 #endif
+2542         alock-&gt;set_non_esc_obj();
+2543         _igvn.rehash_node_delayed(alock);
+2544         alock-&gt;set_box_node(newbox);
+2545         next_edge = false;
+2546       }
+2547     }
+2548     if (u-&gt;is_FastLock() &amp;&amp; u-&gt;as_FastLock()-&gt;obj_node()-&gt;eqv_uncast(obj)) {
+2549       FastLockNode* flock = u-&gt;as_FastLock();
+2550       assert(flock-&gt;box_node() == oldbox, &quot;sanity&quot;);
+2551       _igvn.rehash_node_delayed(flock);
+2552       flock-&gt;set_box_node(newbox);
+2553       next_edge = false;
+2554     }
+2555 
+2556     // Replace old box in monitor debug info.
+2557     if (u-&gt;is_SafePoint() &amp;&amp; u-&gt;as_SafePoint()-&gt;jvms()) {
+2558       SafePointNode* sfn = u-&gt;as_SafePoint();
+2559       JVMState* youngest_jvms = sfn-&gt;jvms();
+2560       int max_depth = youngest_jvms-&gt;depth();
+2561       for (int depth = 1; depth &lt;= max_depth; depth++) {
+2562         JVMState* jvms = youngest_jvms-&gt;of_depth(depth);
+2563         int num_mon  = jvms-&gt;nof_monitors();
+2564         // Loop over monitors
+2565         for (int idx = 0; idx &lt; num_mon; idx++) {
+2566           Node* obj_node = sfn-&gt;monitor_obj(jvms, idx);
+2567           Node* box_node = sfn-&gt;monitor_box(jvms, idx);
+2568           if (box_node == oldbox &amp;&amp; obj_node-&gt;eqv_uncast(obj)) {
+2569             int j = jvms-&gt;monitor_box_offset(idx);
+2570             _igvn.replace_input_of(u, j, newbox);
+2571             next_edge = false;
+2572           }
+2573         }
+2574       }
+2575     }
+2576     if (next_edge) i++;
+2577   }
+2578 }
+2579 
+2580 //-----------------------mark_eliminated_locking_nodes-----------------------
+2581 void PhaseMacroExpand::mark_eliminated_locking_nodes(AbstractLockNode *alock) {
+2582   if (EliminateNestedLocks) {
+2583     if (alock-&gt;is_nested()) {
+2584        assert(alock-&gt;box_node()-&gt;as_BoxLock()-&gt;is_eliminated(), &quot;sanity&quot;);
+2585        return;
+2586     } else if (!alock-&gt;is_non_esc_obj()) { // Not eliminated or coarsened
+2587       // Only Lock node has JVMState needed here.
+2588       // Not that preceding claim is documented anywhere else.
+2589       if (alock-&gt;jvms() != NULL) {
+2590         if (alock-&gt;as_Lock()-&gt;is_nested_lock_region()) {
+2591           // Mark eliminated related nested locks and unlocks.
+2592           Node* obj = alock-&gt;obj_node();
+2593           BoxLockNode* box_node = alock-&gt;box_node()-&gt;as_BoxLock();
+2594           assert(!box_node-&gt;is_eliminated(), &quot;should not be marked yet&quot;);
+2595           // Note: BoxLock node is marked eliminated only here
+2596           // and it is used to indicate that all associated lock
+2597           // and unlock nodes are marked for elimination.
+2598           box_node-&gt;set_eliminated(); // Box&#39;s hash is always NO_HASH here
+2599           for (uint i = 0; i &lt; box_node-&gt;outcnt(); i++) {
+2600             Node* u = box_node-&gt;raw_out(i);
+2601             if (u-&gt;is_AbstractLock()) {
+2602               alock = u-&gt;as_AbstractLock();
+2603               if (alock-&gt;box_node() == box_node) {
+2604                 // Verify that this Box is referenced only by related locks.
+2605                 assert(alock-&gt;obj_node()-&gt;eqv_uncast(obj), &quot;&quot;);
+2606                 // Mark all related locks and unlocks.
+2607 #ifdef ASSERT
+2608                 alock-&gt;log_lock_optimization(C, &quot;eliminate_lock_set_nested&quot;);
+2609 #endif
+2610                 alock-&gt;set_nested();
+2611               }
+2612             }
+2613           }
+2614         } else {
+2615 #ifdef ASSERT
+2616           alock-&gt;log_lock_optimization(C, &quot;eliminate_lock_NOT_nested_lock_region&quot;);
+2617           if (C-&gt;log() != NULL)
+2618             alock-&gt;as_Lock()-&gt;is_nested_lock_region(C); // rerun for debugging output
+2619 #endif
+2620         }
+2621       }
+2622       return;
+2623     }
+2624     // Process locks for non escaping object
+2625     assert(alock-&gt;is_non_esc_obj(), &quot;&quot;);
+2626   } // EliminateNestedLocks
+2627 
+2628   if (alock-&gt;is_non_esc_obj()) { // Lock is used for non escaping object
+2629     // Look for all locks of this object and mark them and
+2630     // corresponding BoxLock nodes as eliminated.
+2631     Node* obj = alock-&gt;obj_node();
+2632     for (uint j = 0; j &lt; obj-&gt;outcnt(); j++) {
+2633       Node* o = obj-&gt;raw_out(j);
+2634       if (o-&gt;is_AbstractLock() &amp;&amp;
+2635           o-&gt;as_AbstractLock()-&gt;obj_node()-&gt;eqv_uncast(obj)) {
+2636         alock = o-&gt;as_AbstractLock();
+2637         Node* box = alock-&gt;box_node();
+2638         // Replace old box node with new eliminated box for all users
+2639         // of the same object and mark related locks as eliminated.
+2640         mark_eliminated_box(box, obj);
+2641       }
+2642     }
+2643   }
+2644 }
+2645 
+2646 // we have determined that this lock/unlock can be eliminated, we simply
+2647 // eliminate the node without expanding it.
+2648 //
+2649 // Note:  The membar&#39;s associated with the lock/unlock are currently not
+2650 //        eliminated.  This should be investigated as a future enhancement.
+2651 //
+2652 bool PhaseMacroExpand::eliminate_locking_node(AbstractLockNode *alock) {
+2653 
+2654   if (!alock-&gt;is_eliminated()) {
+2655     return false;
+2656   }
+2657 #ifdef ASSERT
+2658   if (!alock-&gt;is_coarsened()) {
+2659     // Check that new &quot;eliminated&quot; BoxLock node is created.
+2660     BoxLockNode* oldbox = alock-&gt;box_node()-&gt;as_BoxLock();
+2661     assert(oldbox-&gt;is_eliminated(), &quot;should be done already&quot;);
+2662   }
+2663 #endif
+2664 
+2665   alock-&gt;log_lock_optimization(C, &quot;eliminate_lock&quot;);
+2666 
+2667 #ifndef PRODUCT
+2668   if (PrintEliminateLocks) {
+2669     if (alock-&gt;is_Lock()) {
+2670       tty-&gt;print_cr(&quot;++++ Eliminated: %d Lock&quot;, alock-&gt;_idx);
+2671     } else {
+2672       tty-&gt;print_cr(&quot;++++ Eliminated: %d Unlock&quot;, alock-&gt;_idx);
+2673     }
+2674   }
+2675 #endif
+2676 
+2677   Node* mem  = alock-&gt;in(TypeFunc::Memory);
+2678   Node* ctrl = alock-&gt;in(TypeFunc::Control);
+2679   guarantee(ctrl != NULL, &quot;missing control projection, cannot replace_node() with NULL&quot;);
+2680 
+2681   extract_call_projections(alock);
+2682   // There are 2 projections from the lock.  The lock node will
+2683   // be deleted when its last use is subsumed below.
+2684   assert(alock-&gt;outcnt() == 2 &amp;&amp;
+2685          _fallthroughproj != NULL &amp;&amp;
+2686          _memproj_fallthrough != NULL,
+2687          &quot;Unexpected projections from Lock/Unlock&quot;);
+2688 
+2689   Node* fallthroughproj = _fallthroughproj;
+2690   Node* memproj_fallthrough = _memproj_fallthrough;
+2691 
+2692   // The memory projection from a lock/unlock is RawMem
+2693   // The input to a Lock is merged memory, so extract its RawMem input
+2694   // (unless the MergeMem has been optimized away.)
+2695   if (alock-&gt;is_Lock()) {
+2696     // Seach for MemBarAcquireLock node and delete it also.
+2697     MemBarNode* membar = fallthroughproj-&gt;unique_ctrl_out()-&gt;as_MemBar();
+2698     assert(membar != NULL &amp;&amp; membar-&gt;Opcode() == Op_MemBarAcquireLock, &quot;&quot;);
+2699     Node* ctrlproj = membar-&gt;proj_out(TypeFunc::Control);
+2700     Node* memproj = membar-&gt;proj_out(TypeFunc::Memory);
+2701     _igvn.replace_node(ctrlproj, fallthroughproj);
+2702     _igvn.replace_node(memproj, memproj_fallthrough);
+2703 
+2704     // Delete FastLock node also if this Lock node is unique user
+2705     // (a loop peeling may clone a Lock node).
+2706     Node* flock = alock-&gt;as_Lock()-&gt;fastlock_node();
+2707     if (flock-&gt;outcnt() == 1) {
+2708       assert(flock-&gt;unique_out() == alock, &quot;sanity&quot;);
+2709       _igvn.replace_node(flock, top());
+2710     }
+2711   }
+2712 
+2713   // Seach for MemBarReleaseLock node and delete it also.
+2714   if (alock-&gt;is_Unlock() &amp;&amp; ctrl-&gt;is_Proj() &amp;&amp; ctrl-&gt;in(0)-&gt;is_MemBar()) {
+2715     MemBarNode* membar = ctrl-&gt;in(0)-&gt;as_MemBar();
+2716     assert(membar-&gt;Opcode() == Op_MemBarReleaseLock &amp;&amp;
+2717            mem-&gt;is_Proj() &amp;&amp; membar == mem-&gt;in(0), &quot;&quot;);
+2718     _igvn.replace_node(fallthroughproj, ctrl);
+2719     _igvn.replace_node(memproj_fallthrough, mem);
+2720     fallthroughproj = ctrl;
+2721     memproj_fallthrough = mem;
+2722     ctrl = membar-&gt;in(TypeFunc::Control);
+2723     mem  = membar-&gt;in(TypeFunc::Memory);
+2724   }
+2725 
+2726   _igvn.replace_node(fallthroughproj, ctrl);
+2727   _igvn.replace_node(memproj_fallthrough, mem);
+2728   return true;
+2729 }
+2730 
+2731 
+2732 //------------------------------expand_lock_node----------------------
+2733 void PhaseMacroExpand::expand_lock_node(LockNode *lock) {
+2734 
+2735   Node* ctrl = lock-&gt;in(TypeFunc::Control);
+2736   Node* mem = lock-&gt;in(TypeFunc::Memory);
+2737   Node* obj = lock-&gt;obj_node();
+2738   Node* box = lock-&gt;box_node();
+2739   Node* flock = lock-&gt;fastlock_node();
+2740 
+2741   assert(!box-&gt;as_BoxLock()-&gt;is_eliminated(), &quot;sanity&quot;);
+2742 
+2743   // Make the merge point
+2744   Node *region;
+2745   Node *mem_phi;
+2746   Node *slow_path;
+2747 
+2748   if (UseOptoBiasInlining) {
+2749     /*
+2750      *  See the full description in MacroAssembler::biased_locking_enter().
+2751      *
+2752      *  if( (mark_word &amp; biased_lock_mask) == biased_lock_pattern ) {
+2753      *    // The object is biased.
+2754      *    proto_node = klass-&gt;prototype_header;
+2755      *    o_node = thread | proto_node;
+2756      *    x_node = o_node ^ mark_word;
+2757      *    if( (x_node &amp; ~age_mask) == 0 ) { // Biased to the current thread ?
+2758      *      // Done.
+2759      *    } else {
+2760      *      if( (x_node &amp; biased_lock_mask) != 0 ) {
+2761      *        // The klass&#39;s prototype header is no longer biased.
+2762      *        cas(&amp;mark_word, mark_word, proto_node)
+2763      *        goto cas_lock;
+2764      *      } else {
+2765      *        // The klass&#39;s prototype header is still biased.
+2766      *        if( (x_node &amp; epoch_mask) != 0 ) { // Expired epoch?
+2767      *          old = mark_word;
+2768      *          new = o_node;
+2769      *        } else {
+2770      *          // Different thread or anonymous biased.
+2771      *          old = mark_word &amp; (epoch_mask | age_mask | biased_lock_mask);
+2772      *          new = thread | old;
+2773      *        }
+2774      *        // Try to rebias.
+2775      *        if( cas(&amp;mark_word, old, new) == 0 ) {
+2776      *          // Done.
+2777      *        } else {
+2778      *          goto slow_path; // Failed.
+2779      *        }
+2780      *      }
+2781      *    }
+2782      *  } else {
+2783      *    // The object is not biased.
+2784      *    cas_lock:
+2785      *    if( FastLock(obj) == 0 ) {
+2786      *      // Done.
+2787      *    } else {
+2788      *      slow_path:
+2789      *      OptoRuntime::complete_monitor_locking_Java(obj);
+2790      *    }
+2791      *  }
+2792      */
+2793 
+2794     region  = new RegionNode(5);
+2795     // create a Phi for the memory state
+2796     mem_phi = new PhiNode( region, Type::MEMORY, TypeRawPtr::BOTTOM);
+2797 
+2798     Node* fast_lock_region  = new RegionNode(3);
+2799     Node* fast_lock_mem_phi = new PhiNode( fast_lock_region, Type::MEMORY, TypeRawPtr::BOTTOM);
+2800 
+2801     // First, check mark word for the biased lock pattern.
+2802     Node* mark_node = make_load(ctrl, mem, obj, oopDesc::mark_offset_in_bytes(), TypeX_X, TypeX_X-&gt;basic_type());
+2803 
+2804     // Get fast path - mark word has the biased lock pattern.
+2805     ctrl = opt_bits_test(ctrl, fast_lock_region, 1, mark_node,
+2806                          markWord::biased_lock_mask_in_place,
+2807                          markWord::biased_lock_pattern, true);
+2808     // fast_lock_region-&gt;in(1) is set to slow path.
+2809     fast_lock_mem_phi-&gt;init_req(1, mem);
+2810 
+2811     // Now check that the lock is biased to the current thread and has
+2812     // the same epoch and bias as Klass::_prototype_header.
+2813 
+2814     // Special-case a fresh allocation to avoid building nodes:
+2815     Node* klass_node = AllocateNode::Ideal_klass(obj, &amp;_igvn);
+2816     if (klass_node == NULL) {
+2817       Node* k_adr = basic_plus_adr(obj, oopDesc::klass_offset_in_bytes());
+2818       klass_node = transform_later(LoadKlassNode::make(_igvn, NULL, mem, k_adr, _igvn.type(k_adr)-&gt;is_ptr()));
+2819 #ifdef _LP64
+2820       if (UseCompressedClassPointers &amp;&amp; klass_node-&gt;is_DecodeNKlass()) {
+2821         assert(klass_node-&gt;in(1)-&gt;Opcode() == Op_LoadNKlass, &quot;sanity&quot;);
+2822         klass_node-&gt;in(1)-&gt;init_req(0, ctrl);
+2823       } else
+2824 #endif
+2825       klass_node-&gt;init_req(0, ctrl);
+2826     }
+2827     Node *proto_node = make_load(ctrl, mem, klass_node, in_bytes(Klass::prototype_header_offset()), TypeX_X, TypeX_X-&gt;basic_type());
+2828 
+2829     Node* thread = transform_later(new ThreadLocalNode());
+2830     Node* cast_thread = transform_later(new CastP2XNode(ctrl, thread));
+2831     Node* o_node = transform_later(new OrXNode(cast_thread, proto_node));
+2832     Node* x_node = transform_later(new XorXNode(o_node, mark_node));
+2833 
+2834     // Get slow path - mark word does NOT match the value.
+2835     STATIC_ASSERT(markWord::age_mask_in_place &lt;= INT_MAX);
+2836     Node* not_biased_ctrl =  opt_bits_test(ctrl, region, 3, x_node,
+2837                                       (~(int)markWord::age_mask_in_place), 0);
+2838     // region-&gt;in(3) is set to fast path - the object is biased to the current thread.
+2839     mem_phi-&gt;init_req(3, mem);
+2840 
+2841 
+2842     // Mark word does NOT match the value (thread | Klass::_prototype_header).
+2843 
+2844 
+2845     // First, check biased pattern.
+2846     // Get fast path - _prototype_header has the same biased lock pattern.
+2847     ctrl =  opt_bits_test(not_biased_ctrl, fast_lock_region, 2, x_node,
+2848                           markWord::biased_lock_mask_in_place, 0, true);
+2849 
+2850     not_biased_ctrl = fast_lock_region-&gt;in(2); // Slow path
+2851     // fast_lock_region-&gt;in(2) - the prototype header is no longer biased
+2852     // and we have to revoke the bias on this object.
+2853     // We are going to try to reset the mark of this object to the prototype
+2854     // value and fall through to the CAS-based locking scheme.
+2855     Node* adr = basic_plus_adr(obj, oopDesc::mark_offset_in_bytes());
+2856     Node* cas = new StoreXConditionalNode(not_biased_ctrl, mem, adr,
+2857                                           proto_node, mark_node);
+2858     transform_later(cas);
+2859     Node* proj = transform_later(new SCMemProjNode(cas));
+2860     fast_lock_mem_phi-&gt;init_req(2, proj);
+2861 
+2862 
+2863     // Second, check epoch bits.
+2864     Node* rebiased_region  = new RegionNode(3);
+2865     Node* old_phi = new PhiNode( rebiased_region, TypeX_X);
+2866     Node* new_phi = new PhiNode( rebiased_region, TypeX_X);
+2867 
+2868     // Get slow path - mark word does NOT match epoch bits.
+2869     Node* epoch_ctrl =  opt_bits_test(ctrl, rebiased_region, 1, x_node,
+2870                                       markWord::epoch_mask_in_place, 0);
+2871     // The epoch of the current bias is not valid, attempt to rebias the object
+2872     // toward the current thread.
+2873     rebiased_region-&gt;init_req(2, epoch_ctrl);
+2874     old_phi-&gt;init_req(2, mark_node);
+2875     new_phi-&gt;init_req(2, o_node);
+2876 
+2877     // rebiased_region-&gt;in(1) is set to fast path.
+2878     // The epoch of the current bias is still valid but we know
+2879     // nothing about the owner; it might be set or it might be clear.
+2880     Node* cmask   = MakeConX(markWord::biased_lock_mask_in_place |
+2881                              markWord::age_mask_in_place |
+2882                              markWord::epoch_mask_in_place);
+2883     Node* old = transform_later(new AndXNode(mark_node, cmask));
+2884     cast_thread = transform_later(new CastP2XNode(ctrl, thread));
+2885     Node* new_mark = transform_later(new OrXNode(cast_thread, old));
+2886     old_phi-&gt;init_req(1, old);
+2887     new_phi-&gt;init_req(1, new_mark);
+2888 
+2889     transform_later(rebiased_region);
+2890     transform_later(old_phi);
+2891     transform_later(new_phi);
+2892 
+2893     // Try to acquire the bias of the object using an atomic operation.
+2894     // If this fails we will go in to the runtime to revoke the object&#39;s bias.
+2895     cas = new StoreXConditionalNode(rebiased_region, mem, adr, new_phi, old_phi);
+2896     transform_later(cas);
+2897     proj = transform_later(new SCMemProjNode(cas));
+2898 
+2899     // Get slow path - Failed to CAS.
+2900     not_biased_ctrl = opt_bits_test(rebiased_region, region, 4, cas, 0, 0);
+2901     mem_phi-&gt;init_req(4, proj);
+2902     // region-&gt;in(4) is set to fast path - the object is rebiased to the current thread.
+2903 
+2904     // Failed to CAS.
+2905     slow_path  = new RegionNode(3);
+2906     Node *slow_mem = new PhiNode( slow_path, Type::MEMORY, TypeRawPtr::BOTTOM);
+2907 
+2908     slow_path-&gt;init_req(1, not_biased_ctrl); // Capture slow-control
+2909     slow_mem-&gt;init_req(1, proj);
+2910 
+2911     // Call CAS-based locking scheme (FastLock node).
+2912 
+2913     transform_later(fast_lock_region);
+2914     transform_later(fast_lock_mem_phi);
+2915 
+2916     // Get slow path - FastLock failed to lock the object.
+2917     ctrl = opt_bits_test(fast_lock_region, region, 2, flock, 0, 0);
+2918     mem_phi-&gt;init_req(2, fast_lock_mem_phi);
+2919     // region-&gt;in(2) is set to fast path - the object is locked to the current thread.
+2920 
+2921     slow_path-&gt;init_req(2, ctrl); // Capture slow-control
+2922     slow_mem-&gt;init_req(2, fast_lock_mem_phi);
+2923 
+2924     transform_later(slow_path);
+2925     transform_later(slow_mem);
+2926     // Reset lock&#39;s memory edge.
+2927     lock-&gt;set_req(TypeFunc::Memory, slow_mem);
+2928 
+2929   } else {
+2930     region  = new RegionNode(3);
+2931     // create a Phi for the memory state
+2932     mem_phi = new PhiNode( region, Type::MEMORY, TypeRawPtr::BOTTOM);
+2933 
+2934     // Optimize test; set region slot 2
+2935     slow_path = opt_bits_test(ctrl, region, 2, flock, 0, 0);
+2936     mem_phi-&gt;init_req(2, mem);
+2937   }
+2938 
+2939   // Make slow path call
+2940   CallNode *call = make_slow_call((CallNode *) lock, OptoRuntime::complete_monitor_enter_Type(),
+2941                                   OptoRuntime::complete_monitor_locking_Java(), NULL, slow_path,
+2942                                   obj, box, NULL);
+2943 
+2944   extract_call_projections(call);
+2945 
+2946   // Slow path can only throw asynchronous exceptions, which are always
+2947   // de-opted.  So the compiler thinks the slow-call can never throw an
+2948   // exception.  If it DOES throw an exception we would need the debug
+2949   // info removed first (since if it throws there is no monitor).
+2950   assert ( _ioproj_fallthrough == NULL &amp;&amp; _ioproj_catchall == NULL &amp;&amp;
+2951            _memproj_catchall == NULL &amp;&amp; _catchallcatchproj == NULL, &quot;Unexpected projection from Lock&quot;);
+2952 
+2953   // Capture slow path
+2954   // disconnect fall-through projection from call and create a new one
+2955   // hook up users of fall-through projection to region
+2956   Node *slow_ctrl = _fallthroughproj-&gt;clone();
+2957   transform_later(slow_ctrl);
+2958   _igvn.hash_delete(_fallthroughproj);
+2959   _fallthroughproj-&gt;disconnect_inputs(NULL, C);
+2960   region-&gt;init_req(1, slow_ctrl);
+2961   // region inputs are now complete
+2962   transform_later(region);
+2963   _igvn.replace_node(_fallthroughproj, region);
+2964 
+2965   Node *memproj = transform_later(new ProjNode(call, TypeFunc::Memory));
+2966   mem_phi-&gt;init_req(1, memproj );
+2967   transform_later(mem_phi);
+2968   _igvn.replace_node(_memproj_fallthrough, mem_phi);
+2969 }
+2970 
+2971 //------------------------------expand_unlock_node----------------------
+2972 void PhaseMacroExpand::expand_unlock_node(UnlockNode *unlock) {
+2973 
+2974   Node* ctrl = unlock-&gt;in(TypeFunc::Control);
+2975   Node* mem = unlock-&gt;in(TypeFunc::Memory);
+2976   Node* obj = unlock-&gt;obj_node();
+2977   Node* box = unlock-&gt;box_node();
+2978 
+2979   assert(!box-&gt;as_BoxLock()-&gt;is_eliminated(), &quot;sanity&quot;);
+2980 
+2981   // No need for a null check on unlock
+2982 
+2983   // Make the merge point
+2984   Node *region;
+2985   Node *mem_phi;
+2986 
+2987   if (UseOptoBiasInlining) {
+2988     // Check for biased locking unlock case, which is a no-op.
+2989     // See the full description in MacroAssembler::biased_locking_exit().
+2990     region  = new RegionNode(4);
+2991     // create a Phi for the memory state
+2992     mem_phi = new PhiNode( region, Type::MEMORY, TypeRawPtr::BOTTOM);
+2993     mem_phi-&gt;init_req(3, mem);
+2994 
+2995     Node* mark_node = make_load(ctrl, mem, obj, oopDesc::mark_offset_in_bytes(), TypeX_X, TypeX_X-&gt;basic_type());
+2996     ctrl = opt_bits_test(ctrl, region, 3, mark_node,
+2997                          markWord::biased_lock_mask_in_place,
+2998                          markWord::biased_lock_pattern);
+2999   } else {
+3000     region  = new RegionNode(3);
+3001     // create a Phi for the memory state
+3002     mem_phi = new PhiNode( region, Type::MEMORY, TypeRawPtr::BOTTOM);
+3003   }
+3004 
+3005   FastUnlockNode *funlock = new FastUnlockNode( ctrl, obj, box );
+3006   funlock = transform_later( funlock )-&gt;as_FastUnlock();
+3007   // Optimize test; set region slot 2
+3008   Node *slow_path = opt_bits_test(ctrl, region, 2, funlock, 0, 0);
+3009   Node *thread = transform_later(new ThreadLocalNode());
+3010 
+3011   CallNode *call = make_slow_call((CallNode *) unlock, OptoRuntime::complete_monitor_exit_Type(),
+3012                                   CAST_FROM_FN_PTR(address, SharedRuntime::complete_monitor_unlocking_C),
+3013                                   &quot;complete_monitor_unlocking_C&quot;, slow_path, obj, box, thread);
+3014 
+3015   extract_call_projections(call);
+3016 
+3017   assert ( _ioproj_fallthrough == NULL &amp;&amp; _ioproj_catchall == NULL &amp;&amp;
+3018            _memproj_catchall == NULL &amp;&amp; _catchallcatchproj == NULL, &quot;Unexpected projection from Lock&quot;);
+3019 
+3020   // No exceptions for unlocking
+3021   // Capture slow path
+3022   // disconnect fall-through projection from call and create a new one
+3023   // hook up users of fall-through projection to region
+3024   Node *slow_ctrl = _fallthroughproj-&gt;clone();
+3025   transform_later(slow_ctrl);
+3026   _igvn.hash_delete(_fallthroughproj);
+3027   _fallthroughproj-&gt;disconnect_inputs(NULL, C);
+3028   region-&gt;init_req(1, slow_ctrl);
+3029   // region inputs are now complete
+3030   transform_later(region);
+3031   _igvn.replace_node(_fallthroughproj, region);
+3032 
+3033   Node *memproj = transform_later(new ProjNode(call, TypeFunc::Memory) );
+3034   mem_phi-&gt;init_req(1, memproj );
+3035   mem_phi-&gt;init_req(2, mem);
+3036   transform_later(mem_phi);
+3037   _igvn.replace_node(_memproj_fallthrough, mem_phi);
+3038 }
+3039 
+3040 void PhaseMacroExpand::expand_subtypecheck_node(SubTypeCheckNode *check) {
+3041   assert(check-&gt;in(SubTypeCheckNode::Control) == NULL, &quot;should be pinned&quot;);
+3042   Node* bol = check-&gt;unique_out();
+3043   Node* obj_or_subklass = check-&gt;in(SubTypeCheckNode::ObjOrSubKlass);
+3044   Node* superklass = check-&gt;in(SubTypeCheckNode::SuperKlass);
+3045   assert(bol-&gt;is_Bool() &amp;&amp; bol-&gt;as_Bool()-&gt;_test._test == BoolTest::ne, &quot;unexpected bool node&quot;);
+3046 
+3047   for (DUIterator_Last imin, i = bol-&gt;last_outs(imin); i &gt;= imin; --i) {
+3048     Node* iff = bol-&gt;last_out(i);
+3049     assert(iff-&gt;is_If(), &quot;where&#39;s the if?&quot;);
+3050 
+3051     if (iff-&gt;in(0)-&gt;is_top()) {
+3052       _igvn.replace_input_of(iff, 1, C-&gt;top());
+3053       continue;
+3054     }
+3055 
+3056     Node* iftrue = iff-&gt;as_If()-&gt;proj_out(1);
+3057     Node* iffalse = iff-&gt;as_If()-&gt;proj_out(0);
+3058     Node* ctrl = iff-&gt;in(0);
+3059 
+3060     Node* subklass = NULL;
+3061     if (_igvn.type(obj_or_subklass)-&gt;isa_klassptr()) {
+3062       subklass = obj_or_subklass;
+3063     } else {
+3064       Node* k_adr = basic_plus_adr(obj_or_subklass, oopDesc::klass_offset_in_bytes());
+3065       subklass = _igvn.transform(LoadKlassNode::make(_igvn, NULL, C-&gt;immutable_memory(), k_adr, TypeInstPtr::KLASS));
+3066     }
+3067 
+3068     Node* not_subtype_ctrl = Phase::gen_subtype_check(subklass, superklass, &amp;ctrl, NULL, _igvn);
+3069 
+3070     _igvn.replace_input_of(iff, 0, C-&gt;top());
+3071     _igvn.replace_node(iftrue, not_subtype_ctrl);
+3072     _igvn.replace_node(iffalse, ctrl);
+3073   }
+3074   _igvn.replace_node(check, C-&gt;top());
+3075 }
+3076 
+3077 //---------------------------eliminate_macro_nodes----------------------
+3078 // Eliminate scalar replaced allocations and associated locks.
+3079 void PhaseMacroExpand::eliminate_macro_nodes() {
+3080   if (C-&gt;macro_count() == 0)
+3081     return;
+3082 
+3083   // First, attempt to eliminate locks
+3084   int cnt = C-&gt;macro_count();
+3085   for (int i=0; i &lt; cnt; i++) {
+3086     Node *n = C-&gt;macro_node(i);
+3087     if (n-&gt;is_AbstractLock()) { // Lock and Unlock nodes
+3088       // Before elimination mark all associated (same box and obj)
+3089       // lock and unlock nodes.
+3090       mark_eliminated_locking_nodes(n-&gt;as_AbstractLock());
+3091     }
+3092   }
+3093   bool progress = true;
+3094   while (progress) {
+3095     progress = false;
+3096     for (int i = C-&gt;macro_count(); i &gt; 0; i--) {
+3097       Node * n = C-&gt;macro_node(i-1);
+3098       bool success = false;
+3099       debug_only(int old_macro_count = C-&gt;macro_count(););
+3100       if (n-&gt;is_AbstractLock()) {
+3101         success = eliminate_locking_node(n-&gt;as_AbstractLock());
+3102       }
+3103       assert(success == (C-&gt;macro_count() &lt; old_macro_count), &quot;elimination reduces macro count&quot;);
+3104       progress = progress || success;
+3105     }
+3106   }
+3107   // Next, attempt to eliminate allocations
+3108   _has_locks = false;
+3109   progress = true;
+3110   while (progress) {
+3111     progress = false;
+3112     for (int i = C-&gt;macro_count(); i &gt; 0; i--) {
+3113       Node * n = C-&gt;macro_node(i-1);
+3114       bool success = false;
+3115       debug_only(int old_macro_count = C-&gt;macro_count(););
+3116       switch (n-&gt;class_id()) {
+3117       case Node::Class_Allocate:
+3118       case Node::Class_AllocateArray:
+3119         success = eliminate_allocate_node(n-&gt;as_Allocate());
+3120         break;
+3121       case Node::Class_CallStaticJava:
+3122         success = eliminate_boxing_node(n-&gt;as_CallStaticJava());
+3123         break;
+3124       case Node::Class_Lock:
+3125       case Node::Class_Unlock:
+3126         assert(!n-&gt;as_AbstractLock()-&gt;is_eliminated(), &quot;sanity&quot;);
+3127         _has_locks = true;
+3128         break;
+3129       case Node::Class_ArrayCopy:
+3130         break;
+3131       case Node::Class_OuterStripMinedLoop:
+3132         break;
+3133       case Node::Class_SubTypeCheck:
+3134         break;
+3135       default:
+3136         assert(n-&gt;Opcode() == Op_LoopLimit ||
+3137                n-&gt;Opcode() == Op_Opaque1   ||
+3138                n-&gt;Opcode() == Op_Opaque2   ||
+3139                n-&gt;Opcode() == Op_Opaque3   ||
+3140                BarrierSet::barrier_set()-&gt;barrier_set_c2()-&gt;is_gc_barrier_node(n),
+3141                &quot;unknown node type in macro list&quot;);
+3142       }
+3143       assert(success == (C-&gt;macro_count() &lt; old_macro_count), &quot;elimination reduces macro count&quot;);
+3144       progress = progress || success;
+3145     }
+3146   }
+3147 }
+3148 
+3149 //------------------------------expand_macro_nodes----------------------
+3150 //  Returns true if a failure occurred.
+3151 bool PhaseMacroExpand::expand_macro_nodes() {
+3152   // Last attempt to eliminate macro nodes.
+3153   eliminate_macro_nodes();
+3154 
+3155   // Eliminate Opaque and LoopLimit nodes. Do it after all loop optimizations.
+3156   bool progress = true;
+3157   while (progress) {
+3158     progress = false;
+3159     for (int i = C-&gt;macro_count(); i &gt; 0; i--) {
+3160       Node* n = C-&gt;macro_node(i-1);
+3161       bool success = false;
+3162       debug_only(int old_macro_count = C-&gt;macro_count(););
+3163       if (n-&gt;Opcode() == Op_LoopLimit) {
+3164         // Remove it from macro list and put on IGVN worklist to optimize.
+3165         C-&gt;remove_macro_node(n);
+3166         _igvn._worklist.push(n);
+3167         success = true;
+3168       } else if (n-&gt;Opcode() == Op_CallStaticJava) {
+3169         // Remove it from macro list and put on IGVN worklist to optimize.
+3170         C-&gt;remove_macro_node(n);
+3171         _igvn._worklist.push(n);
+3172         success = true;
+3173       } else if (n-&gt;Opcode() == Op_Opaque1 || n-&gt;Opcode() == Op_Opaque2) {
+3174         _igvn.replace_node(n, n-&gt;in(1));
+3175         success = true;
+3176 #if INCLUDE_RTM_OPT
+3177       } else if ((n-&gt;Opcode() == Op_Opaque3) &amp;&amp; ((Opaque3Node*)n)-&gt;rtm_opt()) {
+3178         assert(C-&gt;profile_rtm(), &quot;should be used only in rtm deoptimization code&quot;);
+3179         assert((n-&gt;outcnt() == 1) &amp;&amp; n-&gt;unique_out()-&gt;is_Cmp(), &quot;&quot;);
+3180         Node* cmp = n-&gt;unique_out();
+3181 #ifdef ASSERT
+3182         // Validate graph.
+3183         assert((cmp-&gt;outcnt() == 1) &amp;&amp; cmp-&gt;unique_out()-&gt;is_Bool(), &quot;&quot;);
+3184         BoolNode* bol = cmp-&gt;unique_out()-&gt;as_Bool();
+3185         assert((bol-&gt;outcnt() == 1) &amp;&amp; bol-&gt;unique_out()-&gt;is_If() &amp;&amp;
+3186                (bol-&gt;_test._test == BoolTest::ne), &quot;&quot;);
+3187         IfNode* ifn = bol-&gt;unique_out()-&gt;as_If();
+3188         assert((ifn-&gt;outcnt() == 2) &amp;&amp;
+3189                ifn-&gt;proj_out(1)-&gt;is_uncommon_trap_proj(Deoptimization::Reason_rtm_state_change) != NULL, &quot;&quot;);
+3190 #endif
+3191         Node* repl = n-&gt;in(1);
+3192         if (!_has_locks) {
+3193           // Remove RTM state check if there are no locks in the code.
+3194           // Replace input to compare the same value.
+3195           repl = (cmp-&gt;in(1) == n) ? cmp-&gt;in(2) : cmp-&gt;in(1);
+3196         }
+3197         _igvn.replace_node(n, repl);
+3198         success = true;
+3199 #endif
+3200       } else if (n-&gt;Opcode() == Op_OuterStripMinedLoop) {
+3201         n-&gt;as_OuterStripMinedLoop()-&gt;adjust_strip_mined_loop(&amp;_igvn);
+3202         C-&gt;remove_macro_node(n);
+3203         success = true;
+3204       }
+3205       assert(!success || (C-&gt;macro_count() == (old_macro_count - 1)), &quot;elimination must have deleted one node from macro list&quot;);
+3206       progress = progress || success;
+3207     }
+3208   }
+3209 
+3210   // Clean up the graph so we&#39;re less likely to hit the maximum node
+3211   // limit
+3212   _igvn.set_delay_transform(false);
+3213   _igvn.optimize();
+3214   if (C-&gt;failing())  return true;
+3215   _igvn.set_delay_transform(true);
+3216 
+3217 
+3218   // Because we run IGVN after each expansion, some macro nodes may go
+3219   // dead and be removed from the list as we iterate over it. Move
+3220   // Allocate nodes (processed in a second pass) at the beginning of
+3221   // the list and then iterate from the last element of the list until
+3222   // an Allocate node is seen. This is robust to random deletion in
+3223   // the list due to nodes going dead.
+3224   C-&gt;sort_macro_nodes();
+3225 
+3226   // expand arraycopy &quot;macro&quot; nodes first
+3227   // For ReduceBulkZeroing, we must first process all arraycopy nodes
+3228   // before the allocate nodes are expanded.
+3229   while (C-&gt;macro_count() &gt; 0) {
+3230     int macro_count = C-&gt;macro_count();
+3231     Node * n = C-&gt;macro_node(macro_count-1);
+3232     assert(n-&gt;is_macro(), &quot;only macro nodes expected here&quot;);
+3233     if (_igvn.type(n) == Type::TOP || (n-&gt;in(0) != NULL &amp;&amp; n-&gt;in(0)-&gt;is_top())) {
+3234       // node is unreachable, so don&#39;t try to expand it
+3235       C-&gt;remove_macro_node(n);
+3236       continue;
+3237     }
+3238     if (n-&gt;is_Allocate()) {
+3239       break;
+3240     }
+3241     // Make sure expansion will not cause node limit to be exceeded.
+3242     // Worst case is a macro node gets expanded into about 200 nodes.
+3243     // Allow 50% more for optimization.
+3244     if (C-&gt;check_node_count(300, &quot;out of nodes before macro expansion&quot;)) {
+3245       return true;
+3246     }
+3247 
+3248     debug_only(int old_macro_count = C-&gt;macro_count(););
+3249     switch (n-&gt;class_id()) {
+3250     case Node::Class_Lock:
+3251       expand_lock_node(n-&gt;as_Lock());
+3252       assert(C-&gt;macro_count() == (old_macro_count - 1), &quot;expansion must have deleted one node from macro list&quot;);
+3253       break;
+3254     case Node::Class_Unlock:
+3255       expand_unlock_node(n-&gt;as_Unlock());
+3256       assert(C-&gt;macro_count() == (old_macro_count - 1), &quot;expansion must have deleted one node from macro list&quot;);
+3257       break;
+3258     case Node::Class_ArrayCopy:
+3259       expand_arraycopy_node(n-&gt;as_ArrayCopy());
+3260       assert(C-&gt;macro_count() == (old_macro_count - 1), &quot;expansion must have deleted one node from macro list&quot;);
+3261       break;
+3262     case Node::Class_SubTypeCheck:
+3263       expand_subtypecheck_node(n-&gt;as_SubTypeCheck());
+3264       assert(C-&gt;macro_count() == (old_macro_count - 1), &quot;expansion must have deleted one node from macro list&quot;);
+3265       break;
+3266     default:
+3267       assert(false, &quot;unknown node type in macro list&quot;);
+3268     }
+3269     assert(C-&gt;macro_count() &lt; macro_count, &quot;must have deleted a node from macro list&quot;);
+3270     if (C-&gt;failing())  return true;
+3271 
+3272     // Clean up the graph so we&#39;re less likely to hit the maximum node
+3273     // limit
+3274     _igvn.set_delay_transform(false);
+3275     _igvn.optimize();
+3276     if (C-&gt;failing())  return true;
+3277     _igvn.set_delay_transform(true);
+3278   }
+3279 
+<a name="10" id="anc10"></a><span class="line-added">3280   for (int i = C-&gt;macro_count(); i &gt; 0; i --) {</span>
+<span class="line-added">3281     Node * n = C-&gt;macro_node(i-1);</span>
+<span class="line-added">3282     assert(n-&gt;is_macro(), &quot;only macro nodes expected here&quot;);</span>
+<span class="line-added">3283 </span>
+<span class="line-added">3284     switch (n-&gt;class_id()) {</span>
+<span class="line-added">3285     case Node::Class_Allocate:</span>
+<span class="line-added">3286     case Node::Class_AllocateArray:</span>
+<span class="line-added">3287       estimate_stack_allocation_size(n-&gt;as_Allocate());</span>
+<span class="line-added">3288       break;</span>
+<span class="line-added">3289     default:</span>
+<span class="line-added">3290       assert(false, &quot;unknown node type in macro list&quot;);</span>
+<span class="line-added">3291     }</span>
+<span class="line-added">3292   }</span>
+<span class="line-added">3293 </span>
+<span class="line-added">3294   // Check to see if stack allocation size is too large before macro expansion</span>
+<span class="line-added">3295   // so we can reject required stack allocations</span>
+<span class="line-added">3296   if (!stack_allocation_location_representable(C-&gt;fixed_slots() + C-&gt;stack_allocated_slots())) {</span>
+<span class="line-added">3297     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="line-added">3298   }</span>
+<span class="line-added">3299 </span>
+3300   // All nodes except Allocate nodes are expanded now. There could be
+3301   // new optimization opportunities (such as folding newly created
+3302   // load from a just allocated object). Run IGVN.
+3303 
+3304   // expand &quot;macro&quot; nodes
+3305   // nodes are removed from the macro list as they are processed
+3306   while (C-&gt;macro_count() &gt; 0) {
+3307     int macro_count = C-&gt;macro_count();
+3308     Node * n = C-&gt;macro_node(macro_count-1);
+3309     assert(n-&gt;is_macro(), &quot;only macro nodes expected here&quot;);
+3310     if (_igvn.type(n) == Type::TOP || (n-&gt;in(0) != NULL &amp;&amp; n-&gt;in(0)-&gt;is_top())) {
+3311       // node is unreachable, so don&#39;t try to expand it
+3312       C-&gt;remove_macro_node(n);
+3313       continue;
+3314     }
+3315     // Make sure expansion will not cause node limit to be exceeded.
+3316     // Worst case is a macro node gets expanded into about 200 nodes.
+3317     // Allow 50% more for optimization.
+3318     if (C-&gt;check_node_count(300, &quot;out of nodes before macro expansion&quot;)) {
+3319       return true;
+3320     }
+3321     switch (n-&gt;class_id()) {
+3322     case Node::Class_Allocate:
+<a name="11" id="anc11"></a><span class="line-modified">3323       if (!stack_allocation(n-&gt;as_Allocate())) {</span>
+<span class="line-added">3324         expand_allocate(n-&gt;as_Allocate());</span>
+<span class="line-added">3325       }</span>
+3326       break;
+3327     case Node::Class_AllocateArray:
+<a name="12" id="anc12"></a><span class="line-modified">3328       if (!stack_allocation(n-&gt;as_AllocateArray())) {</span>
+<span class="line-added">3329         expand_allocate_array(n-&gt;as_AllocateArray());</span>
+<span class="line-added">3330       }</span>
+3331       break;
+3332     default:
+3333       assert(false, &quot;unknown node type in macro list&quot;);
+3334     }
+3335     assert(C-&gt;macro_count() &lt; macro_count, &quot;must have deleted a node from macro list&quot;);
+3336     if (C-&gt;failing())  return true;
+3337 
+3338     // Clean up the graph so we&#39;re less likely to hit the maximum node
+3339     // limit
+3340     _igvn.set_delay_transform(false);
+3341     _igvn.optimize();
+3342     if (C-&gt;failing())  return true;
+3343     _igvn.set_delay_transform(true);
+3344   }
+3345 
+3346   _igvn.set_delay_transform(false);
+3347   return false;
+3348 }
+<a name="13" id="anc13"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="13" type="hidden" />
+</body>
+</html>

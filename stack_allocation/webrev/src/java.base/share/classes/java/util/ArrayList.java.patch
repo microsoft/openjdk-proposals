@@ -1,0 +1,21 @@
+diff a/src/java.base/share/classes/java/util/ArrayList.java b/src/java.base/share/classes/java/util/ArrayList.java
+--- a/src/java.base/share/classes/java/util/ArrayList.java
++++ b/src/java.base/share/classes/java/util/ArrayList.java
+@@ -233,12 +233,15 @@
+             int newCapacity = ArraysSupport.newLength(oldCapacity,
+                     minCapacity - oldCapacity, /* minimum growth */
+                     oldCapacity >> 1           /* preferred growth */);
+             return elementData = Arrays.copyOf(elementData, newCapacity);
+         } else {
+-            return elementData = new Object[Math.max(DEFAULT_CAPACITY, minCapacity)];
+-        }
++            if (DEFAULT_CAPACITY > minCapacity) {
++                return elementData = new Object[DEFAULT_CAPACITY];
++            }
++            return elementData = new Object[minCapacity];
++         }
+     }
+ 
+     private Object[] grow() {
+         return grow(size + 1);
+     }

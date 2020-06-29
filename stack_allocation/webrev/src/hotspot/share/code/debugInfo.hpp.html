@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/code/debugInfo.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_CODE_DEBUGINFO_HPP
+ 26 #define SHARE_CODE_DEBUGINFO_HPP
+ 27 
+ 28 #include &quot;code/compressedStream.hpp&quot;
+ 29 #include &quot;code/location.hpp&quot;
+ 30 #include &quot;code/nmethod.hpp&quot;
+ 31 #include &quot;code/oopRecorder.hpp&quot;
+ 32 #include &quot;runtime/stackValue.hpp&quot;
+ 33 #include &quot;runtime/thread.hpp&quot;
+ 34 #include &quot;utilities/growableArray.hpp&quot;
+ 35 
+ 36 // Classes used for serializing debugging information.
+ 37 // These abstractions are introducted to provide symmetric
+ 38 // read and write operations.
+ 39 
+ 40 // ScopeValue        describes the value of a variable/expression in a scope
+ 41 // - LocationValue   describes a value in a given location (in frame or register)
+ 42 // - ConstantValue   describes a constant
+ 43 
+ 44 class ConstantOopReadValue;
+ 45 class ObjectValue;
+ 46 
+ 47 class ScopeValue: public ResourceObj {
+ 48  public:
+ 49   // Testers
+ 50   virtual bool is_location() const { return false; }
+ 51   virtual bool is_object() const { return false; }
+ 52   virtual bool is_auto_box() const { return false; }
+ 53   virtual bool is_marker() const { return false; }
+ 54   virtual bool is_constant_int() const { return false; }
+ 55   virtual bool is_constant_double() const { return false; }
+ 56   virtual bool is_constant_long() const { return false; }
+ 57   virtual bool is_constant_oop() const { return false; }
+ 58   virtual bool equals(ScopeValue* other) const { return false; }
+ 59 
+ 60   ConstantOopReadValue* as_ConstantOopReadValue() {
+ 61     assert(is_constant_oop(), &quot;must be&quot;);
+ 62     return (ConstantOopReadValue*) this;
+ 63   }
+ 64 
+ 65   ObjectValue* as_ObjectValue() {
+ 66     assert(is_object(), &quot;must be&quot;);
+ 67     return (ObjectValue*)this;
+ 68   }
+ 69 
+ 70   // Serialization of debugging information
+ 71   virtual void write_on(DebugInfoWriteStream* stream) = 0;
+ 72   static ScopeValue* read_from(DebugInfoReadStream* stream);
+ 73 };
+ 74 
+ 75 
+ 76 // A Location value describes a value in a given location; i.e. the corresponding
+ 77 // logical entity (e.g., a method temporary) lives in this location.
+ 78 
+ 79 class LocationValue: public ScopeValue {
+ 80  private:
+ 81   Location  _location;
+ 82  public:
+ 83   LocationValue(Location location)           { _location = location; }
+ 84   bool      is_location() const              { return true; }
+ 85   Location  location() const                 { return _location; }
+ 86 
+ 87   // Serialization of debugging information
+ 88   LocationValue(DebugInfoReadStream* stream);
+ 89   void write_on(DebugInfoWriteStream* stream);
+ 90 
+ 91   // Printing
+ 92   void print_on(outputStream* st) const;
+ 93 };
+ 94 
+ 95 // A placeholder value that has no concrete meaning other than helping constructing
+ 96 // other values.
+ 97 
+ 98 class MarkerValue: public ScopeValue {
+ 99 public:
+100   bool      is_marker() const                { return true; }
+101 
+102   // Serialization of debugging information
+103   void write_on(DebugInfoWriteStream* stream);
+104 
+105   // Printing
+106   void print_on(outputStream* st) const;
+107 };
+108 
+109 // An ObjectValue describes an object eliminated by escape analysis.
+110 
+111 class ObjectValue: public ScopeValue {
+112  protected:
+113   int                        _id;
+114   ScopeValue*                _klass;
+115   GrowableArray&lt;ScopeValue*&gt; _field_values;
+116   Handle                     _value;
+117   bool                       _visited;
+118  public:
+119   ObjectValue(int id, ScopeValue* klass)
+120      : _id(id)
+121      , _klass(klass)
+122      , _field_values()
+123      , _value()
+124      , _visited(false) {
+125     assert(klass-&gt;is_constant_oop(), &quot;should be constant java mirror oop&quot;);
+126   }
+127 
+128   ObjectValue(int id)
+129      : _id(id)
+130      , _klass(NULL)
+131      , _field_values()
+132      , _value()
+133      , _visited(false) {}
+134 
+135   // Accessors
+136   bool                        is_object() const         { return true; }
+137   int                         id() const                { return _id; }
+138   ScopeValue*                 klass() const             { return _klass; }
+139   GrowableArray&lt;ScopeValue*&gt;* field_values()            { return &amp;_field_values; }
+140   ScopeValue*                 field_at(int i) const     { return _field_values.at(i); }
+141   int                         field_size()              { return _field_values.length(); }
+142   Handle                      value() const             { return _value; }
+143   bool                        is_visited() const        { return _visited; }
+144 
+145   void                        set_value(oop value);
+146   void                        set_visited(bool visited) { _visited = false; }
+147 
+148   virtual bool                is_stack_object()         { return false; }
+149 
+150   // Serialization of debugging information
+151   virtual void read_object(DebugInfoReadStream* stream);
+152   void write_on(DebugInfoWriteStream* stream);
+153 
+154   // Printing
+155   void print_on(outputStream* st) const;
+156   void print_fields_on(outputStream* st) const;
+157 };
+158 
+159 class AutoBoxObjectValue : public ObjectValue {
+160   bool                       _cached;
+161 public:
+162   bool                       is_auto_box() const        { return true; }
+163   bool                       is_cached() const          { return _cached; }
+164   void                       set_cached(bool cached)    { _cached = cached; }
+165   AutoBoxObjectValue(int id, ScopeValue* klass) : ObjectValue(id, klass), _cached(false) { }
+166   AutoBoxObjectValue(int id) : ObjectValue(id), _cached(false) { }
+167 };
+168 
+169 
+170 // A ConstantIntValue describes a constant int; i.e., the corresponding logical entity
+171 // is either a source constant or its computation has been constant-folded.
+172 
+173 class ConstantIntValue: public ScopeValue {
+174  private:
+175   jint _value;
+176  public:
+177   ConstantIntValue(jint value)         { _value = value; }
+178   jint value() const                   { return _value;  }
+179   bool is_constant_int() const         { return true;    }
+180   bool equals(ScopeValue* other) const { return false;   }
+181 
+182   // Serialization of debugging information
+183   ConstantIntValue(DebugInfoReadStream* stream);
+184   void write_on(DebugInfoWriteStream* stream);
+185 
+186   // Printing
+187   void print_on(outputStream* st) const;
+188 };
+189 
+190 class StackObjectValue: public ObjectValue {
+191 private:
+192   Location    _location;
+193   ConstantIntValue *_field_length;
+194 public:
+195   StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length);
+196   StackObjectValue(int id) : ObjectValue(id), _location(), _field_length(NULL) { }
+197 
+198   Location get_stack_location() { return _location; }
+199   ConstantIntValue* get_field_length() { return _field_length; }
+200 
+201   bool is_stack_object(){ return true; }
+202 
+203     // Serialization of debugging information
+204   void read_object(DebugInfoReadStream* stream);
+205   void write_on(DebugInfoWriteStream* stream);
+206 };
+207 
+208 
+209 class ConstantLongValue: public ScopeValue {
+210  private:
+211   jlong _value;
+212  public:
+213   ConstantLongValue(jlong value)       { _value = value; }
+214   jlong value() const                  { return _value;  }
+215   bool is_constant_long() const        { return true;    }
+216   bool equals(ScopeValue* other) const { return false;   }
+217 
+218   // Serialization of debugging information
+219   ConstantLongValue(DebugInfoReadStream* stream);
+220   void write_on(DebugInfoWriteStream* stream);
+221 
+222   // Printing
+223   void print_on(outputStream* st) const;
+224 };
+225 
+226 class ConstantDoubleValue: public ScopeValue {
+227  private:
+228   jdouble _value;
+229  public:
+230   ConstantDoubleValue(jdouble value)   { _value = value; }
+231   jdouble value() const                { return _value;  }
+232   bool is_constant_double() const      { return true;    }
+233   bool equals(ScopeValue* other) const { return false;   }
+234 
+235   // Serialization of debugging information
+236   ConstantDoubleValue(DebugInfoReadStream* stream);
+237   void write_on(DebugInfoWriteStream* stream);
+238 
+239   // Printing
+240   void print_on(outputStream* st) const;
+241 };
+242 
+243 // A ConstantOopWriteValue is created by the compiler to
+244 // be written as debugging information.
+245 
+246 class ConstantOopWriteValue: public ScopeValue {
+247  private:
+248   jobject _value;
+249  public:
+250   ConstantOopWriteValue(jobject value) { _value = value; }
+251   jobject value() const                { return _value;  }
+252   bool is_constant_oop() const         { return true;    }
+253   bool equals(ScopeValue* other) const { return false;   }
+254 
+255   // Serialization of debugging information
+256   void write_on(DebugInfoWriteStream* stream);
+257 
+258   // Printing
+259   void print_on(outputStream* st) const;
+260 };
+261 
+262 // A ConstantOopReadValue is created by the VM when reading
+263 // debug information
+264 
+265 class ConstantOopReadValue: public ScopeValue {
+266  private:
+267   Handle _value;
+268  public:
+269   Handle value() const                 { return _value;  }
+270   bool is_constant_oop() const         { return true;    }
+271   bool equals(ScopeValue* other) const { return false;   }
+272 
+273   // Serialization of debugging information
+274   ConstantOopReadValue(DebugInfoReadStream* stream);
+275   void write_on(DebugInfoWriteStream* stream);
+276 
+277   // Printing
+278   void print_on(outputStream* st) const;
+279 };
+280 
+281 // MonitorValue describes the pair used for monitor_enter and monitor_exit.
+282 
+283 class MonitorValue: public ResourceObj {
+284  private:
+285   ScopeValue* _owner;
+286   Location    _basic_lock;
+287   bool        _eliminated;
+288  public:
+289   // Constructor
+290   MonitorValue(ScopeValue* owner, Location basic_lock, bool eliminated = false);
+291 
+292   // Accessors
+293   ScopeValue*  owner()      const { return _owner; }
+294   Location     basic_lock() const { return _basic_lock;  }
+295   bool         eliminated() const { return _eliminated; }
+296 
+297   // Serialization of debugging information
+298   MonitorValue(DebugInfoReadStream* stream);
+299   void write_on(DebugInfoWriteStream* stream);
+300 
+301   // Printing
+302   void print_on(outputStream* st) const;
+303 };
+304 
+305 // DebugInfoReadStream specializes CompressedReadStream for reading
+306 // debugging information. Used by ScopeDesc.
+307 
+308 class DebugInfoReadStream : public CompressedReadStream {
+309  private:
+310   const CompiledMethod* _code;
+311   const CompiledMethod* code() const { return _code; }
+312   GrowableArray&lt;ScopeValue*&gt;* _obj_pool;
+313  public:
+314   DebugInfoReadStream(const CompiledMethod* code, int offset, GrowableArray&lt;ScopeValue*&gt;* obj_pool = NULL) :
+315     CompressedReadStream(code-&gt;scopes_data_begin(), offset) {
+316     _code = code;
+317     _obj_pool = obj_pool;
+318 
+319   } ;
+320 
+321   oop read_oop();
+322   Method* read_method() {
+323     Method* o = (Method*)(code()-&gt;metadata_at(read_int()));
+324     // is_metadata() is a faster check than is_metaspace_object()
+325     assert(o == NULL || o-&gt;is_metadata(), &quot;meta data only&quot;);
+326     return o;
+327   }
+328   ScopeValue* read_object_value(int type);
+329   ScopeValue* get_cached_object();
+330   // BCI encoding is mostly unsigned, but -1 is a distinguished value
+331   int read_bci() { return read_int() + InvocationEntryBci; }
+332 };
+333 
+334 // DebugInfoWriteStream specializes CompressedWriteStream for
+335 // writing debugging information. Used by ScopeDescRecorder.
+336 
+337 class DebugInfoWriteStream : public CompressedWriteStream {
+338  private:
+339   DebugInformationRecorder* _recorder;
+340   DebugInformationRecorder* recorder() const { return _recorder; }
+341  public:
+342   DebugInfoWriteStream(DebugInformationRecorder* recorder, int initial_size);
+343   void write_handle(jobject h);
+344   void write_bci(int bci) { write_int(bci - InvocationEntryBci); }
+345 
+346   void write_metadata(Metadata* m);
+347 };
+348 
+349 #endif // SHARE_CODE_DEBUGINFO_HPP
+    </pre>
+  </body>
+</html>

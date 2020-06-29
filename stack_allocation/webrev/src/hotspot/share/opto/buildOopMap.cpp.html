@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/opto/buildOopMap.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;code/vmreg.inline.hpp&quot;
+ 27 #include &quot;compiler/oopMap.hpp&quot;
+ 28 #include &quot;memory/resourceArea.hpp&quot;
+ 29 #include &quot;opto/addnode.hpp&quot;
+ 30 #include &quot;opto/callnode.hpp&quot;
+ 31 #include &quot;opto/compile.hpp&quot;
+ 32 #include &quot;opto/machnode.hpp&quot;
+ 33 #include &quot;opto/matcher.hpp&quot;
+ 34 #include &quot;opto/output.hpp&quot;
+ 35 #include &quot;opto/phase.hpp&quot;
+ 36 #include &quot;opto/regalloc.hpp&quot;
+ 37 #include &quot;opto/rootnode.hpp&quot;
+ 38 #include &quot;utilities/align.hpp&quot;
+ 39 
+ 40 // The functions in this file builds OopMaps after all scheduling is done.
+ 41 //
+ 42 // OopMaps contain a list of all registers and stack-slots containing oops (so
+ 43 // they can be updated by GC).  OopMaps also contain a list of derived-pointer
+ 44 // base-pointer pairs.  When the base is moved, the derived pointer moves to
+ 45 // follow it.  Finally, any registers holding callee-save values are also
+ 46 // recorded.  These might contain oops, but only the caller knows.
+ 47 //
+ 48 // BuildOopMaps implements a simple forward reaching-defs solution.  At each
+ 49 // GC point we&#39;ll have the reaching-def Nodes.  If the reaching Nodes are
+ 50 // typed as pointers (no offset), then they are oops.  Pointers+offsets are
+ 51 // derived pointers, and bases can be found from them.  Finally, we&#39;ll also
+ 52 // track reaching callee-save values.  Note that a copy of a callee-save value
+ 53 // &quot;kills&quot; it&#39;s source, so that only 1 copy of a callee-save value is alive at
+ 54 // a time.
+ 55 //
+ 56 // We run a simple bitvector liveness pass to help trim out dead oops.  Due to
+ 57 // irreducible loops, we can have a reaching def of an oop that only reaches
+ 58 // along one path and no way to know if it&#39;s valid or not on the other path.
+ 59 // The bitvectors are quite dense and the liveness pass is fast.
+ 60 //
+ 61 // At GC points, we consult this information to build OopMaps.  All reaching
+ 62 // defs typed as oops are added to the OopMap.  Only 1 instance of a
+ 63 // callee-save register can be recorded.  For derived pointers, we&#39;ll have to
+ 64 // find and record the register holding the base.
+ 65 //
+ 66 // The reaching def&#39;s is a simple 1-pass worklist approach.  I tried a clever
+ 67 // breadth-first approach but it was worse (showed O(n^2) in the
+ 68 // pick-next-block code).
+ 69 //
+ 70 // The relevant data is kept in a struct of arrays (it could just as well be
+ 71 // an array of structs, but the struct-of-arrays is generally a little more
+ 72 // efficient).  The arrays are indexed by register number (including
+ 73 // stack-slots as registers) and so is bounded by 200 to 300 elements in
+ 74 // practice.  One array will map to a reaching def Node (or NULL for
+ 75 // conflict/dead).  The other array will map to a callee-saved register or
+ 76 // OptoReg::Bad for not-callee-saved.
+ 77 
+ 78 
+ 79 // Structure to pass around
+ 80 struct OopFlow : public ResourceObj {
+ 81   short *_callees;              // Array mapping register to callee-saved
+ 82   Node **_defs;                 // array mapping register to reaching def
+ 83                                 // or NULL if dead/conflict
+ 84   // OopFlow structs, when not being actively modified, describe the _end_ of
+ 85   // this block.
+ 86   Block *_b;                    // Block for this struct
+ 87   OopFlow *_next;               // Next free OopFlow
+ 88                                 // or NULL if dead/conflict
+ 89   Compile* C;
+ 90 
+ 91   OopFlow( short *callees, Node **defs, Compile* c ) : _callees(callees), _defs(defs),
+ 92     _b(NULL), _next(NULL), C(c) { }
+ 93 
+ 94   // Given reaching-defs for this block start, compute it for this block end
+ 95   void compute_reach( PhaseRegAlloc *regalloc, int max_reg, Dict *safehash );
+ 96 
+ 97   // Merge these two OopFlows into the &#39;this&#39; pointer.
+ 98   void merge( OopFlow *flow, int max_reg );
+ 99 
+100   // Copy a &#39;flow&#39; over an existing flow
+101   void clone( OopFlow *flow, int max_size);
+102 
+103   // Make a new OopFlow from scratch
+104   static OopFlow *make( Arena *A, int max_size, Compile* C );
+105 
+106   // Build an oopmap from the current flow info
+107   OopMap *build_oop_map( Node *n, int max_reg, PhaseRegAlloc *regalloc, int* live );
+108 };
+109 
+110 // Given reaching-defs for this block start, compute it for this block end
+111 void OopFlow::compute_reach( PhaseRegAlloc *regalloc, int max_reg, Dict *safehash ) {
+112 
+113   for( uint i=0; i&lt;_b-&gt;number_of_nodes(); i++ ) {
+114     Node *n = _b-&gt;get_node(i);
+115 
+116     if( n-&gt;jvms() ) {           // Build an OopMap here?
+117       JVMState *jvms = n-&gt;jvms();
+118       // no map needed for leaf calls
+119       if( n-&gt;is_MachSafePoint() &amp;&amp; !n-&gt;is_MachCallLeaf() ) {
+120         int *live = (int*) (*safehash)[n];
+121         assert( live, &quot;must find live&quot; );
+122         n-&gt;as_MachSafePoint()-&gt;set_oop_map( build_oop_map(n,max_reg,regalloc, live) );
+123       }
+124     }
+125 
+126     // Assign new reaching def&#39;s.
+127     // Note that I padded the _defs and _callees arrays so it&#39;s legal
+128     // to index at _defs[OptoReg::Bad].
+129     OptoReg::Name first = regalloc-&gt;get_reg_first(n);
+130     OptoReg::Name second = regalloc-&gt;get_reg_second(n);
+131     _defs[first] = n;
+132     _defs[second] = n;
+133 
+134     // Pass callee-save info around copies
+135     int idx = n-&gt;is_Copy();
+136     if( idx ) {                 // Copies move callee-save info
+137       OptoReg::Name old_first = regalloc-&gt;get_reg_first(n-&gt;in(idx));
+138       OptoReg::Name old_second = regalloc-&gt;get_reg_second(n-&gt;in(idx));
+139       int tmp_first = _callees[old_first];
+140       int tmp_second = _callees[old_second];
+141       _callees[old_first] = OptoReg::Bad; // callee-save is moved, dead in old location
+142       _callees[old_second] = OptoReg::Bad;
+143       _callees[first] = tmp_first;
+144       _callees[second] = tmp_second;
+145     } else if( n-&gt;is_Phi() ) {  // Phis do not mod callee-saves
+146       assert( _callees[first] == _callees[regalloc-&gt;get_reg_first(n-&gt;in(1))], &quot;&quot; );
+147       assert( _callees[second] == _callees[regalloc-&gt;get_reg_second(n-&gt;in(1))], &quot;&quot; );
+148       assert( _callees[first] == _callees[regalloc-&gt;get_reg_first(n-&gt;in(n-&gt;req()-1))], &quot;&quot; );
+149       assert( _callees[second] == _callees[regalloc-&gt;get_reg_second(n-&gt;in(n-&gt;req()-1))], &quot;&quot; );
+150     } else {
+151       _callees[first] = OptoReg::Bad; // No longer holding a callee-save value
+152       _callees[second] = OptoReg::Bad;
+153 
+154       // Find base case for callee saves
+155       if( n-&gt;is_Proj() &amp;&amp; n-&gt;in(0)-&gt;is_Start() ) {
+156         if( OptoReg::is_reg(first) &amp;&amp;
+157             regalloc-&gt;_matcher.is_save_on_entry(first) )
+158           _callees[first] = first;
+159         if( OptoReg::is_reg(second) &amp;&amp;
+160             regalloc-&gt;_matcher.is_save_on_entry(second) )
+161           _callees[second] = second;
+162       }
+163     }
+164   }
+165 }
+166 
+167 // Merge the given flow into the &#39;this&#39; flow
+168 void OopFlow::merge( OopFlow *flow, int max_reg ) {
+169   assert( _b == NULL, &quot;merging into a happy flow&quot; );
+170   assert( flow-&gt;_b, &quot;this flow is still alive&quot; );
+171   assert( flow != this, &quot;no self flow&quot; );
+172 
+173   // Do the merge.  If there are any differences, drop to &#39;bottom&#39; which
+174   // is OptoReg::Bad or NULL depending.
+175   for( int i=0; i&lt;max_reg; i++ ) {
+176     // Merge the callee-save&#39;s
+177     if( _callees[i] != flow-&gt;_callees[i] )
+178       _callees[i] = OptoReg::Bad;
+179     // Merge the reaching defs
+180     if( _defs[i] != flow-&gt;_defs[i] )
+181       _defs[i] = NULL;
+182   }
+183 
+184 }
+185 
+186 void OopFlow::clone( OopFlow *flow, int max_size ) {
+187   _b = flow-&gt;_b;
+188   memcpy( _callees, flow-&gt;_callees, sizeof(short)*max_size);
+189   memcpy( _defs   , flow-&gt;_defs   , sizeof(Node*)*max_size);
+190 }
+191 
+192 OopFlow *OopFlow::make( Arena *A, int max_size, Compile* C ) {
+193   short *callees = NEW_ARENA_ARRAY(A,short,max_size+1);
+194   Node **defs    = NEW_ARENA_ARRAY(A,Node*,max_size+1);
+195   debug_only( memset(defs,0,(max_size+1)*sizeof(Node*)) );
+196   OopFlow *flow = new (A) OopFlow(callees+1, defs+1, C);
+197   assert( &amp;flow-&gt;_callees[OptoReg::Bad] == callees, &quot;Ok to index at OptoReg::Bad&quot; );
+198   assert( &amp;flow-&gt;_defs   [OptoReg::Bad] == defs   , &quot;Ok to index at OptoReg::Bad&quot; );
+199   return flow;
+200 }
+201 
+202 static int get_live_bit( int *live, int reg ) {
+203   return live[reg&gt;&gt;LogBitsPerInt] &amp;   (1&lt;&lt;(reg&amp;(BitsPerInt-1))); }
+204 static void set_live_bit( int *live, int reg ) {
+205          live[reg&gt;&gt;LogBitsPerInt] |=  (1&lt;&lt;(reg&amp;(BitsPerInt-1))); }
+206 static void clr_live_bit( int *live, int reg ) {
+207          live[reg&gt;&gt;LogBitsPerInt] &amp;= ~(1&lt;&lt;(reg&amp;(BitsPerInt-1))); }
+208 
+209 // Build an oopmap from the current flow info
+210 OopMap *OopFlow::build_oop_map( Node *n, int max_reg, PhaseRegAlloc *regalloc, int* live ) {
+211   int framesize = regalloc-&gt;_framesize;
+212   int max_inarg_slot = OptoReg::reg2stack(regalloc-&gt;_matcher._new_SP);
+213   debug_only( char *dup_check = NEW_RESOURCE_ARRAY(char,OptoReg::stack0());
+214               memset(dup_check,0,OptoReg::stack0()) );
+215 
+216   OopMap *omap = new OopMap( framesize,  max_inarg_slot );
+217   MachCallNode *mcall = n-&gt;is_MachCall() ? n-&gt;as_MachCall() : NULL;
+218   JVMState* jvms = n-&gt;jvms();
+219 
+220   // For all registers do...
+221   for( int reg=0; reg&lt;max_reg; reg++ ) {
+222     if( get_live_bit(live,reg) == 0 )
+223       continue;                 // Ignore if not live
+224 
+225     // %%% C2 can use 2 OptoRegs when the physical register is only one 64bit
+226     // register in that case we&#39;ll get an non-concrete register for the second
+227     // half. We only need to tell the map the register once!
+228     //
+229     // However for the moment we disable this change and leave things as they
+230     // were.
+231 
+232     VMReg r = OptoReg::as_VMReg(OptoReg::Name(reg), framesize, max_inarg_slot);
+233 
+234     if (false &amp;&amp; r-&gt;is_reg() &amp;&amp; !r-&gt;is_concrete()) {
+235       continue;
+236     }
+237 
+238     // See if dead (no reaching def).
+239     Node *def = _defs[reg];     // Get reaching def
+240     assert( def, &quot;since live better have reaching def&quot; );
+241 
+242     // Classify the reaching def as oop, derived, callee-save, dead, or other
+243     const Type *t = def-&gt;bottom_type();
+244     if( t-&gt;isa_oop_ptr() || // Oop or derived?
+245        (C-&gt;do_stack_allocation() &amp;&amp; t-&gt;isa_rawptr() &amp;&amp; def-&gt;is_BoxLock())) {  // consider stack oops too
+246       assert( !OptoReg::is_valid(_callees[reg]), &quot;oop can&#39;t be callee save&quot; );
+247 #ifdef _LP64
+248       // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+249       // Make sure both are record from the same reaching def, but do not
+250       // put both into the oopmap.
+251       if( (reg&amp;1) == 1 ) {      // High half of oop-pair?
+252         assert( _defs[reg-1] == _defs[reg], &quot;both halves from same reaching def&quot; );
+253         continue;               // Do not record high parts in oopmap
+254       }
+255 #endif
+256 
+257       // Check for a legal reg name in the oopMap and bailout if it is not.
+258       if (!omap-&gt;legal_vm_reg_name(r)) {
+259         regalloc-&gt;C-&gt;record_method_not_compilable(&quot;illegal oopMap register name&quot;);
+260         continue;
+261       }
+262       if( t-&gt;is_ptr()-&gt;_offset == 0 ) { // Not derived?
+263         if( mcall ) {
+264           // Outgoing argument GC mask responsibility belongs to the callee,
+265           // not the caller.  Inspect the inputs to the call, to see if
+266           // this live-range is one of them.
+267           uint cnt = mcall-&gt;tf()-&gt;domain()-&gt;cnt();
+268           uint j;
+269           for( j = TypeFunc::Parms; j &lt; cnt; j++)
+270             if( mcall-&gt;in(j) == def )
+271               break;            // reaching def is an argument oop
+272           if( j &lt; cnt )         // arg oops dont go in GC map
+273             continue;           // Continue on to the next register
+274         }
+275         omap-&gt;set_oop(r);
+276       } else {                  // Else it&#39;s derived.
+277         // Find the base of the derived value.
+278         uint i;
+279         // Fast, common case, scan
+280         for( i = jvms-&gt;oopoff(); i &lt; n-&gt;req(); i+=2 )
+281           if( n-&gt;in(i) == def ) break; // Common case
+282         if( i == n-&gt;req() ) {   // Missed, try a more generous scan
+283           // Scan again, but this time peek through copies
+284           for( i = jvms-&gt;oopoff(); i &lt; n-&gt;req(); i+=2 ) {
+285             Node *m = n-&gt;in(i); // Get initial derived value
+286             while( 1 ) {
+287               Node *d = def;    // Get initial reaching def
+288               while( 1 ) {      // Follow copies of reaching def to end
+289                 if( m == d ) goto found; // breaks 3 loops
+290                 int idx = d-&gt;is_Copy();
+291                 if( !idx ) break;
+292                 d = d-&gt;in(idx);     // Link through copy
+293               }
+294               int idx = m-&gt;is_Copy();
+295               if( !idx ) break;
+296               m = m-&gt;in(idx);
+297             }
+298           }
+299           guarantee( 0, &quot;must find derived/base pair&quot; );
+300         }
+301       found: ;
+302         Node *base = n-&gt;in(i+1); // Base is other half of pair
+303         int breg = regalloc-&gt;get_reg_first(base);
+304         VMReg b = OptoReg::as_VMReg(OptoReg::Name(breg), framesize, max_inarg_slot);
+305 
+306         // I record liveness at safepoints BEFORE I make the inputs
+307         // live.  This is because argument oops are NOT live at a
+308         // safepoint (or at least they cannot appear in the oopmap).
+309         // Thus bases of base/derived pairs might not be in the
+310         // liveness data but they need to appear in the oopmap.
+311         if( get_live_bit(live,breg) == 0 ) {// Not live?
+312           // Flag it, so next derived pointer won&#39;t re-insert into oopmap
+313           set_live_bit(live,breg);
+314           // Already missed our turn?
+315           if( breg &lt; reg ) {
+316             if (b-&gt;is_stack() || b-&gt;is_concrete() || true ) {
+317               omap-&gt;set_oop( b);
+318             }
+319           }
+320         }
+321         if (b-&gt;is_stack() || b-&gt;is_concrete() || true ) {
+322           omap-&gt;set_derived_oop( r, b);
+323         }
+324       }
+325 
+326     } else if( t-&gt;isa_narrowoop() ) {
+327       assert( !OptoReg::is_valid(_callees[reg]), &quot;oop can&#39;t be callee save&quot; );
+328       // Check for a legal reg name in the oopMap and bailout if it is not.
+329       if (!omap-&gt;legal_vm_reg_name(r)) {
+330         regalloc-&gt;C-&gt;record_method_not_compilable(&quot;illegal oopMap register name&quot;);
+331         continue;
+332       }
+333       if( mcall ) {
+334           // Outgoing argument GC mask responsibility belongs to the callee,
+335           // not the caller.  Inspect the inputs to the call, to see if
+336           // this live-range is one of them.
+337         uint cnt = mcall-&gt;tf()-&gt;domain()-&gt;cnt();
+338         uint j;
+339         for( j = TypeFunc::Parms; j &lt; cnt; j++)
+340           if( mcall-&gt;in(j) == def )
+341             break;            // reaching def is an argument oop
+342         if( j &lt; cnt )         // arg oops dont go in GC map
+343           continue;           // Continue on to the next register
+344       }
+345       omap-&gt;set_narrowoop(r);
+346     } else if( OptoReg::is_valid(_callees[reg])) { // callee-save?
+347       // It&#39;s a callee-save value
+348       assert( dup_check[_callees[reg]]==0, &quot;trying to callee save same reg twice&quot; );
+349       debug_only( dup_check[_callees[reg]]=1; )
+350       VMReg callee = OptoReg::as_VMReg(OptoReg::Name(_callees[reg]));
+351       if ( callee-&gt;is_concrete() || true ) {
+352         omap-&gt;set_callee_saved( r, callee);
+353       }
+354 
+355     } else {
+356       // Other - some reaching non-oop value
+357 #ifdef ASSERT
+358       if( t-&gt;isa_rawptr() &amp;&amp; C-&gt;cfg()-&gt;_raw_oops.member(def) ) {
+359         def-&gt;dump();
+360         n-&gt;dump();
+361         assert(false, &quot;there should be a oop in OopMap instead of a live raw oop at safepoint&quot;);
+362       }
+363 #endif
+364     }
+365 
+366   }
+367 
+368 #ifdef ASSERT
+369   /* Nice, Intel-only assert
+370   int cnt_callee_saves=0;
+371   int reg2 = 0;
+372   while (OptoReg::is_reg(reg2)) {
+373     if( dup_check[reg2] != 0) cnt_callee_saves++;
+374     assert( cnt_callee_saves==3 || cnt_callee_saves==5, &quot;missed some callee-save&quot; );
+375     reg2++;
+376   }
+377   */
+378 #endif
+379 
+380 #ifdef ASSERT
+381   for( OopMapStream oms1(omap); !oms1.is_done(); oms1.next()) {
+382     OopMapValue omv1 = oms1.current();
+383     if (omv1.type() != OopMapValue::derived_oop_value) {
+384       continue;
+385     }
+386     bool found = false;
+387     for( OopMapStream oms2(omap); !oms2.is_done(); oms2.next()) {
+388       OopMapValue omv2 = oms2.current();
+389       if (omv2.type() != OopMapValue::oop_value) {
+390         continue;
+391       }
+392       if( omv1.content_reg() == omv2.reg() ) {
+393         found = true;
+394         break;
+395       }
+396     }
+397     assert( found, &quot;derived with no base in oopmap&quot; );
+398   }
+399 #endif
+400 
+401   return omap;
+402 }
+403 
+404 // Compute backwards liveness on registers
+405 static void do_liveness(PhaseRegAlloc* regalloc, PhaseCFG* cfg, Block_List* worklist, int max_reg_ints, Arena* A, Dict* safehash) {
+406   int* live = NEW_ARENA_ARRAY(A, int, (cfg-&gt;number_of_blocks() + 1) * max_reg_ints);
+407   int* tmp_live = &amp;live[cfg-&gt;number_of_blocks() * max_reg_ints];
+408   Node* root = cfg-&gt;get_root_node();
+409   // On CISC platforms, get the node representing the stack pointer  that regalloc
+410   // used for spills
+411   Node *fp = NodeSentinel;
+412   if (UseCISCSpill &amp;&amp; root-&gt;req() &gt; 1) {
+413     fp = root-&gt;in(1)-&gt;in(TypeFunc::FramePtr);
+414   }
+415   memset(live, 0, cfg-&gt;number_of_blocks() * (max_reg_ints &lt;&lt; LogBytesPerInt));
+416   // Push preds onto worklist
+417   for (uint i = 1; i &lt; root-&gt;req(); i++) {
+418     Block* block = cfg-&gt;get_block_for_node(root-&gt;in(i));
+419     worklist-&gt;push(block);
+420   }
+421 
+422   // ZKM.jar includes tiny infinite loops which are unreached from below.
+423   // If we missed any blocks, we&#39;ll retry here after pushing all missed
+424   // blocks on the worklist.  Normally this outer loop never trips more
+425   // than once.
+426   while (1) {
+427 
+428     while( worklist-&gt;size() ) { // Standard worklist algorithm
+429       Block *b = worklist-&gt;rpop();
+430 
+431       // Copy first successor into my tmp_live space
+432       int s0num = b-&gt;_succs[0]-&gt;_pre_order;
+433       int *t = &amp;live[s0num*max_reg_ints];
+434       for( int i=0; i&lt;max_reg_ints; i++ )
+435         tmp_live[i] = t[i];
+436 
+437       // OR in the remaining live registers
+438       for( uint j=1; j&lt;b-&gt;_num_succs; j++ ) {
+439         uint sjnum = b-&gt;_succs[j]-&gt;_pre_order;
+440         int *t = &amp;live[sjnum*max_reg_ints];
+441         for( int i=0; i&lt;max_reg_ints; i++ )
+442           tmp_live[i] |= t[i];
+443       }
+444 
+445       // Now walk tmp_live up the block backwards, computing live
+446       for( int k=b-&gt;number_of_nodes()-1; k&gt;=0; k-- ) {
+447         Node *n = b-&gt;get_node(k);
+448         // KILL def&#39;d bits
+449         int first = regalloc-&gt;get_reg_first(n);
+450         int second = regalloc-&gt;get_reg_second(n);
+451         if( OptoReg::is_valid(first) ) clr_live_bit(tmp_live,first);
+452         if( OptoReg::is_valid(second) ) clr_live_bit(tmp_live,second);
+453 
+454         MachNode *m = n-&gt;is_Mach() ? n-&gt;as_Mach() : NULL;
+455 
+456         // Check if m is potentially a CISC alternate instruction (i.e, possibly
+457         // synthesized by RegAlloc from a conventional instruction and a
+458         // spilled input)
+459         bool is_cisc_alternate = false;
+460         if (UseCISCSpill &amp;&amp; m) {
+461           is_cisc_alternate = m-&gt;is_cisc_alternate();
+462         }
+463 
+464         // GEN use&#39;d bits
+465         for( uint l=1; l&lt;n-&gt;req(); l++ ) {
+466           Node *def = n-&gt;in(l);
+467           assert(def != 0, &quot;input edge required&quot;);
+468           int first = regalloc-&gt;get_reg_first(def);
+469           int second = regalloc-&gt;get_reg_second(def);
+470           if( OptoReg::is_valid(first) ) set_live_bit(tmp_live,first);
+471           if( OptoReg::is_valid(second) ) set_live_bit(tmp_live,second);
+472           // If we use the stack pointer in a cisc-alternative instruction,
+473           // check for use as a memory operand.  Then reconstruct the RegName
+474           // for this stack location, and set the appropriate bit in the
+475           // live vector 4987749.
+476           if (is_cisc_alternate &amp;&amp; def == fp) {
+477             const TypePtr *adr_type = NULL;
+478             intptr_t offset;
+479             const Node* base = m-&gt;get_base_and_disp(offset, adr_type);
+480             if (base == NodeSentinel) {
+481               // Machnode has multiple memory inputs. We are unable to reason
+482               // with these, but are presuming (with trepidation) that not any of
+483               // them are oops. This can be fixed by making get_base_and_disp()
+484               // look at a specific input instead of all inputs.
+485               assert(!def-&gt;bottom_type()-&gt;isa_oop_ptr(), &quot;expecting non-oop mem input&quot;);
+486             } else if (base != fp || offset == Type::OffsetBot) {
+487               // Do nothing: the fp operand is either not from a memory use
+488               // (base == NULL) OR the fp is used in a non-memory context
+489               // (base is some other register) OR the offset is not constant,
+490               // so it is not a stack slot.
+491             } else {
+492               assert(offset &gt;= 0, &quot;unexpected negative offset&quot;);
+493               offset -= (offset % jintSize);  // count the whole word
+494               int stack_reg = regalloc-&gt;offset2reg(offset);
+495               if (OptoReg::is_stack(stack_reg)) {
+496                 set_live_bit(tmp_live, stack_reg);
+497               } else {
+498                 assert(false, &quot;stack_reg not on stack?&quot;);
+499               }
+500             }
+501           }
+502         }
+503 
+504         if( n-&gt;jvms() ) {       // Record liveness at safepoint
+505 
+506           // This placement of this stanza means inputs to calls are
+507           // considered live at the callsite&#39;s OopMap.  Argument oops are
+508           // hence live, but NOT included in the oopmap.  See cutout in
+509           // build_oop_map.  Debug oops are live (and in OopMap).
+510           int *n_live = NEW_ARENA_ARRAY(A, int, max_reg_ints);
+511           for( int l=0; l&lt;max_reg_ints; l++ )
+512             n_live[l] = tmp_live[l];
+513           safehash-&gt;Insert(n,n_live);
+514         }
+515 
+516       }
+517 
+518       // Now at block top, see if we have any changes.  If so, propagate
+519       // to prior blocks.
+520       int *old_live = &amp;live[b-&gt;_pre_order*max_reg_ints];
+521       int l;
+522       for( l=0; l&lt;max_reg_ints; l++ )
+523         if( tmp_live[l] != old_live[l] )
+524           break;
+525       if( l&lt;max_reg_ints ) {     // Change!
+526         // Copy in new value
+527         for( l=0; l&lt;max_reg_ints; l++ )
+528           old_live[l] = tmp_live[l];
+529         // Push preds onto worklist
+530         for (l = 1; l &lt; (int)b-&gt;num_preds(); l++) {
+531           Block* block = cfg-&gt;get_block_for_node(b-&gt;pred(l));
+532           worklist-&gt;push(block);
+533         }
+534       }
+535     }
+536 
+537     // Scan for any missing safepoints.  Happens to infinite loops
+538     // ala ZKM.jar
+539     uint i;
+540     for (i = 1; i &lt; cfg-&gt;number_of_blocks(); i++) {
+541       Block* block = cfg-&gt;get_block(i);
+542       uint j;
+543       for (j = 1; j &lt; block-&gt;number_of_nodes(); j++) {
+544         if (block-&gt;get_node(j)-&gt;jvms() &amp;&amp; (*safehash)[block-&gt;get_node(j)] == NULL) {
+545            break;
+546         }
+547       }
+548       if (j &lt; block-&gt;number_of_nodes()) {
+549         break;
+550       }
+551     }
+552     if (i == cfg-&gt;number_of_blocks()) {
+553       break;                    // Got &#39;em all
+554     }
+555 
+556     if (PrintOpto &amp;&amp; Verbose) {
+557       tty-&gt;print_cr(&quot;retripping live calc&quot;);
+558     }
+559 
+560     // Force the issue (expensively): recheck everybody
+561     for (i = 1; i &lt; cfg-&gt;number_of_blocks(); i++) {
+562       worklist-&gt;push(cfg-&gt;get_block(i));
+563     }
+564   }
+565 }
+566 
+567 // Collect GC mask info - where are all the OOPs?
+568 void PhaseOutput::BuildOopMaps() {
+569   Compile::TracePhase tp(&quot;bldOopMaps&quot;, &amp;timers[_t_buildOopMaps]);
+570   // Can&#39;t resource-mark because I need to leave all those OopMaps around,
+571   // or else I need to resource-mark some arena other than the default.
+572   // ResourceMark rm;              // Reclaim all OopFlows when done
+573   int max_reg = C-&gt;regalloc()-&gt;_max_reg; // Current array extent
+574 
+575   Arena *A = Thread::current()-&gt;resource_area();
+576   Block_List worklist;          // Worklist of pending blocks
+577 
+578   int max_reg_ints = align_up(max_reg, BitsPerInt)&gt;&gt;LogBitsPerInt;
+579   Dict *safehash = NULL;        // Used for assert only
+580   // Compute a backwards liveness per register.  Needs a bitarray of
+581   // #blocks x (#registers, rounded up to ints)
+582   safehash = new Dict(cmpkey,hashkey,A);
+583   do_liveness( C-&gt;regalloc(), C-&gt;cfg(), &amp;worklist, max_reg_ints, A, safehash );
+584   OopFlow *free_list = NULL;    // Free, unused
+585 
+586   // Array mapping blocks to completed oopflows
+587   OopFlow **flows = NEW_ARENA_ARRAY(A, OopFlow*, C-&gt;cfg()-&gt;number_of_blocks());
+588   memset( flows, 0, C-&gt;cfg()-&gt;number_of_blocks() * sizeof(OopFlow*) );
+589 
+590 
+591   // Do the first block &#39;by hand&#39; to prime the worklist
+592   Block *entry = C-&gt;cfg()-&gt;get_block(1);
+593   OopFlow *rootflow = OopFlow::make(A,max_reg,C);
+594   // Initialize to &#39;bottom&#39; (not &#39;top&#39;)
+595   memset( rootflow-&gt;_callees, OptoReg::Bad, max_reg*sizeof(short) );
+596   memset( rootflow-&gt;_defs   ,            0, max_reg*sizeof(Node*) );
+597   flows[entry-&gt;_pre_order] = rootflow;
+598 
+599   // Do the first block &#39;by hand&#39; to prime the worklist
+600   rootflow-&gt;_b = entry;
+601   rootflow-&gt;compute_reach( C-&gt;regalloc(), max_reg, safehash );
+602   for( uint i=0; i&lt;entry-&gt;_num_succs; i++ )
+603     worklist.push(entry-&gt;_succs[i]);
+604 
+605   // Now worklist contains blocks which have some, but perhaps not all,
+606   // predecessors visited.
+607   while( worklist.size() ) {
+608     // Scan for a block with all predecessors visited, or any randoms slob
+609     // otherwise.  All-preds-visited order allows me to recycle OopFlow
+610     // structures rapidly and cut down on the memory footprint.
+611     // Note: not all predecessors might be visited yet (must happen for
+612     // irreducible loops).  This is OK, since every live value must have the
+613     // SAME reaching def for the block, so any reaching def is OK.
+614     uint i;
+615 
+616     Block *b = worklist.pop();
+617     // Ignore root block
+618     if (b == C-&gt;cfg()-&gt;get_root_block()) {
+619       continue;
+620     }
+621     // Block is already done?  Happens if block has several predecessors,
+622     // he can get on the worklist more than once.
+623     if( flows[b-&gt;_pre_order] ) continue;
+624 
+625     // If this block has a visited predecessor AND that predecessor has this
+626     // last block as his only undone child, we can move the OopFlow from the
+627     // pred to this block.  Otherwise we have to grab a new OopFlow.
+628     OopFlow *flow = NULL;       // Flag for finding optimized flow
+629     Block *pred = (Block*)((intptr_t)0xdeadbeef);
+630     // Scan this block&#39;s preds to find a done predecessor
+631     for (uint j = 1; j &lt; b-&gt;num_preds(); j++) {
+632       Block* p = C-&gt;cfg()-&gt;get_block_for_node(b-&gt;pred(j));
+633       OopFlow *p_flow = flows[p-&gt;_pre_order];
+634       if( p_flow ) {            // Predecessor is done
+635         assert( p_flow-&gt;_b == p, &quot;cross check&quot; );
+636         pred = p;               // Record some predecessor
+637         // If all successors of p are done except for &#39;b&#39;, then we can carry
+638         // p_flow forward to &#39;b&#39; without copying, otherwise we have to draw
+639         // from the free_list and clone data.
+640         uint k;
+641         for( k=0; k&lt;p-&gt;_num_succs; k++ )
+642           if( !flows[p-&gt;_succs[k]-&gt;_pre_order] &amp;&amp;
+643               p-&gt;_succs[k] != b )
+644             break;
+645 
+646         // Either carry-forward the now-unused OopFlow for b&#39;s use
+647         // or draw a new one from the free list
+648         if( k==p-&gt;_num_succs ) {
+649           flow = p_flow;
+650           break;                // Found an ideal pred, use him
+651         }
+652       }
+653     }
+654 
+655     if( flow ) {
+656       // We have an OopFlow that&#39;s the last-use of a predecessor.
+657       // Carry it forward.
+658     } else {                    // Draw a new OopFlow from the freelist
+659       if( !free_list )
+660         free_list = OopFlow::make(A,max_reg,C);
+661       flow = free_list;
+662       assert( flow-&gt;_b == NULL, &quot;oopFlow is not free&quot; );
+663       free_list = flow-&gt;_next;
+664       flow-&gt;_next = NULL;
+665 
+666       // Copy/clone over the data
+667       flow-&gt;clone(flows[pred-&gt;_pre_order], max_reg);
+668     }
+669 
+670     // Mark flow for block.  Blocks can only be flowed over once,
+671     // because after the first time they are guarded from entering
+672     // this code again.
+673     assert( flow-&gt;_b == pred, &quot;have some prior flow&quot; );
+674     flow-&gt;_b = NULL;
+675 
+676     // Now push flow forward
+677     flows[b-&gt;_pre_order] = flow;// Mark flow for this block
+678     flow-&gt;_b = b;
+679     flow-&gt;compute_reach( C-&gt;regalloc(), max_reg, safehash );
+680 
+681     // Now push children onto worklist
+682     for( i=0; i&lt;b-&gt;_num_succs; i++ )
+683       worklist.push(b-&gt;_succs[i]);
+684 
+685   }
+686 }
+    </pre>
+  </body>
+</html>

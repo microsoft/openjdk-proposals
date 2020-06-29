@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/code/debugInfo.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center>&lt; prev <a href="../../../../index.html" target="_top">index</a> <a href="debugInfo.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/code/debugInfo.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 62,19 ***</span>
+    }
+    assert(oopDesc::is_oop_or_null(o), &quot;oop only&quot;);
+    return o;
+  }
+  
+<span class="line-modified">! ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {</span>
+    int id = read_int();
+  #ifdef ASSERT
+    assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+    for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+      assert(_obj_pool-&gt;at(i)-&gt;as_ObjectValue()-&gt;id() != id, &quot;should not be read twice&quot;);
+    }
+  #endif
+<span class="line-modified">!   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);</span>
+    // Cache the object since an object field could reference it.
+    _obj_pool-&gt;push(result);
+    result-&gt;read_object(this);
+    return result;
+  }
+<span class="line-new-header">--- 62,33 ---</span>
+    }
+    assert(oopDesc::is_oop_or_null(o), &quot;oop only&quot;);
+    return o;
+  }
+  
+<span class="line-modified">! enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,</span>
+<span class="line-added">+                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,</span>
+<span class="line-added">+                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,</span>
+<span class="line-added">+                           AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8,</span>
+<span class="line-added">+                           STACK_OBJECT_CODE = 9 };</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ ScopeValue* DebugInfoReadStream::read_object_value(int type) {</span>
+    int id = read_int();
+  #ifdef ASSERT
+    assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+    for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+      assert(_obj_pool-&gt;at(i)-&gt;as_ObjectValue()-&gt;id() != id, &quot;should not be read twice&quot;);
+    }
+  #endif
+<span class="line-modified">!   ObjectValue* result;</span>
+<span class="line-added">+   if (type == AUTO_BOX_OBJECT_CODE) {</span>
+<span class="line-added">+     result = new AutoBoxObjectValue(id);</span>
+<span class="line-added">+   } else if (type == STACK_OBJECT_CODE) {</span>
+<span class="line-added">+     result = new StackObjectValue(id);</span>
+<span class="line-added">+   } else {</span>
+<span class="line-added">+     assert(type == OBJECT_CODE, &quot;has to be an object&quot;);</span>
+<span class="line-added">+     result = new ObjectValue(id);</span>
+<span class="line-added">+   }</span>
+    // Cache the object since an object field could reference it.
+    _obj_pool-&gt;push(result);
+    result-&gt;read_object(this);
+    return result;
+  }
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 92,25 ***</span>
+    return NULL;
+  }
+  
+  // Serializing scope values
+  
+<span class="line-removed">- enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,</span>
+<span class="line-removed">-                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,</span>
+<span class="line-removed">-                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,</span>
+<span class="line-removed">-                           AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8 };</span>
+<span class="line-removed">- </span>
+  ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+    ScopeValue* result = NULL;
+    switch(stream-&gt;read_int()) {
+     case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+     case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+     case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+     case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+     case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+<span class="line-modified">!    case OBJECT_CODE:          result = stream-&gt;read_object_value(false /*is_auto_box*/); break;</span>
+<span class="line-modified">!    case AUTO_BOX_OBJECT_CODE: result = stream-&gt;read_object_value(true /*is_auto_box*/);  break;</span>
+     case OBJECT_ID_CODE:       result = stream-&gt;get_cached_object();                      break;
+     case MARKER_CODE:          result = new MarkerValue();                                break;
+     default: ShouldNotReachHere();
+    }
+    return result;
+<span class="line-new-header">--- 106,21 ---</span>
+    return NULL;
+  }
+  
+  // Serializing scope values
+  
+  ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+    ScopeValue* result = NULL;
+    switch(stream-&gt;read_int()) {
+     case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+     case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+     case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+     case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+     case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+<span class="line-modified">!    case OBJECT_CODE:          result = stream-&gt;read_object_value(OBJECT_CODE);           break;</span>
+<span class="line-modified">!    case AUTO_BOX_OBJECT_CODE: result = stream-&gt;read_object_value(AUTO_BOX_OBJECT_CODE);  break;</span>
+<span class="line-added">+    case STACK_OBJECT_CODE:    result = stream-&gt;read_object_value(STACK_OBJECT_CODE);     break;</span>
+     case OBJECT_ID_CODE:       result = stream-&gt;get_cached_object();                      break;
+     case MARKER_CODE:          result = new MarkerValue();                                break;
+     default: ShouldNotReachHere();
+    }
+    return result;
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 188,10 ***</span>
+<span class="line-new-header">--- 198,44 ---</span>
+      _field_values.at(i)-&gt;print_on(st);
+    }
+  #endif
+  }
+  
+<span class="line-added">+ // StackObjectValue</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ StackObjectValue::StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length)</span>
+<span class="line-added">+ : ObjectValue(id, klass)</span>
+<span class="line-added">+ , _location(location)</span>
+<span class="line-added">+ , _field_length(field_length)</span>
+<span class="line-added">+ {</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ void StackObjectValue::read_object(DebugInfoReadStream* stream) {</span>
+<span class="line-added">+   ObjectValue::read_object(stream);</span>
+<span class="line-added">+   _location = Location(stream);</span>
+<span class="line-added">+   _field_length = (ConstantIntValue *)read_from(stream);</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ void StackObjectValue::write_on(DebugInfoWriteStream* stream) {</span>
+<span class="line-added">+   if (_visited) {</span>
+<span class="line-added">+     stream-&gt;write_int(OBJECT_ID_CODE);</span>
+<span class="line-added">+     stream-&gt;write_int(_id);</span>
+<span class="line-added">+   } else {</span>
+<span class="line-added">+     _visited = true;</span>
+<span class="line-added">+     stream-&gt;write_int(STACK_OBJECT_CODE);</span>
+<span class="line-added">+     stream-&gt;write_int(_id);</span>
+<span class="line-added">+     _klass-&gt;write_on(stream);</span>
+<span class="line-added">+     int length = _field_values.length();</span>
+<span class="line-added">+     stream-&gt;write_int(length);</span>
+<span class="line-added">+     for (int i = 0; i &lt; length; i++) {</span>
+<span class="line-added">+       _field_values.at(i)-&gt;write_on(stream);</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+     _location.write_on(stream);</span>
+<span class="line-added">+     _field_length-&gt;write_on(stream);</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+  // ConstantIntValue
+  
+  ConstantIntValue::ConstantIntValue(DebugInfoReadStream* stream) {
+    _value = stream-&gt;read_signed_int();
+  }
+</pre>
+<center>&lt; prev <a href="../../../../index.html" target="_top">index</a> <a href="debugInfo.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

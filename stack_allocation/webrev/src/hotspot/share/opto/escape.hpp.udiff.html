@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/escape.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="escape.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/escape.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -331,10 +331,12 @@</span>
+                                 // is still being collected. If false,
+                                 // no new nodes will be processed.
+  
+    bool               _verify;  // verify graph
+  
+<span class="udiff-line-added">+   bool             _has_locks; // Used by stack allocation</span>
+<span class="udiff-line-added">+ </span>
+    JavaObjectNode*    null_obj;
+    Node*             _pcmp_neq; // ConI(#CC_GT)
+    Node*              _pcmp_eq; // ConI(#CC_EQ)
+  
+    Compile*           _compile; // Compile object for current compilation
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -598,12 +600,42 @@</span>
+    }
+  
+    void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+    bool add_final_edges_unsafe_access(Node* n, uint opcode);
+  
+<span class="udiff-line-added">+   // Helpers for stack allocation</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // If an allocation is dominated by a loop, check to see if the lifetime of two instances</span>
+<span class="udiff-line-added">+   // may overlap. If they do this allocate is not eligible for stack allocation</span>
+<span class="udiff-line-added">+   bool allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi);</span>
+<span class="udiff-line-added">+   // Stack allocation has limited support for compressed references at the moment.</span>
+<span class="udiff-line-added">+   // This helper checks if an oop may be compressed at some point in the graph.</span>
+<span class="udiff-line-added">+   bool oop_may_be_compressed(Node* alloc_result);</span>
+<span class="udiff-line-added">+   // Check if the alloc node is eligible for stack allocation</span>
+<span class="udiff-line-added">+   bool eligible_for_stack_allocation(PointsToNode* ptn);</span>
+<span class="udiff-line-added">+   // Check if the alloc has uses that make it ineligible for stack allocation</span>
+<span class="udiff-line-added">+   bool all_uses_eligible_for_stack_allocation(PointsToNode *ptn);</span>
+<span class="udiff-line-added">+   // Verify object chains for stack allocated objects. Heap objects cannot point to stack allocated objects.</span>
+<span class="udiff-line-added">+   bool verify_stack_allocated_object_chains(GrowableArray&lt;JavaObjectNode*&gt; &amp;non_escaped_worklist, int non_escaped_length);</span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+   void print_stack_allocated_candidates(GrowableArray&lt;JavaObjectNode*&gt; &amp;non_escaped_worklist, int non_escaped_length);</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+ </span>
+  #ifndef PRODUCT
+    void dump(GrowableArray&lt;PointsToNode*&gt;&amp; ptnodes_worklist);
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool print_escape_analysis() {</span>
+<span class="udiff-line-added">+     return PrintEscapeAnalysis || _compile-&gt;directive()-&gt;PrintEscapeAnalysisOption;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool print_eliminate_allocations() {</span>
+<span class="udiff-line-added">+     return PrintEliminateAllocations || _compile-&gt;directive()-&gt;PrintEliminateAllocationsOption;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool print_stack_allocation() {</span>
+<span class="udiff-line-added">+     return PrintStackAllocation || _compile-&gt;directive()-&gt;PrintStackAllocationOption;</span>
+<span class="udiff-line-added">+   }</span>
+  #endif
+  };
+  
+  inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+    _edges(CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+</pre>
+<center><a href="escape.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

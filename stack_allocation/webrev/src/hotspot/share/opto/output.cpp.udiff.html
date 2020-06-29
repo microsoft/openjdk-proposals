@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/output.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="memnode.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../runtime/deoptimization.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/output.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -757,18 +757,28 @@</span>
+      ObjectValue* sv = sv_for_node_id(objs, spobj-&gt;_idx);
+      if (sv == NULL) {
+        ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+        assert(cik-&gt;is_instance_klass() ||
+               cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="udiff-line-modified-removed">-       sv = new ObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-modified-added">+       if (spobj-&gt;stack_allocated()) {</span>
+<span class="udiff-line-added">+         Node *box_lock = spobj-&gt;in(1);</span>
+<span class="udiff-line-added">+         assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="udiff-line-added">+         sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-added">+                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="udiff-line-added">+                             Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="udiff-line-added">+                             new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="udiff-line-added">+         set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-added">+       } else {</span>
+<span class="udiff-line-added">+         sv = new ObjectValue(spobj-&gt;_idx,</span>
+                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));
+<span class="udiff-line-modified-removed">-       set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-modified-added">+         set_sv_for_object_node(objs, sv);</span>
+  
+<span class="udiff-line-modified-removed">-       uint first_ind = spobj-&gt;first_index(sfpt-&gt;jvms());</span>
+<span class="udiff-line-modified-removed">-       for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="udiff-line-modified-removed">-         Node* fld_node = sfpt-&gt;in(first_ind+i);</span>
+<span class="udiff-line-modified-removed">-         (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfpt, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="udiff-line-modified-added">+         uint first_ind = spobj-&gt;first_index(sfpt-&gt;jvms());</span>
+<span class="udiff-line-modified-added">+         for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="udiff-line-modified-added">+           Node* fld_node = sfpt-&gt;in(first_ind+i);</span>
+<span class="udiff-line-modified-added">+           (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfpt, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="udiff-line-added">+         }</span>
+        }
+      }
+      array-&gt;append(sv);
+      return;
+    }
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1008,10 +1018,11 @@</span>
+      // Loop over monitors and insert into array
+      for (idx = 0; idx &lt; num_mon; idx++) {
+        // Grab the node that defines this monitor
+        Node* box_node = sfn-&gt;monitor_box(jvms, idx);
+        Node* obj_node = sfn-&gt;monitor_obj(jvms, idx);
+<span class="udiff-line-added">+       bool eliminated = (box_node-&gt;is_BoxLock() &amp;&amp; box_node-&gt;as_BoxLock()-&gt;is_eliminated());</span>
+  
+        // Create ScopeValue for object
+        ScopeValue *scval = NULL;
+  
+        if (obj_node-&gt;is_SafePointScalarObject()) {
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1020,18 +1031,30 @@</span>
+          if (scval == NULL) {
+            const Type *t = spobj-&gt;bottom_type();
+            ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+            assert(cik-&gt;is_instance_klass() ||
+                   cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="udiff-line-modified-removed">-           ObjectValue* sv = new ObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-modified-removed">-                                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));</span>
+<span class="udiff-line-modified-removed">-           PhaseOutput::set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-modified-removed">- </span>
+<span class="udiff-line-modified-removed">-           uint first_ind = spobj-&gt;first_index(youngest_jvms);</span>
+<span class="udiff-line-modified-removed">-           for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="udiff-line-modified-removed">-             Node* fld_node = sfn-&gt;in(first_ind+i);</span>
+<span class="udiff-line-modified-removed">-             (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfn, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="udiff-line-modified-added">+           ObjectValue* sv = NULL;</span>
+<span class="udiff-line-modified-added">+           if (spobj-&gt;stack_allocated()) {</span>
+<span class="udiff-line-modified-added">+             Node *box_lock = spobj-&gt;in(1);</span>
+<span class="udiff-line-modified-added">+             assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="udiff-line-modified-added">+             assert(eliminated, &quot;monitor has to be eliminated for stack allocation&quot;);</span>
+<span class="udiff-line-modified-added">+             sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-modified-added">+                                 new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="udiff-line-modified-added">+                                 Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="udiff-line-added">+                                 new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="udiff-line-added">+             set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-added">+           } else {</span>
+<span class="udiff-line-added">+             sv = new ObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-added">+                               new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));</span>
+<span class="udiff-line-added">+             set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+             uint first_ind = spobj-&gt;first_index(youngest_jvms);</span>
+<span class="udiff-line-added">+             for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="udiff-line-added">+               Node* fld_node = sfn-&gt;in(first_ind+i);</span>
+<span class="udiff-line-added">+               (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfn, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="udiff-line-added">+             }</span>
+            }
+            scval = sv;
+          }
+        } else if (!obj_node-&gt;is_Con()) {
+          OptoReg::Name obj_reg = C-&gt;regalloc()-&gt;get_reg_first(obj_node);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1045,14 +1068,34 @@</span>
+          scval = new ConstantOopWriteValue(tp-&gt;is_oopptr()-&gt;const_oop()-&gt;constant_encoding());
+        }
+  
+        OptoReg::Name box_reg = BoxLockNode::reg(box_node);
+        Location basic_lock = Location::new_stk_loc(Location::normal,C-&gt;regalloc()-&gt;reg2offset(box_reg));
+<span class="udiff-line-removed">-       bool eliminated = (box_node-&gt;is_BoxLock() &amp;&amp; box_node-&gt;as_BoxLock()-&gt;is_eliminated());</span>
+        monarray-&gt;append(new MonitorValue(scval, basic_lock, eliminated));
+      }
+  
+<span class="udiff-line-added">+     for (idx = 0; idx &lt; jvms-&gt;scl_size(); idx++ ) {</span>
+<span class="udiff-line-added">+       Node* obj_node = sfn-&gt;scalar(jvms, idx);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+       if (obj_node-&gt;is_SafePointScalarObject()) {</span>
+<span class="udiff-line-added">+         SafePointScalarObjectNode* spobj = obj_node-&gt;as_SafePointScalarObject();</span>
+<span class="udiff-line-added">+         if (sv_for_node_id(objs, spobj-&gt;_idx) == NULL) {</span>
+<span class="udiff-line-added">+           const Type *t = spobj-&gt;bottom_type();</span>
+<span class="udiff-line-added">+           ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();</span>
+<span class="udiff-line-added">+           assert(cik-&gt;is_instance_klass() ||</span>
+<span class="udiff-line-added">+                   cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);</span>
+<span class="udiff-line-added">+           assert(spobj-&gt;stack_allocated(), &quot;has to be stack allocated&quot;);</span>
+<span class="udiff-line-added">+           Node *box_lock = spobj-&gt;in(1);</span>
+<span class="udiff-line-added">+           assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="udiff-line-added">+           StackObjectValue* sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="udiff-line-added">+                                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="udiff-line-added">+                                             Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="udiff-line-added">+                                             new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="udiff-line-added">+           set_sv_for_object_node(objs, sv);</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+      // We dump the object pool first, since deoptimization reads it in first.
+      C-&gt;debug_info()-&gt;dump_object_pool(objs);
+  
+      // Build first class objects to pass to scope
+      DebugToken *locvals = C-&gt;debug_info()-&gt;create_scope_values(locarray);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1272,10 +1315,17 @@</span>
+  
+    // fill in the nop array for bundling computations
+    MachNode *_nop_list[Bundle::_nop_count];
+    Bundle::initialize_nops(_nop_list);
+  
+<span class="udiff-line-added">+   // if we are using stack allocation enable the runtime part</span>
+<span class="udiff-line-added">+   // stack allocation can be enabled selectively via compiler directive</span>
+<span class="udiff-line-added">+   // so we need to enable the runtime part</span>
+<span class="udiff-line-added">+   if (!UseStackAllocationRuntime &amp;&amp; C-&gt;do_stack_allocation()) {</span>
+<span class="udiff-line-added">+     FLAG_SET_ERGO(UseStackAllocationRuntime, true);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+    return cb;
+  }
+  
+  //------------------------------fill_buffer------------------------------------
+  void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
+</pre>
+<center><a href="memnode.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../runtime/deoptimization.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/runtime/vframe_hp.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;classfile/javaClasses.inline.hpp&quot;
+ 27 #include &quot;code/codeCache.hpp&quot;
+ 28 #include &quot;code/debugInfoRec.hpp&quot;
+ 29 #include &quot;code/nmethod.hpp&quot;
+ 30 #include &quot;code/pcDesc.hpp&quot;
+ 31 #include &quot;code/scopeDesc.hpp&quot;
+ 32 #include &quot;interpreter/interpreter.hpp&quot;
+ 33 #include &quot;interpreter/oopMapCache.hpp&quot;
+ 34 #include &quot;oops/instanceKlass.hpp&quot;
+ 35 #include &quot;oops/oop.inline.hpp&quot;
+ 36 #include &quot;runtime/basicLock.hpp&quot;
+ 37 #include &quot;runtime/frame.inline.hpp&quot;
+ 38 #include &quot;runtime/handles.inline.hpp&quot;
+ 39 #include &quot;runtime/monitorChunk.hpp&quot;
+ 40 #include &quot;runtime/signature.hpp&quot;
+ 41 #include &quot;runtime/stubRoutines.hpp&quot;
+ 42 #include &quot;runtime/vframeArray.hpp&quot;
+ 43 #include &quot;runtime/vframe_hp.hpp&quot;
+ 44 #ifdef COMPILER2
+ 45 #include &quot;opto/matcher.hpp&quot;
+ 46 #endif
+ 47 
+ 48 
+ 49 // ------------- compiledVFrame --------------
+ 50 
+ 51 StackValueCollection* compiledVFrame::locals() const {
+ 52   // Natives has no scope
+ 53   if (scope() == NULL) return new StackValueCollection(0);
+ 54   GrowableArray&lt;ScopeValue*&gt;*  scv_list = scope()-&gt;locals();
+ 55   if (scv_list == NULL) return new StackValueCollection(0);
+ 56 
+ 57   // scv_list is the list of ScopeValues describing the JVM stack state.
+ 58   // There is one scv_list entry for every JVM stack state in use.
+ 59   int length = scv_list-&gt;length();
+ 60   StackValueCollection* result = new StackValueCollection(length);
+ 61   GrowableArray&lt;ScopeValue*&gt;* objects = scope()-&gt;objects();
+ 62   for (int i = 0; i &lt; length; i++) {
+ 63     result-&gt;add(create_stack_value(get_scope_value(scv_list, i, objects)));
+ 64   }
+ 65 
+ 66   // Replace the original values with any stores that have been
+ 67   // performed through compiledVFrame::update_locals.
+ 68   GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+ 69   if (list != NULL ) {
+ 70     // In real life this never happens or is typically a single element search
+ 71     for (int i = 0; i &lt; list-&gt;length(); i++) {
+ 72       if (list-&gt;at(i)-&gt;matches(this)) {
+ 73         list-&gt;at(i)-&gt;update_locals(result);
+ 74         break;
+ 75       }
+ 76     }
+ 77   }
+ 78 
+ 79   return result;
+ 80 }
+ 81 
+ 82 
+ 83 void compiledVFrame::set_locals(StackValueCollection* values) const {
+ 84 
+ 85   fatal(&quot;Should use update_local for each local update&quot;);
+ 86 }
+ 87 
+ 88 void compiledVFrame::update_local(BasicType type, int index, jvalue value) {
+ 89   assert(index &gt;= 0 &amp;&amp; index &lt; method()-&gt;max_locals(), &quot;out of bounds&quot;);
+ 90   update_deferred_value(type, index, value);
+ 91 }
+ 92 
+ 93 void compiledVFrame::update_stack(BasicType type, int index, jvalue value) {
+ 94   assert(index &gt;= 0 &amp;&amp; index &lt; method()-&gt;max_stack(), &quot;out of bounds&quot;);
+ 95   update_deferred_value(type, index + method()-&gt;max_locals(), value);
+ 96 }
+ 97 
+ 98 void compiledVFrame::update_monitor(int index, MonitorInfo* val) {
+ 99   assert(index &gt;= 0, &quot;out of bounds&quot;);
+100   jvalue value;
+101   value.l = cast_from_oop&lt;jobject&gt;(val-&gt;owner());
+102   update_deferred_value(T_OBJECT, index + method()-&gt;max_locals() + method()-&gt;max_stack(), value);
+103 }
+104 
+105 void compiledVFrame::update_deferred_value(BasicType type, int index, jvalue value) {
+106   assert(fr().is_deoptimized_frame(), &quot;frame must be scheduled for deoptimization&quot;);
+107   GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* deferred = thread()-&gt;deferred_locals();
+108   jvmtiDeferredLocalVariableSet* locals = NULL;
+109   if (deferred != NULL ) {
+110     // See if this vframe has already had locals with deferred writes
+111     for (int f = 0; f &lt; deferred-&gt;length(); f++ ) {
+112       if (deferred-&gt;at(f)-&gt;matches(this)) {
+113         locals = deferred-&gt;at(f);
+114         break;
+115       }
+116     }
+117     // No matching vframe must push a new vframe
+118   } else {
+119     // No deferred updates pending for this thread.
+120     // allocate in C heap
+121     deferred =  new(ResourceObj::C_HEAP, mtCompiler) GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt; (1, mtCompiler);
+122     thread()-&gt;set_deferred_locals(deferred);
+123   }
+124   if (locals == NULL) {
+125     locals = new jvmtiDeferredLocalVariableSet(method(), bci(), fr().id(), vframe_id());
+126     deferred-&gt;push(locals);
+127     assert(locals-&gt;id() == fr().id(), &quot;Huh? Must match&quot;);
+128   }
+129   locals-&gt;set_value_at(index, type, value);
+130 }
+131 
+132 StackValueCollection* compiledVFrame::expressions() const {
+133   // Natives has no scope
+134   if (scope() == NULL) return new StackValueCollection(0);
+135   GrowableArray&lt;ScopeValue*&gt;*  scv_list = scope()-&gt;expressions();
+136   if (scv_list == NULL) return new StackValueCollection(0);
+137 
+138   // scv_list is the list of ScopeValues describing the JVM stack state.
+139   // There is one scv_list entry for every JVM stack state in use.
+140   int length = scv_list-&gt;length();
+141   StackValueCollection* result = new StackValueCollection(length);
+142   GrowableArray&lt;ScopeValue*&gt;* objects = scope()-&gt;objects();
+143   for (int i = 0; i &lt; length; i++) {
+144     result-&gt;add(create_stack_value(get_scope_value(scv_list, i, objects)));
+145   }
+146 
+147   // Replace the original values with any stores that have been
+148   // performed through compiledVFrame::update_stack.
+149   GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+150   if (list != NULL ) {
+151     // In real life this never happens or is typically a single element search
+152     for (int i = 0; i &lt; list-&gt;length(); i++) {
+153       if (list-&gt;at(i)-&gt;matches(this)) {
+154         list-&gt;at(i)-&gt;update_stack(result);
+155         break;
+156       }
+157     }
+158   }
+159 
+160   return result;
+161 }
+162 
+163 
+164 // The implementation of the following two methods was factorized into the
+165 // class StackValue because it is also used from within deoptimization.cpp for
+166 // rematerialization and relocking of non-escaping objects.
+167 
+168 StackValue *compiledVFrame::create_stack_value(ScopeValue *sv) const {
+169   return StackValue::create_stack_value(&amp;_fr, register_map(), sv);
+170 }
+171 
+172 BasicLock* compiledVFrame::resolve_monitor_lock(Location location) const {
+173   return StackValue::resolve_monitor_lock(&amp;_fr, location);
+174 }
+175 
+176 ScopeValue *compiledVFrame::match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects) const {
+177   if (objects == NULL) {
+178     return NULL;
+179   }
+180   for (int j = 0; j &lt; objects-&gt;length(); j++) {
+181     ScopeValue* o_sv = objects-&gt;at(j);
+182     if (o_sv-&gt;is_object()) {
+183       if (o_sv-&gt;as_ObjectValue()-&gt;is_stack_object()) {
+184         StackObjectValue *sov = (StackObjectValue *)o_sv;
+185         Location o_loc = sov-&gt;get_stack_location();
+186         int o_offset = o_loc.stack_offset();
+187         int l_offset = (address)oop_ptr - (address)sp_base;
+188         if (o_offset == l_offset) {
+189           return o_sv;
+190         }
+191       }
+192     }
+193   }
+194 
+195   return NULL;
+196 }
+197 
+198 ScopeValue *compiledVFrame::get_scope_value(GrowableArray&lt;ScopeValue*&gt;* scv_list, int index, GrowableArray&lt;ScopeValue*&gt;* objects) const {
+199   ScopeValue* sv = scv_list-&gt;at(index);
+200   if (sv-&gt;is_location()) {
+201     if ((objects != NULL) &amp;&amp; (objects-&gt;length() &gt; 0)) {
+202       //printf(&quot;Attempting to swap svs\n&quot;);
+203       LocationValue* lv = (LocationValue *)sv;
+204       Location loc = lv-&gt;location();
+205       intptr_t *oop_ptr;
+206       intptr_t *sp_base = _fr.unextended_sp();
+207       intptr_t *sp_top = sp_base + _fr.cb()-&gt;frame_size();
+208       if (loc.is_stack() &amp;&amp; (loc.type() == Location::oop)) {
+209         address value_addr = ((address)sp_base) + loc.stack_offset();
+210         oop val = *(oop *)value_addr;
+211         oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);
+212       } else if (loc.is_register() &amp;&amp; (loc.type() == Location::oop)) {
+213         address value_addr = register_map()-&gt;location(VMRegImpl::as_VMReg(loc.register_number()));
+214         oop val = *(oop *)value_addr;
+215         oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);
+216       } else {
+217         assert(loc.type() != Location::oop, &quot;Can not be an oop&quot;);
+218         return sv;
+219       }
+220       if (sp_base &lt;= oop_ptr &amp;&amp; oop_ptr &lt; sp_top) {
+221         ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);
+222         if (o_sv != NULL) {
+223           scv_list-&gt;at_put(index, o_sv);
+224           sv = o_sv;
+225         } else {
+226           assert(false, &quot;did not find stack oop for object on stack&quot;);
+227         }
+228       }
+229     }
+230   } else if (sv-&gt;is_object()) {
+231     oop o = sv-&gt;as_ObjectValue()-&gt;value()();
+232     intptr_t *sp_base = _fr.unextended_sp();
+233     intptr_t *sp_top = sp_base + _fr.cb()-&gt;frame_size();
+234     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(o);
+235     if (sp_base &lt;= oop_ptr &amp;&amp; oop_ptr &lt; sp_top) {
+236       ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);
+237       if (o_sv != NULL) {
+238         assert(sv == o_sv, &quot;Objects need to match&quot;);
+239         sv = o_sv;
+240       } else {
+241         assert(false, &quot;did not find stack oop for object on stack&quot;);
+242       }
+243     }
+244     assert(oopDesc::is_oop_or_null(sv-&gt;as_ObjectValue()-&gt;value()()), &quot;needs to be an oop&quot;);
+245   }
+246   return sv;
+247 }
+248 
+249 
+250 GrowableArray&lt;MonitorInfo*&gt;* compiledVFrame::monitors() const {
+251   // Natives has no scope
+252   if (scope() == NULL) {
+253     CompiledMethod* nm = code();
+254     Method* method = nm-&gt;method();
+255     assert(method-&gt;is_native() || nm-&gt;is_aot(), &quot;Expect a native method or precompiled method&quot;);
+256     if (!method-&gt;is_synchronized()) {
+257       return new GrowableArray&lt;MonitorInfo*&gt;(0);
+258     }
+259     // This monitor is really only needed for UseBiasedLocking, but
+260     // return it in all cases for now as it might be useful for stack
+261     // traces and tools as well
+262     GrowableArray&lt;MonitorInfo*&gt; *monitors = new GrowableArray&lt;MonitorInfo*&gt;(1);
+263     // Casting away const
+264     frame&amp; fr = (frame&amp;) _fr;
+265     MonitorInfo* info = new MonitorInfo(
+266         fr.get_native_receiver(), fr.get_native_monitor(), false, false);
+267     monitors-&gt;push(info);
+268     return monitors;
+269   }
+270   GrowableArray&lt;MonitorValue*&gt;* monitors = scope()-&gt;monitors();
+271   if (monitors == NULL) {
+272     return new GrowableArray&lt;MonitorInfo*&gt;(0);
+273   }
+274   GrowableArray&lt;MonitorInfo*&gt;* result = new GrowableArray&lt;MonitorInfo*&gt;(monitors-&gt;length());
+275   for (int index = 0; index &lt; monitors-&gt;length(); index++) {
+276     MonitorValue* mv = monitors-&gt;at(index);
+277     ScopeValue*   ov = mv-&gt;owner();
+278     StackValue *owner_sv = create_stack_value(ov); // it is an oop
+279     if (ov-&gt;is_object() &amp;&amp; owner_sv-&gt;obj_is_scalar_replaced()) { // The owner object was scalar replaced
+280       assert(mv-&gt;eliminated(), &quot;monitor should be eliminated for scalar replaced object&quot;);
+281       // Put klass for scalar replaced object.
+282       ScopeValue* kv = ((ObjectValue *)ov)-&gt;klass();
+283       assert(kv-&gt;is_constant_oop(), &quot;klass should be oop constant for scalar replaced object&quot;);
+284       Handle k(Thread::current(), ((ConstantOopReadValue*)kv)-&gt;value()());
+285       assert(java_lang_Class::is_instance(k()), &quot;must be&quot;);
+286       result-&gt;push(new MonitorInfo(k(), resolve_monitor_lock(mv-&gt;basic_lock()),
+287                                    mv-&gt;eliminated(), true));
+288     } else {
+289       result-&gt;push(new MonitorInfo(owner_sv-&gt;get_obj()(), resolve_monitor_lock(mv-&gt;basic_lock()),
+290                                    mv-&gt;eliminated(), false));
+291     }
+292   }
+293 
+294   // Replace the original values with any stores that have been
+295   // performed through compiledVFrame::update_monitors.
+296   GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+297   if (list != NULL ) {
+298     // In real life this never happens or is typically a single element search
+299     for (int i = 0; i &lt; list-&gt;length(); i++) {
+300       if (list-&gt;at(i)-&gt;matches(this)) {
+301         list-&gt;at(i)-&gt;update_monitors(result);
+302         break;
+303       }
+304     }
+305   }
+306 
+307   return result;
+308 }
+309 
+310 
+311 compiledVFrame::compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, CompiledMethod* nm)
+312 : javaVFrame(fr, reg_map, thread) {
+313   _scope  = NULL;
+314   _vframe_id = 0;
+315   // Compiled method (native stub or Java code)
+316   // native wrappers have no scope data, it is implied
+317   if (!nm-&gt;is_compiled() || !nm-&gt;as_compiled_method()-&gt;is_native_method()) {
+318       _scope  = nm-&gt;scope_desc_at(_fr.pc());
+319   }
+320 }
+321 
+322 compiledVFrame::compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, ScopeDesc* scope, int vframe_id)
+323 : javaVFrame(fr, reg_map, thread) {
+324   _scope  = scope;
+325   _vframe_id = vframe_id;
+326   guarantee(_scope != NULL, &quot;scope must be present&quot;);
+327 }
+328 
+329 compiledVFrame* compiledVFrame::at_scope(int decode_offset, int vframe_id) {
+330   if (scope()-&gt;decode_offset() != decode_offset) {
+331     ScopeDesc* scope = this-&gt;scope()-&gt;at_offset(decode_offset);
+332     return new compiledVFrame(frame_pointer(), register_map(), thread(), scope, vframe_id);
+333   }
+334   assert(_vframe_id == vframe_id, &quot;wrong frame id&quot;);
+335   return this;
+336 }
+337 
+338 bool compiledVFrame::is_top() const {
+339   // FIX IT: Remove this when new native stubs are in place
+340   if (scope() == NULL) return true;
+341   return scope()-&gt;is_top();
+342 }
+343 
+344 
+345 CompiledMethod* compiledVFrame::code() const {
+346   return CodeCache::find_compiled(_fr.pc());
+347 }
+348 
+349 
+350 Method* compiledVFrame::method() const {
+351   if (scope() == NULL) {
+352     // native nmethods have no scope the method is implied
+353     nmethod* nm = code()-&gt;as_nmethod();
+354     assert(nm-&gt;is_native_method(), &quot;must be native&quot;);
+355     return nm-&gt;method();
+356   }
+357   return scope()-&gt;method();
+358 }
+359 
+360 
+361 int compiledVFrame::bci() const {
+362   int raw = raw_bci();
+363   return raw == SynchronizationEntryBCI ? 0 : raw;
+364 }
+365 
+366 
+367 int compiledVFrame::raw_bci() const {
+368   if (scope() == NULL) {
+369     // native nmethods have no scope the method/bci is implied
+370     nmethod* nm = code()-&gt;as_nmethod();
+371     assert(nm-&gt;is_native_method(), &quot;must be native&quot;);
+372     return 0;
+373   }
+374   return scope()-&gt;bci();
+375 }
+376 
+377 bool compiledVFrame::should_reexecute() const {
+378   if (scope() == NULL) {
+379     // native nmethods have no scope the method/bci is implied
+380     nmethod* nm = code()-&gt;as_nmethod();
+381     assert(nm-&gt;is_native_method(), &quot;must be native&quot;);
+382     return false;
+383   }
+384   return scope()-&gt;should_reexecute();
+385 }
+386 
+387 vframe* compiledVFrame::sender() const {
+388   const frame f = fr();
+389   if (scope() == NULL) {
+390     // native nmethods have no scope the method/bci is implied
+391     nmethod* nm = code()-&gt;as_nmethod();
+392     assert(nm-&gt;is_native_method(), &quot;must be native&quot;);
+393     return vframe::sender();
+394   } else {
+395     return scope()-&gt;is_top()
+396       ? vframe::sender()
+397       : new compiledVFrame(&amp;f, register_map(), thread(), scope()-&gt;sender(), vframe_id() + 1);
+398   }
+399 }
+400 
+401 jvmtiDeferredLocalVariableSet::jvmtiDeferredLocalVariableSet(Method* method, int bci, intptr_t* id, int vframe_id) {
+402   _method = method;
+403   _bci = bci;
+404   _id = id;
+405   _vframe_id = vframe_id;
+406   // Alway will need at least one, must be on C heap
+407   _locals = new(ResourceObj::C_HEAP, mtCompiler) GrowableArray&lt;jvmtiDeferredLocalVariable*&gt; (1, mtCompiler);
+408 }
+409 
+410 jvmtiDeferredLocalVariableSet::~jvmtiDeferredLocalVariableSet() {
+411   for (int i = 0; i &lt; _locals-&gt;length(); i++ ) {
+412     delete _locals-&gt;at(i);
+413   }
+414   // Free growableArray and c heap for elements
+415   delete _locals;
+416 }
+417 
+418 bool jvmtiDeferredLocalVariableSet::matches(const vframe* vf) {
+419   if (!vf-&gt;is_compiled_frame()) return false;
+420   compiledVFrame* cvf = (compiledVFrame*)vf;
+421   if (cvf-&gt;fr().id() == id() &amp;&amp; cvf-&gt;vframe_id() == vframe_id()) {
+422     assert(cvf-&gt;method() == method() &amp;&amp; cvf-&gt;bci() == bci(), &quot;must agree&quot;);
+423     return true;
+424   }
+425   return false;
+426 }
+427 
+428 void jvmtiDeferredLocalVariableSet::set_value_at(int idx, BasicType type, jvalue val) {
+429   for (int i = 0; i &lt; _locals-&gt;length(); i++) {
+430     if (_locals-&gt;at(i)-&gt;index() == idx) {
+431       assert(_locals-&gt;at(i)-&gt;type() == type, &quot;Wrong type&quot;);
+432       _locals-&gt;at(i)-&gt;set_value(val);
+433       return;
+434     }
+435   }
+436   _locals-&gt;push(new jvmtiDeferredLocalVariable(idx, type, val));
+437 }
+438 
+439 void jvmtiDeferredLocalVariableSet::update_value(StackValueCollection* locals, BasicType type, int index, jvalue value) {
+440   switch (type) {
+441     case T_BOOLEAN:
+442       locals-&gt;set_int_at(index, value.z);
+443       break;
+444     case T_CHAR:
+445       locals-&gt;set_int_at(index, value.c);
+446       break;
+447     case T_FLOAT:
+448       locals-&gt;set_float_at(index, value.f);
+449       break;
+450     case T_DOUBLE:
+451       locals-&gt;set_double_at(index, value.d);
+452       break;
+453     case T_BYTE:
+454       locals-&gt;set_int_at(index, value.b);
+455       break;
+456     case T_SHORT:
+457       locals-&gt;set_int_at(index, value.s);
+458       break;
+459     case T_INT:
+460       locals-&gt;set_int_at(index, value.i);
+461       break;
+462     case T_LONG:
+463       locals-&gt;set_long_at(index, value.j);
+464       break;
+465     case T_OBJECT:
+466       {
+467         Handle obj(Thread::current(), (oop)value.l);
+468         locals-&gt;set_obj_at(index, obj);
+469       }
+470       break;
+471     default:
+472       ShouldNotReachHere();
+473   }
+474 }
+475 
+476 void jvmtiDeferredLocalVariableSet::update_locals(StackValueCollection* locals) {
+477   for (int l = 0; l &lt; _locals-&gt;length(); l ++) {
+478     jvmtiDeferredLocalVariable* val = _locals-&gt;at(l);
+479     if (val-&gt;index() &gt;= 0 &amp;&amp; val-&gt;index() &lt; method()-&gt;max_locals()) {
+480       update_value(locals, val-&gt;type(), val-&gt;index(), val-&gt;value());
+481     }
+482   }
+483 }
+484 
+485 
+486 void jvmtiDeferredLocalVariableSet::update_stack(StackValueCollection* expressions) {
+487   for (int l = 0; l &lt; _locals-&gt;length(); l ++) {
+488     jvmtiDeferredLocalVariable* val = _locals-&gt;at(l);
+489     if (val-&gt;index() &gt;= method()-&gt;max_locals() &amp;&amp; val-&gt;index() &lt; method()-&gt;max_locals() + method()-&gt;max_stack()) {
+490       update_value(expressions, val-&gt;type(), val-&gt;index() - method()-&gt;max_locals(), val-&gt;value());
+491     }
+492   }
+493 }
+494 
+495 
+496 void jvmtiDeferredLocalVariableSet::update_monitors(GrowableArray&lt;MonitorInfo*&gt;* monitors) {
+497   for (int l = 0; l &lt; _locals-&gt;length(); l ++) {
+498     jvmtiDeferredLocalVariable* val = _locals-&gt;at(l);
+499     if (val-&gt;index() &gt;= method()-&gt;max_locals() + method()-&gt;max_stack()) {
+500       int lock_index = val-&gt;index() - (method()-&gt;max_locals() + method()-&gt;max_stack());
+501       MonitorInfo* info = monitors-&gt;at(lock_index);
+502       MonitorInfo* new_info = new MonitorInfo((oopDesc*)val-&gt;value().l, info-&gt;lock(), info-&gt;eliminated(), info-&gt;owner_is_scalar_replaced());
+503       monitors-&gt;at_put(lock_index, new_info);
+504     }
+505   }
+506 }
+507 
+508 
+509 void jvmtiDeferredLocalVariableSet::oops_do(OopClosure* f) {
+510   // The Method* is on the stack so a live activation keeps it alive
+511   // either by mirror in interpreter or code in compiled code.
+512   for (int i = 0; i &lt; _locals-&gt;length(); i++) {
+513     if (_locals-&gt;at(i)-&gt;type() == T_OBJECT) {
+514       f-&gt;do_oop(_locals-&gt;at(i)-&gt;oop_addr());
+515     }
+516   }
+517 }
+518 
+519 jvmtiDeferredLocalVariable::jvmtiDeferredLocalVariable(int index, BasicType type, jvalue value) {
+520   _index = index;
+521   _type = type;
+522   _value = value;
+523 }
+524 
+525 
+526 #ifndef PRODUCT
+527 void compiledVFrame::verify() const {
+528   Unimplemented();
+529 }
+530 #endif // PRODUCT
+    </pre>
+  </body>
+</html>

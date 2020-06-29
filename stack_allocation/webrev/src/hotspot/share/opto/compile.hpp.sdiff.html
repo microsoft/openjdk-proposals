@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/compile.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compile.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="escape.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/compile.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 242 
+ 243  private:
+ 244   // Fixed parameters to this compilation.
+ 245   const int             _compile_id;
+ 246   const bool            _save_argument_registers; // save/restore arg regs for trampolines
+ 247   const bool            _subsume_loads;         // Load can be matched as part of a larger op.
+ 248   const bool            _do_escape_analysis;    // Do escape analysis.
+ 249   const bool            _eliminate_boxing;      // Do boxing elimination.
+ 250   ciMethod*             _method;                // The method being compiled.
+ 251   int                   _entry_bci;             // entry bci for osr methods.
+ 252   const TypeFunc*       _tf;                    // My kind of signature
+ 253   InlineTree*           _ilt;                   // Ditto (temporary).
+ 254   address               _stub_function;         // VM entry for stub being compiled, or NULL
+ 255   const char*           _stub_name;             // Name of stub or adapter being compiled, or NULL
+ 256   address               _stub_entry_point;      // Compile code entry for generated stub, or NULL
+ 257 
+ 258   // Control of this compilation.
+ 259   int                   _max_inline_size;       // Max inline size for this compilation
+ 260   int                   _freq_inline_size;      // Max hot method inline size for this compilation
+ 261   int                   _fixed_slots;           // count of frame slots not allocated by the register
+<span class="line-modified"> 262                                                 // allocator i.e. locks, original deopt pc, etc.</span>
+ 263   uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+ 264 
+ 265   int                   _major_progress;        // Count of something big happening
+ 266   bool                  _inlining_progress;     // progress doing incremental inlining?
+ 267   bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+ 268   bool                  _do_cleanup;            // Cleanup is needed before proceeding with incremental inlining
+ 269   bool                  _has_loops;             // True if the method _may_ have some loops
+ 270   bool                  _has_split_ifs;         // True if the method _may_ have some split-if
+ 271   bool                  _has_unsafe_access;     // True if the method _may_ produce faults in unsafe loads or stores.
+ 272   bool                  _has_stringbuilder;     // True StringBuffers or StringBuilders are allocated
+ 273   bool                  _has_boxed_value;       // True if a boxed object is allocated
+ 274   bool                  _has_reserved_stack_access; // True if the method or an inlined method is annotated with ReservedStackAccess
+ 275   uint                  _max_vector_size;       // Maximum size of generated vectors
+ 276   bool                  _clear_upper_avx;       // Clear upper bits of ymm registers using vzeroupper
+ 277   uint                  _trap_hist[trapHistLength];  // Cumulative traps
+ 278   bool                  _trap_can_recompile;    // Have we emitted a recompiling trap?
+ 279   uint                  _decompile_count;       // Cumulative decompilation counts.
+ 280   bool                  _do_inlining;           // True if we intend to do inlining
+ 281   bool                  _do_scheduling;         // True if we intend to do scheduling
+ 282   bool                  _do_freq_based_layout;  // True if we intend to do frequency based block layout
+ 283   bool                  _do_count_invocations;  // True if we generate code to count invocations
+ 284   bool                  _do_method_data_update; // True if we generate code to update MethodData*s
+ 285   bool                  _do_vector_loop;        // True if allowed to execute loop in parallel iterations
+ 286   bool                  _use_cmove;             // True if CMove should be used without profitability analysis
+ 287   bool                  _age_code;              // True if we need to profile code age (decrement the aging counter)
+ 288   int                   _AliasLevel;            // Locally-adjusted version of AliasLevel flag.
+ 289   bool                  _print_assembly;        // True if we should dump assembly code for this compilation
+ 290   bool                  _print_inlining;        // True if we should print inlining for this compilation
+ 291   bool                  _print_intrinsics;      // True if we should print intrinsics for this compilation
+ 292 #ifndef PRODUCT
+ 293   bool                  _trace_opto_output;
+ 294   bool                  _print_ideal;
+ 295   bool                  _parsed_irreducible_loop; // True if ciTypeFlow detected irreducible loops during parsing
+ 296 #endif
+ 297   bool                  _has_irreducible_loop;  // Found irreducible loops
+ 298   // JSR 292
+ 299   bool                  _has_method_handle_invokes; // True if this method has MethodHandle invokes.
+ 300   RTMState              _rtm_state;             // State of Restricted Transactional Memory usage
+ 301   int                   _loop_opts_cnt;         // loop opts round
+ 302   bool                  _clinit_barrier_on_entry; // True if clinit barrier is needed on nmethod entry
+
+
+
+
+ 303 
+ 304   // Compilation environment.
+ 305   Arena                 _comp_arena;            // Arena with lifetime equivalent to Compile
+ 306   void*                 _barrier_set_state;     // Potential GC barrier state for Compile
+ 307   ciEnv*                _env;                   // CI interface
+ 308   DirectiveSet*         _directive;             // Compiler directive
+ 309   CompileLog*           _log;                   // from CompilerThread
+ 310   const char*           _failure_reason;        // for record_failure/failing pattern
+ 311   GrowableArray&lt;CallGenerator*&gt;* _intrinsics;   // List of intrinsics.
+ 312   GrowableArray&lt;Node*&gt;* _macro_nodes;           // List of nodes which need to be expanded before matching.
+ 313   GrowableArray&lt;Node*&gt;* _predicate_opaqs;       // List of Opaque1 nodes for the loop predicates.
+ 314   GrowableArray&lt;Node*&gt;* _expensive_nodes;       // List of nodes that are expensive to compute and that we&#39;d better not let the GVN freely common
+ 315   GrowableArray&lt;Node*&gt;* _range_check_casts;     // List of CastII nodes with a range check dependency
+ 316   GrowableArray&lt;Node*&gt;* _opaque4_nodes;         // List of Opaque4 nodes that have a default value
+ 317   ConnectionGraph*      _congraph;
+ 318 #ifndef PRODUCT
+ 319   IdealGraphPrinter*    _printer;
+ 320   static IdealGraphPrinter* _debug_file_printer;
+ 321   static IdealGraphPrinter* _debug_network_printer;
+ 322 #endif
+</pre>
+<hr />
+<pre>
+ 489   int interpreter_frame_size() const            { return _interpreter_frame_size; }
+ 490 
+ 491   PhaseOutput*      output() const              { return _output; }
+ 492   void              set_output(PhaseOutput* o)  { _output = o; }
+ 493 
+ 494   // ID for this compilation.  Useful for setting breakpoints in the debugger.
+ 495   int               compile_id() const          { return _compile_id; }
+ 496   DirectiveSet*     directive() const           { return _directive; }
+ 497 
+ 498   // Does this compilation allow instructions to subsume loads?  User
+ 499   // instructions that subsume a load may result in an unschedulable
+ 500   // instruction sequence.
+ 501   bool              subsume_loads() const       { return _subsume_loads; }
+ 502   /** Do escape analysis. */
+ 503   bool              do_escape_analysis() const  { return _do_escape_analysis; }
+ 504   /** Do boxing elimination. */
+ 505   bool              eliminate_boxing() const    { return _eliminate_boxing; }
+ 506   /** Do aggressive boxing elimination. */
+ 507   bool              aggressive_unboxing() const { return _eliminate_boxing &amp;&amp; AggressiveUnboxing; }
+ 508   bool              save_argument_registers() const { return _save_argument_registers; }
+<span class="line-modified"> 509 </span>
+
+ 510 
+ 511   // Other fixed compilation parameters.
+ 512   ciMethod*         method() const              { return _method; }
+ 513   int               entry_bci() const           { return _entry_bci; }
+ 514   bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+ 515   bool              is_method_compilation() const { return (_method != NULL &amp;&amp; !_method-&gt;flags().is_native()); }
+ 516   const TypeFunc*   tf() const                  { assert(_tf!=NULL, &quot;&quot;); return _tf; }
+ 517   void         init_tf(const TypeFunc* tf)      { assert(_tf==NULL, &quot;&quot;); _tf = tf; }
+ 518   InlineTree*       ilt() const                 { return _ilt; }
+ 519   address           stub_function() const       { return _stub_function; }
+ 520   const char*       stub_name() const           { return _stub_name; }
+ 521   address           stub_entry_point() const    { return _stub_entry_point; }
+ 522   void          set_stub_entry_point(address z) { _stub_entry_point = z; }
+ 523 
+ 524   // Control of this compilation.
+ 525   int               fixed_slots() const         { assert(_fixed_slots &gt;= 0, &quot;&quot;);         return _fixed_slots; }
+ 526   void          set_fixed_slots(int n)          { _fixed_slots = n; }
+ 527   int               major_progress() const      { return _major_progress; }
+ 528   void          set_inlining_progress(bool z)   { _inlining_progress = z; }
+ 529   int               inlining_progress() const   { return _inlining_progress; }
+</pre>
+<hr />
+<pre>
+ 575   void          set_do_vector_loop(bool z)      { _do_vector_loop = z; }
+ 576   bool              use_cmove() const           { return _use_cmove; }
+ 577   void          set_use_cmove(bool z)           { _use_cmove = z; }
+ 578   bool              age_code() const             { return _age_code; }
+ 579   void          set_age_code(bool z)             { _age_code = z; }
+ 580   int               AliasLevel() const           { return _AliasLevel; }
+ 581   bool              print_assembly() const       { return _print_assembly; }
+ 582   void          set_print_assembly(bool z)       { _print_assembly = z; }
+ 583   bool              print_inlining() const       { return _print_inlining; }
+ 584   void          set_print_inlining(bool z)       { _print_inlining = z; }
+ 585   bool              print_intrinsics() const     { return _print_intrinsics; }
+ 586   void          set_print_intrinsics(bool z)     { _print_intrinsics = z; }
+ 587   RTMState          rtm_state()  const           { return _rtm_state; }
+ 588   void          set_rtm_state(RTMState s)        { _rtm_state = s; }
+ 589   bool              use_rtm() const              { return (_rtm_state &amp; NoRTM) == 0; }
+ 590   bool          profile_rtm() const              { return _rtm_state == ProfileRTM; }
+ 591   uint              max_node_limit() const       { return (uint)_max_node_limit; }
+ 592   void          set_max_node_limit(uint n)       { _max_node_limit = n; }
+ 593   bool              clinit_barrier_on_entry()       { return _clinit_barrier_on_entry; }
+ 594   void          set_clinit_barrier_on_entry(bool z) { _clinit_barrier_on_entry = z; }
+
+
+
+
+ 595 
+ 596   // check the CompilerOracle for special behaviours for this compile
+ 597   bool          method_has_option(const char * option) {
+ 598     return method() != NULL &amp;&amp; method()-&gt;has_option(option);
+ 599   }
+ 600 
+ 601 #ifndef PRODUCT
+ 602   bool          trace_opto_output() const       { return _trace_opto_output; }
+ 603   bool          print_ideal() const             { return _print_ideal; }
+ 604   bool              parsed_irreducible_loop() const { return _parsed_irreducible_loop; }
+ 605   void          set_parsed_irreducible_loop(bool z) { _parsed_irreducible_loop = z; }
+ 606   int _in_dump_cnt;  // Required for dumping ir nodes.
+ 607 #endif
+ 608   bool              has_irreducible_loop() const { return _has_irreducible_loop; }
+ 609   void          set_has_irreducible_loop(bool z) { _has_irreducible_loop = z; }
+ 610 
+ 611   // JSR 292
+ 612   bool              has_method_handle_invokes() const { return _has_method_handle_invokes;     }
+ 613   void          set_has_method_handle_invokes(bool z) {        _has_method_handle_invokes = z; }
+ 614 
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 242 
+ 243  private:
+ 244   // Fixed parameters to this compilation.
+ 245   const int             _compile_id;
+ 246   const bool            _save_argument_registers; // save/restore arg regs for trampolines
+ 247   const bool            _subsume_loads;         // Load can be matched as part of a larger op.
+ 248   const bool            _do_escape_analysis;    // Do escape analysis.
+ 249   const bool            _eliminate_boxing;      // Do boxing elimination.
+ 250   ciMethod*             _method;                // The method being compiled.
+ 251   int                   _entry_bci;             // entry bci for osr methods.
+ 252   const TypeFunc*       _tf;                    // My kind of signature
+ 253   InlineTree*           _ilt;                   // Ditto (temporary).
+ 254   address               _stub_function;         // VM entry for stub being compiled, or NULL
+ 255   const char*           _stub_name;             // Name of stub or adapter being compiled, or NULL
+ 256   address               _stub_entry_point;      // Compile code entry for generated stub, or NULL
+ 257 
+ 258   // Control of this compilation.
+ 259   int                   _max_inline_size;       // Max inline size for this compilation
+ 260   int                   _freq_inline_size;      // Max hot method inline size for this compilation
+ 261   int                   _fixed_slots;           // count of frame slots not allocated by the register
+<span class="line-modified"> 262                                                 // allocator i.e. locks, original deopt pc, stack allocated objects, etc.</span>
+ 263   uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+ 264 
+ 265   int                   _major_progress;        // Count of something big happening
+ 266   bool                  _inlining_progress;     // progress doing incremental inlining?
+ 267   bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+ 268   bool                  _do_cleanup;            // Cleanup is needed before proceeding with incremental inlining
+ 269   bool                  _has_loops;             // True if the method _may_ have some loops
+ 270   bool                  _has_split_ifs;         // True if the method _may_ have some split-if
+ 271   bool                  _has_unsafe_access;     // True if the method _may_ produce faults in unsafe loads or stores.
+ 272   bool                  _has_stringbuilder;     // True StringBuffers or StringBuilders are allocated
+ 273   bool                  _has_boxed_value;       // True if a boxed object is allocated
+ 274   bool                  _has_reserved_stack_access; // True if the method or an inlined method is annotated with ReservedStackAccess
+ 275   uint                  _max_vector_size;       // Maximum size of generated vectors
+ 276   bool                  _clear_upper_avx;       // Clear upper bits of ymm registers using vzeroupper
+ 277   uint                  _trap_hist[trapHistLength];  // Cumulative traps
+ 278   bool                  _trap_can_recompile;    // Have we emitted a recompiling trap?
+ 279   uint                  _decompile_count;       // Cumulative decompilation counts.
+ 280   bool                  _do_inlining;           // True if we intend to do inlining
+ 281   bool                  _do_scheduling;         // True if we intend to do scheduling
+ 282   bool                  _do_freq_based_layout;  // True if we intend to do frequency based block layout
+ 283   bool                  _do_count_invocations;  // True if we generate code to count invocations
+ 284   bool                  _do_method_data_update; // True if we generate code to update MethodData*s
+ 285   bool                  _do_vector_loop;        // True if allowed to execute loop in parallel iterations
+ 286   bool                  _use_cmove;             // True if CMove should be used without profitability analysis
+ 287   bool                  _age_code;              // True if we need to profile code age (decrement the aging counter)
+ 288   int                   _AliasLevel;            // Locally-adjusted version of AliasLevel flag.
+ 289   bool                  _print_assembly;        // True if we should dump assembly code for this compilation
+ 290   bool                  _print_inlining;        // True if we should print inlining for this compilation
+ 291   bool                  _print_intrinsics;      // True if we should print intrinsics for this compilation
+ 292 #ifndef PRODUCT
+ 293   bool                  _trace_opto_output;
+ 294   bool                  _print_ideal;
+ 295   bool                  _parsed_irreducible_loop; // True if ciTypeFlow detected irreducible loops during parsing
+ 296 #endif
+ 297   bool                  _has_irreducible_loop;  // Found irreducible loops
+ 298   // JSR 292
+ 299   bool                  _has_method_handle_invokes; // True if this method has MethodHandle invokes.
+ 300   RTMState              _rtm_state;             // State of Restricted Transactional Memory usage
+ 301   int                   _loop_opts_cnt;         // loop opts round
+ 302   bool                  _clinit_barrier_on_entry; // True if clinit barrier is needed on nmethod entry
+<span class="line-added"> 303   int                   _stack_allocated_slots; // count of frame slots potentially taken by stack allocated objects.</span>
+<span class="line-added"> 304                                                 // Going over the limit disables stack allocation of objects pointing</span>
+<span class="line-added"> 305                                                 // to other stack allocated objects.</span>
+<span class="line-added"> 306   bool                  _fail_stack_allocation_with_references;</span>
+ 307 
+ 308   // Compilation environment.
+ 309   Arena                 _comp_arena;            // Arena with lifetime equivalent to Compile
+ 310   void*                 _barrier_set_state;     // Potential GC barrier state for Compile
+ 311   ciEnv*                _env;                   // CI interface
+ 312   DirectiveSet*         _directive;             // Compiler directive
+ 313   CompileLog*           _log;                   // from CompilerThread
+ 314   const char*           _failure_reason;        // for record_failure/failing pattern
+ 315   GrowableArray&lt;CallGenerator*&gt;* _intrinsics;   // List of intrinsics.
+ 316   GrowableArray&lt;Node*&gt;* _macro_nodes;           // List of nodes which need to be expanded before matching.
+ 317   GrowableArray&lt;Node*&gt;* _predicate_opaqs;       // List of Opaque1 nodes for the loop predicates.
+ 318   GrowableArray&lt;Node*&gt;* _expensive_nodes;       // List of nodes that are expensive to compute and that we&#39;d better not let the GVN freely common
+ 319   GrowableArray&lt;Node*&gt;* _range_check_casts;     // List of CastII nodes with a range check dependency
+ 320   GrowableArray&lt;Node*&gt;* _opaque4_nodes;         // List of Opaque4 nodes that have a default value
+ 321   ConnectionGraph*      _congraph;
+ 322 #ifndef PRODUCT
+ 323   IdealGraphPrinter*    _printer;
+ 324   static IdealGraphPrinter* _debug_file_printer;
+ 325   static IdealGraphPrinter* _debug_network_printer;
+ 326 #endif
+</pre>
+<hr />
+<pre>
+ 493   int interpreter_frame_size() const            { return _interpreter_frame_size; }
+ 494 
+ 495   PhaseOutput*      output() const              { return _output; }
+ 496   void              set_output(PhaseOutput* o)  { _output = o; }
+ 497 
+ 498   // ID for this compilation.  Useful for setting breakpoints in the debugger.
+ 499   int               compile_id() const          { return _compile_id; }
+ 500   DirectiveSet*     directive() const           { return _directive; }
+ 501 
+ 502   // Does this compilation allow instructions to subsume loads?  User
+ 503   // instructions that subsume a load may result in an unschedulable
+ 504   // instruction sequence.
+ 505   bool              subsume_loads() const       { return _subsume_loads; }
+ 506   /** Do escape analysis. */
+ 507   bool              do_escape_analysis() const  { return _do_escape_analysis; }
+ 508   /** Do boxing elimination. */
+ 509   bool              eliminate_boxing() const    { return _eliminate_boxing; }
+ 510   /** Do aggressive boxing elimination. */
+ 511   bool              aggressive_unboxing() const { return _eliminate_boxing &amp;&amp; AggressiveUnboxing; }
+ 512   bool              save_argument_registers() const { return _save_argument_registers; }
+<span class="line-modified"> 513   /** Do stack allocation */</span>
+<span class="line-added"> 514   bool              do_stack_allocation() const { return UseStackAllocation || _directive-&gt;UseStackAllocationOption; }</span>
+ 515 
+ 516   // Other fixed compilation parameters.
+ 517   ciMethod*         method() const              { return _method; }
+ 518   int               entry_bci() const           { return _entry_bci; }
+ 519   bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+ 520   bool              is_method_compilation() const { return (_method != NULL &amp;&amp; !_method-&gt;flags().is_native()); }
+ 521   const TypeFunc*   tf() const                  { assert(_tf!=NULL, &quot;&quot;); return _tf; }
+ 522   void         init_tf(const TypeFunc* tf)      { assert(_tf==NULL, &quot;&quot;); _tf = tf; }
+ 523   InlineTree*       ilt() const                 { return _ilt; }
+ 524   address           stub_function() const       { return _stub_function; }
+ 525   const char*       stub_name() const           { return _stub_name; }
+ 526   address           stub_entry_point() const    { return _stub_entry_point; }
+ 527   void          set_stub_entry_point(address z) { _stub_entry_point = z; }
+ 528 
+ 529   // Control of this compilation.
+ 530   int               fixed_slots() const         { assert(_fixed_slots &gt;= 0, &quot;&quot;);         return _fixed_slots; }
+ 531   void          set_fixed_slots(int n)          { _fixed_slots = n; }
+ 532   int               major_progress() const      { return _major_progress; }
+ 533   void          set_inlining_progress(bool z)   { _inlining_progress = z; }
+ 534   int               inlining_progress() const   { return _inlining_progress; }
+</pre>
+<hr />
+<pre>
+ 580   void          set_do_vector_loop(bool z)      { _do_vector_loop = z; }
+ 581   bool              use_cmove() const           { return _use_cmove; }
+ 582   void          set_use_cmove(bool z)           { _use_cmove = z; }
+ 583   bool              age_code() const             { return _age_code; }
+ 584   void          set_age_code(bool z)             { _age_code = z; }
+ 585   int               AliasLevel() const           { return _AliasLevel; }
+ 586   bool              print_assembly() const       { return _print_assembly; }
+ 587   void          set_print_assembly(bool z)       { _print_assembly = z; }
+ 588   bool              print_inlining() const       { return _print_inlining; }
+ 589   void          set_print_inlining(bool z)       { _print_inlining = z; }
+ 590   bool              print_intrinsics() const     { return _print_intrinsics; }
+ 591   void          set_print_intrinsics(bool z)     { _print_intrinsics = z; }
+ 592   RTMState          rtm_state()  const           { return _rtm_state; }
+ 593   void          set_rtm_state(RTMState s)        { _rtm_state = s; }
+ 594   bool              use_rtm() const              { return (_rtm_state &amp; NoRTM) == 0; }
+ 595   bool          profile_rtm() const              { return _rtm_state == ProfileRTM; }
+ 596   uint              max_node_limit() const       { return (uint)_max_node_limit; }
+ 597   void          set_max_node_limit(uint n)       { _max_node_limit = n; }
+ 598   bool              clinit_barrier_on_entry()       { return _clinit_barrier_on_entry; }
+ 599   void          set_clinit_barrier_on_entry(bool z) { _clinit_barrier_on_entry = z; }
+<span class="line-added"> 600   int               stack_allocated_slots() const { assert(_stack_allocated_slots &gt;= 0, &quot;&quot;); return _stack_allocated_slots; }</span>
+<span class="line-added"> 601   void          set_stack_allocated_slots(int n)  { _stack_allocated_slots = n; }</span>
+<span class="line-added"> 602   bool               fail_stack_allocation_with_references() const { return _fail_stack_allocation_with_references; }</span>
+<span class="line-added"> 603   void          set_fail_stack_allocation_with_references(bool b)  { _fail_stack_allocation_with_references = b; }</span>
+ 604 
+ 605   // check the CompilerOracle for special behaviours for this compile
+ 606   bool          method_has_option(const char * option) {
+ 607     return method() != NULL &amp;&amp; method()-&gt;has_option(option);
+ 608   }
+ 609 
+ 610 #ifndef PRODUCT
+ 611   bool          trace_opto_output() const       { return _trace_opto_output; }
+ 612   bool          print_ideal() const             { return _print_ideal; }
+ 613   bool              parsed_irreducible_loop() const { return _parsed_irreducible_loop; }
+ 614   void          set_parsed_irreducible_loop(bool z) { _parsed_irreducible_loop = z; }
+ 615   int _in_dump_cnt;  // Required for dumping ir nodes.
+ 616 #endif
+ 617   bool              has_irreducible_loop() const { return _has_irreducible_loop; }
+ 618   void          set_has_irreducible_loop(bool z) { _has_irreducible_loop = z; }
+ 619 
+ 620   // JSR 292
+ 621   bool              has_method_handle_invokes() const { return _has_method_handle_invokes;     }
+ 622   void          set_has_method_handle_invokes(bool z) {        _has_method_handle_invokes = z; }
+ 623 
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="compile.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="escape.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

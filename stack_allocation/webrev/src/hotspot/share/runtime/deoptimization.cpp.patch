@@ -1,0 +1,397 @@
+diff a/src/hotspot/share/runtime/deoptimization.cpp b/src/hotspot/share/runtime/deoptimization.cpp
+--- a/src/hotspot/share/runtime/deoptimization.cpp
++++ b/src/hotspot/share/runtime/deoptimization.cpp
+@@ -301,11 +301,11 @@
+   bool jvmci_enabled = false;
+ #endif
+ 
+   // Reallocate the non-escaping objects and restore their fields. Then
+   // relock objects if synchronization on them was eliminated.
+-  if (jvmci_enabled COMPILER2_PRESENT( || (DoEscapeAnalysis && EliminateAllocations) )) {
++  if (jvmci_enabled COMPILER2_PRESENT( || (DoEscapeAnalysis && EliminateAllocations || (DoEscapeAnalysis && UseStackAllocationRuntime)) )) {
+     realloc_failures = eliminate_allocations(thread, exec_mode, cm, deoptee, map, chunk);
+   }
+ #endif // COMPILER2_OR_JVMCI
+ 
+   // Revoke biases, done with in java state.
+@@ -1004,16 +1004,27 @@
+       if (obj == NULL) {
+         obj = ik->allocate_instance(THREAD);
+       }
+     } else if (k->is_typeArray_klass()) {
+       TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+-      assert(sv->field_size() % type2size[ak->element_type()] == 0, "non-integral array length");
+-      int len = sv->field_size() / type2size[ak->element_type()];
++      int len;
++      if (sv->is_stack_object()) {
++        len = ((StackObjectValue *)sv)->get_field_length()->value();
++      } else {
++        assert(sv->field_size() % type2size[ak->element_type()] == 0, "non-integral array length");
++        len = sv->field_size() / type2size[ak->element_type()];
++      }
+       obj = ak->allocate(len, THREAD);
+     } else if (k->is_objArray_klass()) {
+       ObjArrayKlass* ak = ObjArrayKlass::cast(k);
+-      obj = ak->allocate(sv->field_size(), THREAD);
++      int len;
++      if (sv->is_stack_object()) {
++        len = ((StackObjectValue *)sv)->get_field_length()->value();
++      } else {
++        len = sv->field_size();
++      }
++      obj = ak->allocate(len, THREAD);
+     }
+ 
+     if (obj == NULL) {
+       failures = true;
+     }
+@@ -1031,10 +1042,22 @@
+   }
+ 
+   return failures;
+ }
+ 
++void Deoptimization::reassign_scalar_replaced_fields(frame *fr, RegisterMap *reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k, bool skip_internal) {
++  if (k->is_instance_klass()) {
++      InstanceKlass* ik = InstanceKlass::cast(k);
++      reassign_scalar_replaced_fields_by_klass(ik, fr, reg_map, objects, sv, 0, obj(), skip_internal);
++    } else if (k->is_typeArray_klass()) {
++      TypeArrayKlass* ak = TypeArrayKlass::cast(k);
++      reassign_scalar_replaced_type_array_elements(fr, reg_map, sv, (typeArrayOop) obj(), ak->element_type());
++    } else if (k->is_objArray_klass()) {
++      reassign_scalar_replaced_object_array_elements(fr, reg_map, objects, sv, (objArrayOop) obj());
++    }
++}
++
+ #if INCLUDE_JVMCI
+ /**
+  * For primitive types whose kind gets "erased" at runtime (shorts become stack ints),
+  * we need to somehow be able to recover the actual kind to be able to write the correct
+  * amount of bytes.
+@@ -1092,11 +1115,11 @@
+ }
+ #endif // INCLUDE_JVMCI
+ 
+ 
+ // restore elements of an eliminated type array
+-void Deoptimization::reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type) {
++void Deoptimization::reassign_scalar_replaced_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type) {
+   int index = 0;
+   intptr_t val;
+ 
+   for (int i = 0; i < sv->field_size(); i++) {
+     StackValue* value = StackValue::create_stack_value(fr, reg_map, sv->field_at(i));
+@@ -1191,14 +1214,15 @@
+     index++;
+   }
+ }
+ 
+ // restore fields of an eliminated object array
+-void Deoptimization::reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj) {
++void Deoptimization::reassign_scalar_replaced_object_array_elements(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, objArrayOop obj) {
+   for (int i = 0; i < sv->field_size(); i++) {
+-    StackValue* value = StackValue::create_stack_value(fr, reg_map, sv->field_at(i));
++    StackValue* value = StackValue::create_stack_value(fr, reg_map, get_scope_value(fr, reg_map, sv->field_at(i), objects));
+     assert(value->type() == T_OBJECT, "object element expected");
++    assert(oopDesc::is_oop_or_null(value->get_obj()()), "must be oop");
+     obj->obj_at_put(i, value->get_obj()());
+   }
+ }
+ 
+ class ReassignedField {
+@@ -1214,13 +1238,78 @@
+ 
+ int compare(ReassignedField* left, ReassignedField* right) {
+   return left->_offset - right->_offset;
+ }
+ 
++ScopeValue *Deoptimization::match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray<ScopeValue*>* objects) {
++  for (int j = 0; j < objects->length(); j++) {
++    ScopeValue* o_sv = objects->at(j);
++    if (o_sv->is_object()) {
++      if (o_sv->as_ObjectValue()->is_stack_object()) {
++        StackObjectValue *sov = (StackObjectValue *)o_sv;
++        Location o_loc = sov->get_stack_location();
++        int o_offset = o_loc.stack_offset();
++        int l_offset = (address)oop_ptr - (address)sp_base;
++        if (o_offset == l_offset) {
++          return o_sv;
++        }
++      }
++    }
++  }
++  return NULL;
++}
++
++ScopeValue *Deoptimization::get_scope_value(frame* fr, RegisterMap* reg_map, ScopeValue* sv, GrowableArray<ScopeValue*>* objects) {
++  if (sv->is_location()) {
++    if ((objects != NULL) && (objects->length() > 0)) {
++      LocationValue* lv = (LocationValue *)sv;
++      Location loc = lv->location();
++      intptr_t *oop_ptr;
++      intptr_t *sp_base = fr->unextended_sp();
++      intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++      if (loc.is_stack() && (loc.type() == Location::oop)) {
++        address value_addr = ((address)sp_base) + loc.stack_offset();
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else if (loc.is_register() && (loc.type() == Location::oop)) {
++        address value_addr = reg_map->location(VMRegImpl::as_VMReg(loc.register_number()));
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else {
++        assert(loc.type() != Location::oop, "Can not be an oop");
++        return sv;
++      }
++      if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++        ScopeValue* o_sv = Deoptimization::match_object_to_stack_oop(oop_ptr, sp_base, objects);
++        if (o_sv != NULL) {
++          sv = o_sv;
++        } else {
++          assert(false, "pointer to stack but did not find object to replace");
++        }
++      }
++    }
++  } else if (sv->is_object()) {
++    oop o = sv->as_ObjectValue()->value()();
++    intptr_t *sp_base = fr->unextended_sp();
++    intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++    if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++      ScopeValue* o_sv = Deoptimization::match_object_to_stack_oop(oop_ptr, sp_base, objects);
++      if (o_sv != NULL) {
++        sv = o_sv;
++        assert(sv = o_sv, "objects have to match?");
++      } else {
++        assert(false, "pointer to stack but did not find object to replace");
++      }
++    }
++  }
++  return sv;
++}
++
+ // Restore fields of an eliminated instance object using the same field order
+ // returned by HotSpotResolvedObjectTypeImpl.getInstanceFields(true)
+-static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, ObjectValue* sv, int svIndex, oop obj, bool skip_internal) {
++void Deoptimization::reassign_scalar_replaced_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, int svIndex, oop obj, bool skip_internal) {
+   GrowableArray<ReassignedField>* fields = new GrowableArray<ReassignedField>();
+   InstanceKlass* ik = klass;
+   while (ik != NULL) {
+     for (AllFieldStream fs(ik); !fs.done(); fs.next()) {
+       if (!fs.access_flags().is_static() && (!skip_internal || !fs.access_flags().is_internal())) {
+@@ -1233,17 +1322,18 @@
+     ik = ik->superklass();
+   }
+   fields->sort(compare);
+   for (int i = 0; i < fields->length(); i++) {
+     intptr_t val;
+-    ScopeValue* scope_field = sv->field_at(svIndex);
++    ScopeValue* scope_field = get_scope_value(fr, reg_map, sv->field_at(svIndex), objects);
+     StackValue* value = StackValue::create_stack_value(fr, reg_map, scope_field);
+     int offset = fields->at(i)._offset;
+     BasicType type = fields->at(i)._type;
+     switch (type) {
+       case T_OBJECT: case T_ARRAY:
+         assert(value->type() == T_OBJECT, "Agreement.");
++        assert(oopDesc::is_oop_or_null(value->get_obj()()), "must be oop");
+         obj->obj_field_put(offset, value->get_obj()());
+         break;
+ 
+       // Have to cast to INT (32 bits) pointer to avoid little/big-endian problem.
+       case T_INT: case T_FLOAT: { // 4 bytes.
+@@ -1315,11 +1405,170 @@
+       default:
+         ShouldNotReachHere();
+     }
+     svIndex++;
+   }
+-  return svIndex;
++}
++
++void Deoptimization::reassign_stack_allocated_type_array_elements(oop orig, oop newly_allocated, Klass *k) {
++  typeArrayOop orig_obj = (typeArrayOop) orig;
++  typeArrayOop new_obj = (typeArrayOop) newly_allocated;
++  assert(orig_obj->length() == new_obj->length(), "lengths have to be the same");
++  TypeArrayKlass* ak = TypeArrayKlass::cast(k);
++  BasicType type = ak->element_type();
++  for (int i = 0; i < orig_obj->length(); i++) {
++    switch (type) {
++      case T_BOOLEAN:
++        new_obj->bool_at_put(i, orig_obj->bool_at(i));
++        break;
++      case T_CHAR:
++        new_obj->char_at_put(i, orig_obj->char_at(i));
++        break;
++      case T_FLOAT:
++        new_obj->float_at_put(i, orig_obj->float_at(i));
++        break;
++      case T_DOUBLE:
++        new_obj->double_at_put(i, orig_obj->double_at(i));
++        break;
++      case T_BYTE:
++        new_obj->byte_at_put(i, orig_obj->byte_at(i));
++        break;
++      case T_SHORT:
++        new_obj->short_at_put(i, orig_obj->short_at(i));
++        break;
++      case T_INT:
++        new_obj->int_at_put(i, orig_obj->int_at(i));
++        break;
++      case T_LONG:
++        new_obj->long_at_put(i, orig_obj->long_at(i));
++        break;
++      default:
++        assert(false, "unreachable");
++    }
++  }
++}
++
++void Deoptimization::reassign_stack_allocated_object_array_elements(oop orig, oop newly_allocated, intptr_t *sp_base, intptr_t *sp_top, GrowableArray<ScopeValue*>* objects) {
++  objArrayOop orig_obj = (objArrayOop) orig;
++  objArrayOop new_obj = (objArrayOop) newly_allocated;
++  assert(orig_obj->length() == new_obj->length(), "lengths have to be the same");
++  for (int i = 0; i < orig_obj->length(); i++) {
++    oop o = orig_obj->obj_at(i);
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++    if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++      int field_offset = (address)oop_ptr - (address)sp_base;
++      bool found = false;
++      for (int j = 0; j < objects->length(); j++) {
++        ScopeValue* o_sv = objects->at(j);
++        if (o_sv->is_object() && o_sv->as_ObjectValue()->is_stack_object()) {
++          StackObjectValue *sov = (StackObjectValue *)o_sv;
++          Location o_loc = sov->get_stack_location();
++          int o_offset = o_loc.stack_offset();
++          if (o_offset == field_offset) {
++            o = sov->value()();
++            found = true;
++            break;
++          }
++        }
++      }
++      assert(found, "pointer to stack but did not find object to replace");
++    }
++    assert(oopDesc::is_oop_or_null(o), "must be oop");
++    new_obj->obj_at_put(i, o);
++  }
++}
++
++class ReassignStackObjectFields: public FieldClosure {
++ private:
++  oop _orig;
++  oop _new;
++  intptr_t *_sp_base;
++  intptr_t *_sp_top;
++  GrowableArray<ScopeValue*>* _objects;
++
++ public:
++  ReassignStackObjectFields(oop orig, oop n, intptr_t *sp_base, intptr_t *sp_top, GrowableArray<ScopeValue*>* objects) :
++    _orig(orig), _new(n), _sp_base(sp_base), _sp_top(sp_top), _objects(objects) {}
++
++  void do_field(fieldDescriptor* fd) {
++    BasicType ft = fd->field_type();
++    switch (ft) {
++      case T_BYTE:
++        _new->byte_field_put(fd->offset(), _orig->byte_field(fd->offset()));
++        break;
++      case T_CHAR:
++        _new->char_field_put(fd->offset(), _orig->char_field(fd->offset()));
++        break;
++      case T_DOUBLE:
++        _new->double_field_put(fd->offset(), _orig->double_field(fd->offset()));
++        break;
++      case T_FLOAT:
++        _new->float_field_put(fd->offset(), _orig->float_field(fd->offset()));
++        break;
++      case T_INT:
++        _new->int_field_put(fd->offset(), _orig->int_field(fd->offset()));
++        break;
++      case T_LONG:
++        _new->long_field_put(fd->offset(), _orig->long_field(fd->offset()));
++        break;
++      case T_SHORT:
++        _new->short_field_put(fd->offset(), _orig->short_field(fd->offset()));
++        break;
++      case T_BOOLEAN:
++        _new->bool_field_put(fd->offset(), _orig->bool_field(fd->offset()));
++        break;
++      case T_ARRAY:
++      case T_OBJECT: {
++        oop o = _orig->obj_field(fd->offset());
++        intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++        if (_sp_base <= oop_ptr && oop_ptr < _sp_top) {
++          int field_offset = (address)oop_ptr - (address)_sp_base;
++          bool found = false;
++          for (int j = 0; j < _objects->length(); j++) {
++            ScopeValue* o_sv = _objects->at(j);
++            if (o_sv->is_object() && o_sv->as_ObjectValue()->is_stack_object()) {
++              StackObjectValue *sov = (StackObjectValue *)o_sv;
++              Location o_loc = sov->get_stack_location();
++              int o_offset = o_loc.stack_offset();
++              if (o_offset == field_offset) {
++                o = sov->value()();
++                found = true;
++                break;
++              }
++            }
++          }
++          assert(found, "Pointer to stack but did not find object to replace");
++        }
++        assert(oopDesc::is_oop_or_null(o), "must be oop");
++        _new->obj_field_put(fd->offset(), o);
++        break;
++      }
++      default:
++        ShouldNotReachHere();
++        break;
++     }
++  }
++};
++
++void Deoptimization::reassign_stack_allocated_fields(frame *fr, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k) {
++  StackObjectValue *sov = (StackObjectValue *)sv;
++  Location loc = sov->get_stack_location();
++  address value_addr = ((address)fr->unextended_sp()) + loc.stack_offset();
++  oop orig = cast_to_oop<address>(value_addr);
++  oop newly_allocated = obj();
++  intptr_t *sp_base = fr->unextended_sp();
++  intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++
++  if (k->is_instance_klass()) {
++    InstanceKlass* ik = InstanceKlass::cast(k);
++    ReassignStackObjectFields reassign(orig, newly_allocated, sp_base, sp_top, objects);
++    ik->do_nonstatic_fields(&reassign);
++  } else if (k->is_typeArray_klass()) {
++    reassign_stack_allocated_type_array_elements(orig, newly_allocated, k);
++  } else if (k->is_objArray_klass()) {
++    reassign_stack_allocated_object_array_elements(orig, newly_allocated, sp_base, sp_top, objects);
++  }
+ }
+ 
+ // restore fields of all eliminated objects and arrays
+ void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, bool realloc_failures, bool skip_internal) {
+   for (int i = 0; i < objects->length(); i++) {
+@@ -1337,18 +1586,15 @@
+     // Don't reassign fields of boxes that came from a cache. Caches may be in CDS.
+     if (sv->is_auto_box() && ((AutoBoxObjectValue*) sv)->is_cached()) {
+       continue;
+     }
+ #endif // INCLUDE_JVMCI || INCLUDE_AOT
+-    if (k->is_instance_klass()) {
+-      InstanceKlass* ik = InstanceKlass::cast(k);
+-      reassign_fields_by_klass(ik, fr, reg_map, sv, 0, obj(), skip_internal);
+-    } else if (k->is_typeArray_klass()) {
+-      TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+-      reassign_type_array_elements(fr, reg_map, sv, (typeArrayOop) obj(), ak->element_type());
+-    } else if (k->is_objArray_klass()) {
+-      reassign_object_array_elements(fr, reg_map, sv, (objArrayOop) obj());
++
++    if (sv->is_stack_object()) {
++      reassign_stack_allocated_fields(fr, objects, sv, obj, k);
++    } else {
++      reassign_scalar_replaced_fields(fr, reg_map, objects, sv, obj, k, skip_internal);
+     }
+   }
+ }
+ 
+ 

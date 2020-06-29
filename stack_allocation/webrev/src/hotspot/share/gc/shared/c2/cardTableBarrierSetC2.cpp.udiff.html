@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="barrierSetC2.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="cardTableBarrierSetC2.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -29,10 +29,11 @@</span>
+  #include &quot;gc/shared/c2/cardTableBarrierSetC2.hpp&quot;
+  #include &quot;opto/arraycopynode.hpp&quot;
+  #include &quot;opto/graphKit.hpp&quot;
+  #include &quot;opto/idealKit.hpp&quot;
+  #include &quot;opto/macro.hpp&quot;
+<span class="udiff-line-added">+ #include &quot;opto/rootnode.hpp&quot;</span>
+  #include &quot;utilities/macros.hpp&quot;
+  
+  #define __ ideal.
+  
+  Node* CardTableBarrierSetC2::byte_map_base_node(GraphKit* kit) const {
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -55,12 +56,10 @@</span>
+                                           Node* adr,
+                                           uint  adr_idx,
+                                           Node* val,
+                                           BasicType bt,
+                                           bool use_precise) const {
+<span class="udiff-line-removed">-   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(BarrierSet::barrier_set());</span>
+<span class="udiff-line-removed">-   CardTable* ct = ctbs-&gt;card_table();</span>
+    // No store check needed if we&#39;re storing a NULL or an old object
+    // (latter case is probably a string constant). The concurrent
+    // mark sweep garbage collector, however, needs to have all nonNull
+    // oop updates flagged via card-marks.
+    if (val != NULL &amp;&amp; val-&gt;is_Con()) {
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -88,10 +87,16 @@</span>
+    // (Else it&#39;s an array (or unknown), and we want more precise card marks.)
+    assert(adr != NULL, &quot;&quot;);
+  
+    IdealKit ideal(kit, true);
+  
+<span class="udiff-line-added">+   BarrierSet* bs = BarrierSet::barrier_set();</span>
+<span class="udiff-line-added">+   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(bs);</span>
+<span class="udiff-line-added">+   CardTable* ct = ctbs-&gt;card_table();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   float likely = PROB_LIKELY_MAG(3);</span>
+<span class="udiff-line-added">+ </span>
+    // Convert the pointer to an int prior to doing math on it
+    Node* cast = __ CastPX(__ ctrl(), adr);
+  
+    // Divide by card size
+    Node* card_offset = __ URShiftX( cast, __ ConI(CardTable::card_shift) );
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -101,35 +106,48 @@</span>
+  
+    // Get the alias_index for raw card-mark memory
+    int adr_type = Compile::AliasIdxRaw;
+    Node*   zero = __ ConI(0); // Dirty card value
+  
+<span class="udiff-line-modified-removed">-   if (UseCondCardMark) {</span>
+<span class="udiff-line-modified-removed">-     if (ct-&gt;scanned_concurrently()) {</span>
+<span class="udiff-line-modified-removed">-       kit-&gt;insert_mem_bar(Op_MemBarVolatile, oop_store);</span>
+<span class="udiff-line-modified-removed">-       __ sync_kit(kit);</span>
+<span class="udiff-line-modified-removed">-     }</span>
+<span class="udiff-line-modified-removed">-     // The classic GC reference write barrier is typically implemented</span>
+<span class="udiff-line-modified-removed">-     // as a store into the global card mark table.  Unfortunately</span>
+<span class="udiff-line-modified-removed">-     // unconditional stores can result in false sharing and excessive</span>
+<span class="udiff-line-modified-removed">-     // coherence traffic as well as false transactional aborts.</span>
+<span class="udiff-line-modified-removed">-     // UseCondCardMark enables MP &quot;polite&quot; conditional card mark</span>
+<span class="udiff-line-modified-removed">-     // stores.  In theory we could relax the load from ctrl() to</span>
+<span class="udiff-line-modified-removed">-     // no_ctrl, but that doesn&#39;t buy much latitude.</span>
+<span class="udiff-line-modified-removed">-     Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);</span>
+<span class="udiff-line-modified-removed">-     __ if_then(card_val, BoolTest::ne, zero);</span>
+<span class="udiff-line-modified-removed">-   }</span>
+<span class="udiff-line-modified-removed">- </span>
+<span class="udiff-line-modified-removed">-   // Smash zero into card</span>
+<span class="udiff-line-modified-removed">-   if(!ct-&gt;scanned_concurrently()) {</span>
+<span class="udiff-line-modified-removed">-     __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);</span>
+<span class="udiff-line-modified-removed">-   } else {</span>
+<span class="udiff-line-modified-removed">-     // Specialized path for CM store barrier</span>
+<span class="udiff-line-modified-removed">-     __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);</span>
+<span class="udiff-line-modified-removed">-   }</span>
+<span class="udiff-line-modified-removed">- </span>
+<span class="udiff-line-modified-removed">-   if (UseCondCardMark) {</span>
+<span class="udiff-line-modified-added">+   if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="udiff-line-modified-added">+     // Stack allocation: cache CastP2XNode for later processing</span>
+<span class="udiff-line-modified-added">+     state()-&gt;add_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(cast));</span>
+<span class="udiff-line-modified-added">+ </span>
+<span class="udiff-line-modified-added">+     Node* low_off = kit-&gt;longcon(ct-&gt;byte_map_bottom_offset());</span>
+<span class="udiff-line-modified-added">+     Node* delta_off = kit-&gt;longcon(ct-&gt;byte_map_top_offset() - ct-&gt;byte_map_bottom_offset());</span>
+<span class="udiff-line-modified-added">+     Node* sub_off = __ SubL(cast, low_off);</span>
+<span class="udiff-line-modified-added">+ </span>
+<span class="udiff-line-modified-added">+     __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {</span>
+<span class="udiff-line-modified-added">+ </span>
+<span class="udiff-line-modified-added">+       if (UseCondCardMark) {</span>
+<span class="udiff-line-modified-added">+         if (ct-&gt;scanned_concurrently()) {</span>
+<span class="udiff-line-modified-added">+           kit-&gt;insert_mem_bar(Op_MemBarVolatile, oop_store);</span>
+<span class="udiff-line-modified-added">+           __ sync_kit(kit);</span>
+<span class="udiff-line-modified-added">+         }</span>
+<span class="udiff-line-modified-added">+         // The classic GC reference write barrier is typically implemented</span>
+<span class="udiff-line-modified-added">+         // as a store into the global card mark table.  Unfortunately</span>
+<span class="udiff-line-modified-added">+         // unconditional stores can result in false sharing and excessive</span>
+<span class="udiff-line-modified-added">+         // coherence traffic as well as false transactional aborts.</span>
+<span class="udiff-line-modified-added">+         // UseCondCardMark enables MP &quot;polite&quot; conditional card mark</span>
+<span class="udiff-line-modified-added">+         // stores.  In theory we could relax the load from ctrl() to</span>
+<span class="udiff-line-modified-added">+         // no_ctrl, but that doesn&#39;t buy much latitude.</span>
+<span class="udiff-line-modified-added">+         Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);</span>
+<span class="udiff-line-modified-added">+         __ if_then(card_val, BoolTest::ne, zero);</span>
+<span class="udiff-line-modified-added">+       }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+       // Smash zero into card</span>
+<span class="udiff-line-added">+       if(!ct-&gt;scanned_concurrently()) {</span>
+<span class="udiff-line-added">+         __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);</span>
+<span class="udiff-line-added">+       } else {</span>
+<span class="udiff-line-added">+         // Specialized path for CM store barrier</span>
+<span class="udiff-line-added">+         __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+       if (UseCondCardMark) {</span>
+<span class="udiff-line-added">+         __ end_if();</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+   } if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+      __ end_if();
+    }
+  
+    // Final sync IdealKit and GraphKit.
+    kit-&gt;final_sync(ideal);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -166,13 +184,76 @@</span>
+  
+  bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {
+    return ModRefBarrierSetC2::is_gc_barrier_node(node) || node-&gt;Opcode() == Op_StoreCM;
+  }
+  
+<span class="udiff-line-added">+ bool CardTableBarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN&amp; igvn) const {</span>
+<span class="udiff-line-added">+   assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Must have a control node</span>
+<span class="udiff-line-added">+   if (node-&gt;in(0) == NULL) {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   Node *addx_node = node-&gt;find_out_with(Op_AddX);</span>
+<span class="udiff-line-added">+   if (addx_node == NULL) {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   Node *addx_out = addx_node-&gt;unique_out();</span>
+<span class="udiff-line-added">+   if (addx_out == NULL) {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   CmpNode* cmp_node = addx_out-&gt;as_Cmp();</span>
+<span class="udiff-line-added">+   // the input to the CMPX is the card_table_top_offset constant</span>
+<span class="udiff-line-added">+   Node* cmp_node_in_2_node = cmp_node-&gt;in(2);</span>
+<span class="udiff-line-added">+   if (!cmp_node_in_2_node-&gt;is_Con()) {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   BarrierSet* bs = BarrierSet::barrier_set();</span>
+<span class="udiff-line-added">+   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(bs);</span>
+<span class="udiff-line-added">+   CardTable* ct = ctbs-&gt;card_table();</span>
+<span class="udiff-line-added">+   size_t constant = ct-&gt;byte_map_top_offset() - ct-&gt;byte_map_bottom_offset();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Check that the input to this CMP node is the expected constant</span>
+<span class="udiff-line-added">+   const TypeX* otype = cmp_node_in_2_node-&gt;find_intptr_t_type();</span>
+<span class="udiff-line-added">+   if (otype != NULL &amp;&amp; otype-&gt;is_con() &amp;&amp;</span>
+<span class="udiff-line-added">+       size_t(otype-&gt;get_con()) != constant) {</span>
+<span class="udiff-line-added">+     // Constant offset but not the card table size constant so just return</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // we can&#39;t change the compare or the constant so create a new constant(0) and replace the variable</span>
+<span class="udiff-line-added">+   Node* cmp_node_in_1_node = cmp_node-&gt;in(1);</span>
+<span class="udiff-line-added">+   ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);</span>
+<span class="udiff-line-added">+   if (cmp_node_in_1_node-&gt;_idx == zeroConstant_node-&gt;_idx) {</span>
+<span class="udiff-line-added">+     // we can get here via different nodes - but we only want to change the input once</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   igvn.rehash_node_delayed(cmp_node);</span>
+<span class="udiff-line-added">+   int numReplaced = cmp_node-&gt;replace_edge(cmp_node_in_1_node, zeroConstant_node);</span>
+<span class="udiff-line-added">+   assert(numReplaced == 1, &quot;Failed to replace the card_offset with Conx(0)&quot;);</span>
+<span class="udiff-line-added">+   igvn.replace_node(addx_node, igvn.C-&gt;top());</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   return true;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+  void CardTableBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+    assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);
+<span class="udiff-line-modified-removed">-   Node *shift = node-&gt;unique_out();</span>
+<span class="udiff-line-modified-added">+   assert(node-&gt;outcnt() &lt;= 2, &quot;node-&gt;outcnt() &lt;= 2&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Certain loop optimisations may introduce a CastP2X node with</span>
+<span class="udiff-line-added">+   // ConvL2I in case of an AllocateArray op. Check for that case</span>
+<span class="udiff-line-added">+   // here and do not attempt to eliminate it as write barrier.</span>
+<span class="udiff-line-added">+   if (macro-&gt;C-&gt;do_stack_allocation() &amp;&amp; !state()-&gt;is_a_barrier(static_cast&lt;CastP2XNode*&gt;(node))) {</span>
+<span class="udiff-line-added">+     return;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   Node *shift = node-&gt;find_out_with(Op_URShiftX);</span>
+    Node *addp = shift-&gt;unique_out();
+    for (DUIterator_Last jmin, j = addp-&gt;last_outs(jmin); j &gt;= jmin; --j) {
+      Node *mem = addp-&gt;last_out(j);
+      if (UseCondCardMark &amp;&amp; mem-&gt;is_Load()) {
+        assert(mem-&gt;Opcode() == Op_LoadB, &quot;unexpected code shape&quot;);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -182,11 +263,126 @@</span>
+        continue;
+      }
+      assert(mem-&gt;is_Store(), &quot;store required&quot;);
+      macro-&gt;replace_node(mem, mem-&gt;in(MemNode::Memory));
+    }
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (macro-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="udiff-line-added">+     Node *addl_node = node-&gt;find_out_with(Op_AddL);</span>
+<span class="udiff-line-added">+     assert(addl_node != NULL, &quot;stackallocation expects addl&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     Node* cmp_node = addl_node-&gt;unique_out();</span>
+<span class="udiff-line-added">+     assert(cmp_node != NULL &amp;&amp; cmp_node-&gt;is_Cmp(), &quot;expected unique cmp node&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     macro-&gt;replace_node(cmp_node, macro-&gt;makecon(TypeInt::CC_EQ));</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Stack allocation: remove this node from our cache so we don&#39;t process it later</span>
+<span class="udiff-line-added">+   state()-&gt;remove_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(node));</span>
+  }
+  
+  bool CardTableBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const {
+    bool is_oop = is_reference_type(type);
+    return is_oop &amp;&amp; (!tightly_coupled_alloc || !use_ReduceInitialCardMarks());
+  }
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool CardTableBarrierSetC2::expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const {</span>
+<span class="udiff-line-added">+   // We need to process write barriers for extra checks in case we have stack allocation on</span>
+<span class="udiff-line-added">+   if (C-&gt;do_stack_allocation()) {</span>
+<span class="udiff-line-added">+     BarrierSetC2State* set_state = state();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     for (int i = 0; i &lt; set_state-&gt;enqueue_barriers_count(); i++) {</span>
+<span class="udiff-line-added">+       Node* n = set_state-&gt;enqueue_barrier(i);</span>
+<span class="udiff-line-added">+       process_barrier_node(n, igvn);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     if (set_state-&gt;enqueue_barriers_count()) {</span>
+<span class="udiff-line-added">+       // this kicks in the dead code elimination we need to remove the redundant check</span>
+<span class="udiff-line-added">+       igvn.optimize();</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   return false;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ Node* CardTableBarrierSetC2::step_over_gc_barrier(Node* c) const {</span>
+<span class="udiff-line-added">+   if (Compile::current()-&gt;do_stack_allocation() &amp;&amp;</span>
+<span class="udiff-line-added">+       !use_ReduceInitialCardMarks() &amp;&amp;</span>
+<span class="udiff-line-added">+       c != NULL &amp;&amp; c-&gt;is_Region() &amp;&amp; c-&gt;req() == 3) {</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     //                  [Proj] &lt;----------- step over to here and return</span>
+<span class="udiff-line-added">+     //                    |</span>
+<span class="udiff-line-added">+     //               -----------</span>
+<span class="udiff-line-added">+     //              /           \</span>
+<span class="udiff-line-added">+     //             /             \</span>
+<span class="udiff-line-added">+     //            /             [CastP2X]</span>
+<span class="udiff-line-added">+     //            |            /</span>
+<span class="udiff-line-added">+     //            |           [AddL]</span>
+<span class="udiff-line-added">+     //            |          /</span>
+<span class="udiff-line-added">+     //            |         [CmpUL]</span>
+<span class="udiff-line-added">+     //            |        /</span>
+<span class="udiff-line-added">+     //            \      [Bool]</span>
+<span class="udiff-line-added">+     //             \    /</span>
+<span class="udiff-line-added">+     //              [If]</span>
+<span class="udiff-line-added">+     //            /     \</span>
+<span class="udiff-line-added">+     //  [IfFalse]        [IfTrue]</span>
+<span class="udiff-line-added">+     //         \        /</span>
+<span class="udiff-line-added">+     //          [Region] &lt;---------------- c node</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     Node* if_bool = c-&gt;in(1);</span>
+<span class="udiff-line-added">+     assert(if_bool-&gt;is_IfTrue() || if_bool-&gt;is_IfFalse(), &quot;Invalid gc graph pattern&quot;);</span>
+<span class="udiff-line-added">+     Node* if_node = if_bool-&gt;in(0);</span>
+<span class="udiff-line-added">+     Node* proj_node = if_node-&gt;in(0);</span>
+<span class="udiff-line-added">+     assert(proj_node-&gt;is_Proj(), &quot;Invalid gc graph pattern&quot;);</span>
+<span class="udiff-line-added">+     return proj_node;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   return c;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void CardTableBarrierSetC2::register_potential_barrier_node(Node* node) const {</span>
+<span class="udiff-line-added">+   if (node-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="udiff-line-added">+     state()-&gt;add_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(node));</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void CardTableBarrierSetC2::unregister_potential_barrier_node(Node* node) const {</span>
+<span class="udiff-line-added">+   if (node-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="udiff-line-added">+     state()-&gt;remove_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(node));</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ BarrierSetC2State* CardTableBarrierSetC2::state() const {</span>
+<span class="udiff-line-added">+   BarrierSetC2State* ret = reinterpret_cast&lt;BarrierSetC2State*&gt;(Compile::current()-&gt;barrier_set_state());</span>
+<span class="udiff-line-added">+   assert(ret != NULL, &quot;Sanity&quot;);</span>
+<span class="udiff-line-added">+   return ret;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void* CardTableBarrierSetC2::create_barrier_state(Arena* comp_arena) const {</span>
+<span class="udiff-line-added">+   return new(comp_arena) BarrierSetC2State(comp_arena);</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ BarrierSetC2State::BarrierSetC2State(Arena* comp_arena)</span>
+<span class="udiff-line-added">+   : _enqueue_barriers(new (comp_arena) GrowableArray&lt;CastP2XNode*&gt;(comp_arena, 8,  0, NULL)) {</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ int BarrierSetC2State::enqueue_barriers_count() const {</span>
+<span class="udiff-line-added">+   return _enqueue_barriers-&gt;length();</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ CastP2XNode* BarrierSetC2State::enqueue_barrier(int idx) const {</span>
+<span class="udiff-line-added">+   return _enqueue_barriers-&gt;at(idx);</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void BarrierSetC2State::add_enqueue_barrier(CastP2XNode* n) {</span>
+<span class="udiff-line-added">+   assert(!_enqueue_barriers-&gt;contains(n), &quot;duplicate entry in barrier list&quot;);</span>
+<span class="udiff-line-added">+   _enqueue_barriers-&gt;append(n);</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void BarrierSetC2State::remove_enqueue_barrier(CastP2XNode* n) {</span>
+<span class="udiff-line-added">+   if (_enqueue_barriers-&gt;contains(n)) {</span>
+<span class="udiff-line-added">+     _enqueue_barriers-&gt;remove(n);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool BarrierSetC2State::is_a_barrier(CastP2XNode* n) {</span>
+<span class="udiff-line-added">+   return _enqueue_barriers-&gt;contains(n);</span>
+<span class="udiff-line-added">+ }</span>
+</pre>
+<center><a href="barrierSetC2.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="cardTableBarrierSetC2.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

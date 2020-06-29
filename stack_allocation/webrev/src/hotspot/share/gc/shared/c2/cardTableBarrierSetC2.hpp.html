@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+ 1 /*
+ 2  * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ 3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ 4  *
+ 5  * This code is free software; you can redistribute it and/or modify it
+ 6  * under the terms of the GNU General Public License version 2 only, as
+ 7  * published by the Free Software Foundation.
+ 8  *
+ 9  * This code is distributed in the hope that it will be useful, but WITHOUT
+10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+12  * version 2 for more details (a copy is included in the LICENSE file that
+13  * accompanied this code).
+14  *
+15  * You should have received a copy of the GNU General Public License version
+16  * 2 along with this work; if not, write to the Free Software Foundation,
+17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+18  *
+19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+20  * or visit www.oracle.com if you need additional information or have any
+21  * questions.
+22  *
+23  */
+24 
+25 #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+26 #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+27 
+28 #include &quot;gc/shared/c2/modRefBarrierSetC2.hpp&quot;
+29 #include &quot;utilities/growableArray.hpp&quot;
+30 
+31 class CastP2XNode;
+32 
+33 class BarrierSetC2State : public ResourceObj {
+34 private:
+35   GrowableArray&lt;CastP2XNode*&gt;* _enqueue_barriers;
+36 
+37 public:
+38   BarrierSetC2State(Arena* comp_arena);
+39 
+40   int enqueue_barriers_count() const;
+41   CastP2XNode* enqueue_barrier(int idx) const;
+42   void add_enqueue_barrier(CastP2XNode* n);
+43   void remove_enqueue_barrier(CastP2XNode* n);
+44   bool is_a_barrier(CastP2XNode* n);
+45 };
+46 
+47 
+48 class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+49 protected:
+50   virtual void post_barrier(GraphKit* kit,
+51                             Node* ctl,
+52                             Node* store,
+53                             Node* obj,
+54                             Node* adr,
+55                             uint adr_idx,
+56                             Node* val,
+57                             BasicType bt,
+58                             bool use_precise) const;
+59 
+60   Node* byte_map_base_node(GraphKit* kit) const;
+61 
+62 public:
+63   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+64   virtual bool is_gc_barrier_node(Node* node) const;
+65   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+66   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
+67   virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN&amp; igvn) const;
+68   virtual Node* step_over_gc_barrier(Node* c) const;
+69 
+70   bool use_ReduceInitialCardMarks() const;
+71 
+72   BarrierSetC2State* state() const;
+73 
+74   virtual void register_potential_barrier_node(Node* node) const;
+75   virtual void unregister_potential_barrier_node(Node* node) const;
+76   virtual bool expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const;
+77   virtual void* create_barrier_state(Arena* comp_arena) const;
+78 };
+79 
+80 #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+    </pre>
+  </body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/macro.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="macro.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="memnode.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/macro.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 87   ProjNode *_ioproj_fallthrough;
+ 88   ProjNode *_ioproj_catchall;
+ 89   ProjNode *_catchallcatchproj;
+ 90   ProjNode *_memproj_fallthrough;
+ 91   ProjNode *_memproj_catchall;
+ 92   ProjNode *_resproj;
+ 93 
+ 94   // Additional data collected during macro expansion
+ 95   bool _has_locks;
+ 96 
+ 97   void expand_allocate(AllocateNode *alloc);
+ 98   void expand_allocate_array(AllocateArrayNode *alloc);
+ 99   void expand_allocate_common(AllocateNode* alloc,
+100                               Node* length,
+101                               const TypeFunc* slow_call_type,
+102                               address slow_call_address);
+103   void yank_initalize_node(InitializeNode* node);
+104   void yank_alloc_node(AllocateNode* alloc);
+105   Node *value_from_mem(Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
+106   Node *value_from_mem_phi(Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
+
+
+
+
+107 
+108   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
+109   bool eliminate_allocate_node(AllocateNode *alloc);
+110   bool can_eliminate_allocation(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints);
+111   bool scalar_replacement(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints_done);
+112   void process_users_of_allocation(CallNode *alloc);
+
+
+
+
+
+
+
+
+
+
+
+
+
+113 
+114   void eliminate_gc_barrier(Node *p2x);
+115   void mark_eliminated_box(Node* box, Node* obj);
+116   void mark_eliminated_locking_nodes(AbstractLockNode *alock);
+117   bool eliminate_locking_node(AbstractLockNode *alock);
+118   void expand_lock_node(LockNode *lock);
+119   void expand_unlock_node(UnlockNode *unlock);
+120 
+121   // More helper methods modeled after GraphKit for array copy
+122   void insert_mem_bar(Node** ctrl, Node** mem, int opcode, Node* precedent = NULL);
+123   Node* array_element_address(Node* ary, Node* idx, BasicType elembt);
+124   Node* ConvI2L(Node* offset);
+125 
+126   // helper methods modeled after LibraryCallKit for array copy
+127   Node* generate_guard(Node** ctrl, Node* test, RegionNode* region, float true_prob);
+128   Node* generate_slow_guard(Node** ctrl, Node* test, RegionNode* region);
+129   void generate_negative_guard(Node** ctrl, Node* index, RegionNode* region);
+130   void generate_limit_guard(Node** ctrl, Node* offset, Node* subseq_length, Node* array_length, RegionNode* region);
+131 
+132   // More helper methods for array copy
+</pre>
+<hr />
+<pre>
+186 
+187   void expand_subtypecheck_node(SubTypeCheckNode *check);
+188 
+189   int replace_input(Node *use, Node *oldref, Node *newref);
+190   void migrate_outs(Node *old, Node *target);
+191   void copy_call_debug_info(CallNode *oldcall, CallNode * newcall);
+192   Node* opt_bits_test(Node* ctrl, Node* region, int edge, Node* word, int mask, int bits, bool return_fast_path = false);
+193   void copy_predefined_input_for_runtime_call(Node * ctrl, CallNode* oldcall, CallNode* call);
+194   CallNode* make_slow_call(CallNode *oldcall, const TypeFunc* slow_call_type, address slow_call,
+195                            const char* leaf_name, Node* slow_path, Node* parm0, Node* parm1,
+196                            Node* parm2);
+197   void extract_call_projections(CallNode *call);
+198 
+199   Node* initialize_object(AllocateNode* alloc,
+200                           Node* control, Node* rawmem, Node* object,
+201                           Node* klass_node, Node* length,
+202                           Node* size_in_bytes);
+203 
+204   Node* make_arraycopy_load(ArrayCopyNode* ac, intptr_t offset, Node* ctl, Node* mem, BasicType ft, const Type *ftype, AllocateNode *alloc);
+205 
+
+
+
+
+
+
+
+
+
+
+
+
+
+206 public:
+207   PhaseMacroExpand(PhaseIterGVN &amp;igvn) : Phase(Macro_Expand), _igvn(igvn), _has_locks(false) {
+208     _igvn.set_delay_transform(true);
+209   }
+210   void eliminate_macro_nodes();
+211   bool expand_macro_nodes();
+212 
+213   PhaseIterGVN &amp;igvn() const { return _igvn; }
+214 
+215   // Members accessed from BarrierSetC2
+216   void replace_node(Node* source, Node* target) { _igvn.replace_node(source, target); }
+217   Node* intcon(jint con)        const { return _igvn.intcon(con); }
+218   Node* longcon(jlong con)      const { return _igvn.longcon(con); }
+219   Node* makecon(const Type *t)  const { return _igvn.makecon(t); }
+220   Node* top()                   const { return C-&gt;top(); }
+221 
+222   Node* prefetch_allocation(Node* i_o,
+223                             Node*&amp; needgc_false, Node*&amp; contended_phi_rawmem,
+224                             Node* old_eden_top, Node* new_eden_top,
+225                             intx lines);
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 87   ProjNode *_ioproj_fallthrough;
+ 88   ProjNode *_ioproj_catchall;
+ 89   ProjNode *_catchallcatchproj;
+ 90   ProjNode *_memproj_fallthrough;
+ 91   ProjNode *_memproj_catchall;
+ 92   ProjNode *_resproj;
+ 93 
+ 94   // Additional data collected during macro expansion
+ 95   bool _has_locks;
+ 96 
+ 97   void expand_allocate(AllocateNode *alloc);
+ 98   void expand_allocate_array(AllocateArrayNode *alloc);
+ 99   void expand_allocate_common(AllocateNode* alloc,
+100                               Node* length,
+101                               const TypeFunc* slow_call_type,
+102                               address slow_call_address);
+103   void yank_initalize_node(InitializeNode* node);
+104   void yank_alloc_node(AllocateNode* alloc);
+105   Node *value_from_mem(Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
+106   Node *value_from_mem_phi(Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
+<span class="line-added">107   const Type* field_type_from_element(ciField* field, ciType* elem_type, BasicType&amp; basic_elem_type);</span>
+<span class="line-added">108   void adjust_safepoint_jvms(SafePointNode* sfpt, Node* res, SafePointScalarObjectNode* sobj);</span>
+<span class="line-added">109   void retrieve_type_and_size_info(AllocateNode *alloc, Node *res, const TypeOopPtr** res_type, ciKlass** klass, ciInstanceKlass** iklass, int* nfields);</span>
+<span class="line-added">110   void retrieve_array_type_and_size_info(ciKlass* klass, ciType** elem_type, BasicType* basic_elem_type, int* element_size, int* array_base);</span>
+111 
+112   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
+113   bool eliminate_allocate_node(AllocateNode *alloc);
+114   bool can_eliminate_allocation(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints);
+115   bool scalar_replacement(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints_done);
+116   void process_users_of_allocation(CallNode *alloc);
+<span class="line-added">117   bool stack_allocation(AllocateNode *alloc);</span>
+<span class="line-added">118   void eliminate_unused_allocation_edges(CallNode* alloc);</span>
+<span class="line-added">119   void handle_safepoint_for_stack_allocation(Dict* safepoint_map, AllocateNode* alloc, Node* oop_node, Node* parent, SafePointNode* sfpt);</span>
+<span class="line-added">120   bool process_write_barriers_on_stack_allocated_objects(AllocateNode* alloc);</span>
+<span class="line-added">121   bool register_stack_allocated_object_with_safepoints(AllocateNode* alloc, Node* stack_oop);</span>
+<span class="line-added">122   void stack_allocation_init_array_length_on_entry(AllocateNode *alloc, Node *length, Node *stack_oop);</span>
+<span class="line-added">123 #ifndef PRODUCT</span>
+<span class="line-added">124   void stack_allocation_clear_object_data(AllocateNode *alloc, Node *stack_oop);</span>
+<span class="line-added">125 #endif</span>
+<span class="line-added">126   void estimate_stack_allocation_size(AllocateNode* alloc);</span>
+<span class="line-added">127   bool can_stack_allocate(AllocateNode* alloc, Node *res, intptr_t size_of_object);</span>
+<span class="line-added">128   bool stack_allocation_location_representable(int n);</span>
+<span class="line-added">129   int next_stack_allocated_object(int num_slots);</span>
+130 
+131   void eliminate_gc_barrier(Node *p2x);
+132   void mark_eliminated_box(Node* box, Node* obj);
+133   void mark_eliminated_locking_nodes(AbstractLockNode *alock);
+134   bool eliminate_locking_node(AbstractLockNode *alock);
+135   void expand_lock_node(LockNode *lock);
+136   void expand_unlock_node(UnlockNode *unlock);
+137 
+138   // More helper methods modeled after GraphKit for array copy
+139   void insert_mem_bar(Node** ctrl, Node** mem, int opcode, Node* precedent = NULL);
+140   Node* array_element_address(Node* ary, Node* idx, BasicType elembt);
+141   Node* ConvI2L(Node* offset);
+142 
+143   // helper methods modeled after LibraryCallKit for array copy
+144   Node* generate_guard(Node** ctrl, Node* test, RegionNode* region, float true_prob);
+145   Node* generate_slow_guard(Node** ctrl, Node* test, RegionNode* region);
+146   void generate_negative_guard(Node** ctrl, Node* index, RegionNode* region);
+147   void generate_limit_guard(Node** ctrl, Node* offset, Node* subseq_length, Node* array_length, RegionNode* region);
+148 
+149   // More helper methods for array copy
+</pre>
+<hr />
+<pre>
+203 
+204   void expand_subtypecheck_node(SubTypeCheckNode *check);
+205 
+206   int replace_input(Node *use, Node *oldref, Node *newref);
+207   void migrate_outs(Node *old, Node *target);
+208   void copy_call_debug_info(CallNode *oldcall, CallNode * newcall);
+209   Node* opt_bits_test(Node* ctrl, Node* region, int edge, Node* word, int mask, int bits, bool return_fast_path = false);
+210   void copy_predefined_input_for_runtime_call(Node * ctrl, CallNode* oldcall, CallNode* call);
+211   CallNode* make_slow_call(CallNode *oldcall, const TypeFunc* slow_call_type, address slow_call,
+212                            const char* leaf_name, Node* slow_path, Node* parm0, Node* parm1,
+213                            Node* parm2);
+214   void extract_call_projections(CallNode *call);
+215 
+216   Node* initialize_object(AllocateNode* alloc,
+217                           Node* control, Node* rawmem, Node* object,
+218                           Node* klass_node, Node* length,
+219                           Node* size_in_bytes);
+220 
+221   Node* make_arraycopy_load(ArrayCopyNode* ac, intptr_t offset, Node* ctl, Node* mem, BasicType ft, const Type *ftype, AllocateNode *alloc);
+222 
+<span class="line-added">223   bool should_stack_allocate() {</span>
+<span class="line-added">224     return C-&gt;do_stack_allocation();</span>
+<span class="line-added">225   }</span>
+<span class="line-added">226 </span>
+<span class="line-added">227 #ifndef PRODUCT</span>
+<span class="line-added">228   bool print_eliminate_allocations() {</span>
+<span class="line-added">229     return PrintEliminateAllocations || C-&gt;directive()-&gt;PrintEliminateAllocationsOption;</span>
+<span class="line-added">230   }</span>
+<span class="line-added">231   bool print_stack_allocation() {</span>
+<span class="line-added">232     return PrintStackAllocation || C-&gt;directive()-&gt;PrintStackAllocationOption;</span>
+<span class="line-added">233   }</span>
+<span class="line-added">234 #endif</span>
+<span class="line-added">235 </span>
+236 public:
+237   PhaseMacroExpand(PhaseIterGVN &amp;igvn) : Phase(Macro_Expand), _igvn(igvn), _has_locks(false) {
+238     _igvn.set_delay_transform(true);
+239   }
+240   void eliminate_macro_nodes();
+241   bool expand_macro_nodes();
+242 
+243   PhaseIterGVN &amp;igvn() const { return _igvn; }
+244 
+245   // Members accessed from BarrierSetC2
+246   void replace_node(Node* source, Node* target) { _igvn.replace_node(source, target); }
+247   Node* intcon(jint con)        const { return _igvn.intcon(con); }
+248   Node* longcon(jlong con)      const { return _igvn.longcon(con); }
+249   Node* makecon(const Type *t)  const { return _igvn.makecon(t); }
+250   Node* top()                   const { return C-&gt;top(); }
+251 
+252   Node* prefetch_allocation(Node* i_o,
+253                             Node*&amp; needgc_false, Node*&amp; contended_phi_rawmem,
+254                             Node* old_eden_top, Node* new_eden_top,
+255                             intx lines);
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="macro.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="memnode.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

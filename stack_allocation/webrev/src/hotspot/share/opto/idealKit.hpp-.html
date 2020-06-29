@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/opto/idealKit.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_OPTO_IDEALKIT_HPP
+ 26 #define SHARE_OPTO_IDEALKIT_HPP
+ 27 
+ 28 #include &quot;opto/addnode.hpp&quot;
+ 29 #include &quot;opto/cfgnode.hpp&quot;
+ 30 #include &quot;opto/castnode.hpp&quot;
+ 31 #include &quot;opto/connode.hpp&quot;
+ 32 #include &quot;opto/divnode.hpp&quot;
+ 33 #include &quot;opto/graphKit.hpp&quot;
+ 34 #include &quot;opto/mulnode.hpp&quot;
+ 35 #include &quot;opto/phaseX.hpp&quot;
+ 36 #include &quot;opto/subnode.hpp&quot;
+ 37 #include &quot;opto/type.hpp&quot;
+ 38 
+ 39 //-----------------------------------------------------------------------------
+ 40 //----------------------------IdealKit-----------------------------------------
+ 41 // Set of utilities for creating control flow and scalar SSA data flow.
+ 42 // Control:
+ 43 //    if_then(left, relop, right)
+ 44 //    else_ (optional)
+ 45 //    end_if
+ 46 //    loop(iv variable, initial, relop, limit)
+ 47 //       - sets iv to initial for first trip
+ 48 //       - exits when relation on limit is true
+ 49 //       - the values of initial and limit should be loop invariant
+ 50 //       - no increment, must be explicitly coded
+ 51 //       - final value of iv is available after end_loop (until dead())
+ 52 //    end_loop
+ 53 //    make_label(number of gotos)
+ 54 //    goto_(label)
+ 55 //    bind(label)
+ 56 // Data:
+ 57 //    ConI(integer constant)     - create an integer constant
+ 58 //    set(variable, value)       - assignment
+ 59 //    value(variable)            - reference value
+ 60 //    dead(variable)             - variable&#39;s value is no longer live
+ 61 //    increment(variable, value) - increment variable by value
+ 62 //    simple operations: AddI, SubI, AndI, LShiftI, etc.
+ 63 // Example:
+ 64 //    Node* limit = ??
+ 65 //    IdealVariable i(kit), j(kit);
+ 66 //    declarations_done();
+ 67 //    Node* exit = make_label(1); // 1 goto
+ 68 //    set(j, ConI(0));
+ 69 //    loop(i, ConI(0), BoolTest::lt, limit); {
+ 70 //       if_then(value(i), BoolTest::gt, ConI(5)) {
+ 71 //         set(j, ConI(1));
+ 72 //         goto_(exit); dead(i);
+ 73 //       } end_if();
+ 74 //       increment(i, ConI(1));
+ 75 //    } end_loop(); dead(i);
+ 76 //    bind(exit);
+ 77 //
+ 78 // See string_indexOf for a more complete example.
+ 79 
+ 80 class IdealKit;
+ 81 
+ 82 // Variable definition for IdealKit
+ 83 class IdealVariable: public StackObj {
+ 84  friend class IdealKit;
+ 85  private:
+ 86   int _id;
+ 87   void set_id(int id) { _id = id; }
+ 88  public:
+ 89   IdealVariable(IdealKit &amp;k);
+ 90   int id() { assert(has_id(),&quot;uninitialized id&quot;); return _id; }
+ 91   bool has_id() { return _id &gt;= 0; }
+ 92 };
+ 93 
+ 94 class IdealKit: public StackObj {
+ 95  friend class IdealVariable;
+ 96   // The main state (called a cvstate for Control and Variables)
+ 97   // contains both the current values of the variables and the
+ 98   // current set of predecessor control edges.  The variable values
+ 99   // are managed via a Node [in(1)..in(_var_ct)], and the predecessor
+100   // control edges managed via a RegionNode. The in(0) of the Node
+101   // for variables points to the RegionNode for the control edges.
+102  protected:
+103   Compile * const C;
+104   PhaseGVN &amp;_gvn;
+105   GrowableArray&lt;Node*&gt;* _pending_cvstates; // stack of cvstates
+106   Node* _cvstate;                          // current cvstate (control, memory and variables)
+107   uint _var_ct;                            // number of variables
+108   bool _delay_all_transforms;              // flag forcing all transforms to be delayed
+109   Node* _initial_ctrl;                     // saves initial control until variables declared
+110   Node* _initial_memory;                   // saves initial memory  until variables declared
+111   Node* _initial_i_o;                      // saves initial i_o  until variables declared
+112 
+113   PhaseGVN&amp; gvn() const { return _gvn; }
+114   // Create a new cvstate filled with nulls
+115   Node* new_cvstate();                     // Create a new cvstate
+116   Node* cvstate() { return _cvstate; }     // current cvstate
+117   Node* copy_cvstate();                    // copy current cvstate
+118 
+119   void set_memory(Node* mem, uint alias_idx );
+120   void do_memory_merge(Node* merging, Node* join);
+121   void clear(Node* m);                     // clear a cvstate
+122   void stop() { clear(_cvstate); }         // clear current cvstate
+123   Node* delay_transform(Node* n);
+124   Node* transform(Node* n);                // gvn.transform or skip it
+125   Node* promote_to_phi(Node* n, Node* reg);// Promote &quot;n&quot; to a phi on region &quot;reg&quot;
+126   bool was_promoted_to_phi(Node* n, Node* reg) {
+127     return (n-&gt;is_Phi() &amp;&amp; n-&gt;in(0) == reg);
+128   }
+129   void declare(IdealVariable* v) { v-&gt;set_id(_var_ct++); }
+130   // This declares the position where vars are kept in the cvstate
+131   // For some degree of consistency we use the TypeFunc enum to
+132   // soak up spots in the inputs even though we only use early Control
+133   // and Memory slots. (So far.)
+134   static const uint first_var; // = TypeFunc::Parms + 1;
+135 
+136 #ifdef ASSERT
+137   enum State { NullS=0, BlockS=1, LoopS=2, IfThenS=4, ElseS=8, EndifS= 16 };
+138   GrowableArray&lt;int&gt;* _state;
+139   State state() { return (State)(_state-&gt;top()); }
+140 #endif
+141 
+142   // Users should not care about slices only MergedMem so no access for them.
+143   Node* memory(uint alias_idx);
+144 
+145  public:
+146   IdealKit(GraphKit* gkit, bool delay_all_transforms = false, bool has_declarations = false);
+147   ~IdealKit() {
+148     stop();
+149   }
+150   void sync_kit(GraphKit* gkit);
+151 
+152   // Control
+153   Node* ctrl()                          { return _cvstate-&gt;in(TypeFunc::Control); }
+154   void set_ctrl(Node* ctrl)             { _cvstate-&gt;set_req(TypeFunc::Control, ctrl); }
+155   Node* top()                           { return C-&gt;top(); }
+156   MergeMemNode* merged_memory()         { return _cvstate-&gt;in(TypeFunc::Memory)-&gt;as_MergeMem(); }
+157   void set_all_memory(Node* mem)        { _cvstate-&gt;set_req(TypeFunc::Memory, mem); }
+158   Node* i_o()                           { return _cvstate-&gt;in(TypeFunc::I_O); }
+159   void set_i_o(Node* c)                 { _cvstate-&gt;set_req(TypeFunc::I_O, c); }
+160   void set(IdealVariable&amp; v, Node* rhs) { _cvstate-&gt;set_req(first_var + v.id(), rhs); }
+161   Node* value(IdealVariable&amp; v)         { return _cvstate-&gt;in(first_var + v.id()); }
+162   void dead(IdealVariable&amp; v)           { set(v, (Node*)NULL); }
+163   void if_then(Node* left, BoolTest::mask relop, Node* right,
+164                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+165                bool push_new_state = true);
+166   void else_();
+167   void end_if();
+168   void loop(GraphKit* gkit, int nargs, IdealVariable&amp; iv, Node* init, BoolTest::mask cmp, Node* limit,
+169             float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+170   void end_loop();
+171   Node* make_label(int goto_ct);
+172   void bind(Node* lab);
+173   void goto_(Node* lab, bool bind = false);
+174   void declarations_done();
+175 
+176   Node* IfTrue(IfNode* iff)  { return transform(new IfTrueNode(iff)); }
+177   Node* IfFalse(IfNode* iff) { return transform(new IfFalseNode(iff)); }
+178 
+179   // Data
+180   Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+181   Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+182 
+183   Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+184   Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
+185   Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+186   Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+187   Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+188   Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+189   Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
+190   Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+191   void  increment(IdealVariable&amp; v, Node* j)  { set(v, AddI(value(v), j)); }
+192   void  decrement(IdealVariable&amp; v, Node* j)  { set(v, SubI(value(v), j)); }
+193 
+194   Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
+195 
+196   // TLS
+197   Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+198 
+199   // Pointers
+200 
+201   // Raw address should be transformed regardless &#39;delay_transform&#39; flag
+202   // to produce canonical form CastX2P(offset).
+203   Node* AddP(Node *base, Node *ptr, Node *off) { return _gvn.transform(new AddPNode(base, ptr, off)); }
+204 
+205   Node* CmpP(Node* l, Node* r) { return transform(new CmpPNode(l, r)); }
+206 #ifdef _LP64
+207   Node* XorX(Node* l, Node* r) { return transform(new XorLNode(l, r)); }
+208 #else // _LP64
+209   Node* XorX(Node* l, Node* r) { return transform(new XorINode(l, r)); }
+210 #endif // _LP64
+211   Node* URShiftX(Node* l, Node* r) { return transform(new URShiftXNode(l, r)); }
+212   Node* ConX(jint k) { return (Node*)gvn().MakeConX(k); }
+213   Node* CastPX(Node* ctl, Node* p) { return transform(new CastP2XNode(ctl, p)); }
+214 
+215   // Memory operations
+216 
+217   // This is the base version which is given an alias index.
+218   Node* load(Node* ctl,
+219              Node* adr,
+220              const Type* t,
+221              BasicType bt,
+222              int adr_idx,
+223              bool require_atomic_access = false);
+224 
+225   // Return the new StoreXNode
+226   Node* store(Node* ctl,
+227               Node* adr,
+228               Node* val,
+229               BasicType bt,
+230               int adr_idx,
+231               MemNode::MemOrd mo,
+232               bool require_atomic_access = false,
+233               bool mismatched = false);
+234 
+235   // Store a card mark ordered after store_oop
+236   Node* storeCM(Node* ctl,
+237                 Node* adr,
+238                 Node* val,
+239                 Node* oop_store,
+240                 int oop_adr_idx,
+241                 BasicType bt,
+242                 int adr_idx);
+243 
+244   // Trivial call
+245   Node* make_leaf_call(const TypeFunc *slow_call_type,
+246                        address slow_call,
+247                        const char *leaf_name,
+248                        Node* parm0,
+249                        Node* parm1 = NULL,
+250                        Node* parm2 = NULL,
+251                        Node* parm3 = NULL);
+252 
+253   void make_leaf_call_no_fp(const TypeFunc *slow_call_type,
+254                             address slow_call,
+255                             const char *leaf_name,
+256                             const TypePtr* adr_type,
+257                             Node* parm0,
+258                             Node* parm1,
+259                             Node* parm2,
+260                             Node* parm3);
+261 };
+262 
+263 #endif // SHARE_OPTO_IDEALKIT_HPP
+    </pre>
+  </body>
+</html>

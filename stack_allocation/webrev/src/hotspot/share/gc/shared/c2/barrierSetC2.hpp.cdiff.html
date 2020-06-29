@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/gc/shared/c2/barrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../../parallel/psParallelCompact.inline.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="cardTableBarrierSetC2.cpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/shared/c2/barrierSetC2.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 271,10 ***</span>
+<span class="line-new-header">--- 271,11 ---</span>
+    // This could for example comprise macro nodes to be expanded during macro expansion.
+    virtual void* create_barrier_state(Arena* comp_arena) const { return NULL; }
+    // If the BarrierSetC2 state has barrier nodes in its compilation
+    // unit state to be expanded later, then now is the time to do so.
+    virtual bool expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const { return false; }
+<span class="line-added">+   virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN&amp; igvn) const { return false; }</span>
+    virtual bool optimize_loops(PhaseIdealLoop* phase, LoopOptsMode mode, VectorSet&amp; visited, Node_Stack&amp; nstack, Node_List&amp; worklist) const { return false; }
+    virtual bool strip_mined_loops_expanded(LoopOptsMode mode) const { return false; }
+    virtual bool is_gc_specific_loop_opts_pass(LoopOptsMode mode) const { return false; }
+  
+    enum CompilePhase {
+</pre>
+<center><a href="../../parallel/psParallelCompact.inline.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="cardTableBarrierSetC2.cpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

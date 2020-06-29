@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/runtime/vframe_hp.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+    <script type="text/javascript" src="../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_RUNTIME_VFRAME_HP_HPP
+ 26 #define SHARE_RUNTIME_VFRAME_HP_HPP
+ 27 
+ 28 #include &quot;runtime/vframe.hpp&quot;
+ 29 
+ 30 class compiledVFrame: public javaVFrame {
+ 31  public:
+ 32   // JVM state
+ 33   Method*                      method()             const;
+ 34   int                          bci()                const;
+ 35   bool                         should_reexecute()   const;
+ 36   StackValueCollection*        locals()             const;
+ 37   StackValueCollection*        expressions()        const;
+ 38   GrowableArray&lt;MonitorInfo*&gt;* monitors()           const;
+ 39   int                          vframe_id()          const { return _vframe_id; }
+ 40 
+ 41   void set_locals(StackValueCollection* values) const;
+ 42 
+ 43   // Virtuals defined in vframe
+ 44   bool is_compiled_frame() const { return true; }
+ 45   vframe* sender() const;
+ 46   bool is_top() const;
+ 47 
+ 48   // Casting
+ 49   static compiledVFrame* cast(vframe* vf) {
+ 50     assert(vf == NULL || vf-&gt;is_compiled_frame(), &quot;must be compiled frame&quot;);
+ 51     return (compiledVFrame*) vf;
+ 52   }
+ 53 
+ 54   void update_deferred_value(BasicType type, int index, jvalue value);
+ 55 
+ 56  public:
+ 57   // Constructors
+ 58   compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, CompiledMethod* nm);
+ 59 
+ 60   // Update a local in a compiled frame. Update happens when deopt occurs
+ 61   void update_local(BasicType type, int index, jvalue value);
+ 62 
+ 63   // Update an expression stack value in a compiled frame. Update happens when deopt occurs
+ 64   void update_stack(BasicType type, int index, jvalue value);
+ 65 
+ 66   // Update a lock value in a compiled frame. Update happens when deopt occurs
+ 67   void update_monitor(int index, MonitorInfo* value);
+ 68 
+ 69   // Returns the active nmethod
+ 70   CompiledMethod*  code() const;
+ 71 
+ 72   // Returns the scopeDesc
+ 73   ScopeDesc* scope() const { return _scope; }
+ 74 
+ 75   // Return the compiledVFrame for the desired scope
+ 76   compiledVFrame* at_scope(int decode_offset, int vframe_id);
+ 77 
+ 78   // Returns SynchronizationEntryBCI or bci() (used for synchronization)
+ 79   int raw_bci() const;
+ 80 
+<a name="1" id="anc1"></a><span class="line-added"> 81   // Used by stack allocation to match a stack oop to a described stack allocated object</span>
+<span class="line-added"> 82   ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects) const;</span>
+<span class="line-added"> 83 </span>
+ 84  protected:
+ 85   ScopeDesc* _scope;
+ 86   int _vframe_id;
+ 87 
+ 88   //StackValue resolve(ScopeValue* sv) const;
+ 89   BasicLock* resolve_monitor_lock(Location location) const;
+ 90   StackValue *create_stack_value(ScopeValue *sv) const;
+<a name="2" id="anc2"></a><span class="line-added"> 91   ScopeValue *get_scope_value(GrowableArray&lt;ScopeValue*&gt;*  scv_list, int index, GrowableArray&lt;ScopeValue*&gt;* objects) const;</span>
+ 92 
+ 93  private:
+ 94   compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, ScopeDesc* scope, int vframe_id);
+ 95 
+ 96 #ifndef PRODUCT
+ 97  public:
+ 98   void verify() const;
+ 99 #endif
+100 };
+101 
+102 // In order to implement set_locals for compiled vframes we must
+103 // store updated locals in a data structure that contains enough
+104 // information to recognize equality with a vframe and to store
+105 // any updated locals.
+106 
+107 class jvmtiDeferredLocalVariable;
+108 class jvmtiDeferredLocalVariableSet : public CHeapObj&lt;mtCompiler&gt; {
+109   friend class compiledVFrame;
+110 
+111 private:
+112 
+113   Method* _method;
+114   int       _bci;
+115   intptr_t* _id;
+116   int _vframe_id;
+117   GrowableArray&lt;jvmtiDeferredLocalVariable*&gt;* _locals;
+118 
+119   void                              update_value(StackValueCollection* locals, BasicType type, int index, jvalue value);
+120 
+121   void                              set_value_at(int idx, BasicType typ, jvalue val);
+122 
+123  public:
+124   // JVM state
+125   Method*                           method()         const  { return _method; }
+126   int                               bci()            const  { return _bci; }
+127   intptr_t*                         id()             const  { return _id; }
+128   int                               vframe_id()      const  { return _vframe_id; }
+129 
+130   void                              update_locals(StackValueCollection* locals);
+131   void                              update_stack(StackValueCollection* locals);
+132   void                              update_monitors(GrowableArray&lt;MonitorInfo*&gt;* monitors);
+133 
+134   // Does the vframe match this jvmtiDeferredLocalVariableSet
+135   bool                              matches(const vframe* vf);
+136   // GC
+137   void                              oops_do(OopClosure* f);
+138 
+139   // constructor
+140   jvmtiDeferredLocalVariableSet(Method* method, int bci, intptr_t* id, int vframe_id);
+141 
+142   // destructor
+143   ~jvmtiDeferredLocalVariableSet();
+144 
+145 
+146 };
+147 
+148 class jvmtiDeferredLocalVariable : public CHeapObj&lt;mtCompiler&gt; {
+149   public:
+150 
+151     jvmtiDeferredLocalVariable(int index, BasicType type, jvalue value);
+152 
+153     BasicType type(void)                   { return _type; }
+154     int index(void)                        { return _index; }
+155     jvalue value(void)                     { return _value; }
+156     // Only mutator is for value as only it can change
+157     void set_value(jvalue value)           { _value = value; }
+158     // For gc
+159     oop* oop_addr(void)                    { return (oop*) &amp;_value.l; }
+160 
+161   private:
+162 
+163     BasicType         _type;
+164     jvalue            _value;
+165     int               _index;
+166 
+167 };
+168 
+169 #endif // SHARE_RUNTIME_VFRAME_HP_HPP
+<a name="3" id="anc3"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="3" type="hidden" />
+</body>
+</html>

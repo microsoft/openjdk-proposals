@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/buildOopMap.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="block.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="c2_globals.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/buildOopMap.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+224 
+225     // %%% C2 can use 2 OptoRegs when the physical register is only one 64bit
+226     // register in that case we&#39;ll get an non-concrete register for the second
+227     // half. We only need to tell the map the register once!
+228     //
+229     // However for the moment we disable this change and leave things as they
+230     // were.
+231 
+232     VMReg r = OptoReg::as_VMReg(OptoReg::Name(reg), framesize, max_inarg_slot);
+233 
+234     if (false &amp;&amp; r-&gt;is_reg() &amp;&amp; !r-&gt;is_concrete()) {
+235       continue;
+236     }
+237 
+238     // See if dead (no reaching def).
+239     Node *def = _defs[reg];     // Get reaching def
+240     assert( def, &quot;since live better have reaching def&quot; );
+241 
+242     // Classify the reaching def as oop, derived, callee-save, dead, or other
+243     const Type *t = def-&gt;bottom_type();
+<span class="line-modified">244     if( t-&gt;isa_oop_ptr() ) {    // Oop or derived?</span>
+
+245       assert( !OptoReg::is_valid(_callees[reg]), &quot;oop can&#39;t be callee save&quot; );
+246 #ifdef _LP64
+247       // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+248       // Make sure both are record from the same reaching def, but do not
+249       // put both into the oopmap.
+250       if( (reg&amp;1) == 1 ) {      // High half of oop-pair?
+251         assert( _defs[reg-1] == _defs[reg], &quot;both halves from same reaching def&quot; );
+252         continue;               // Do not record high parts in oopmap
+253       }
+254 #endif
+255 
+256       // Check for a legal reg name in the oopMap and bailout if it is not.
+257       if (!omap-&gt;legal_vm_reg_name(r)) {
+258         regalloc-&gt;C-&gt;record_method_not_compilable(&quot;illegal oopMap register name&quot;);
+259         continue;
+260       }
+261       if( t-&gt;is_ptr()-&gt;_offset == 0 ) { // Not derived?
+262         if( mcall ) {
+263           // Outgoing argument GC mask responsibility belongs to the callee,
+264           // not the caller.  Inspect the inputs to the call, to see if
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+224 
+225     // %%% C2 can use 2 OptoRegs when the physical register is only one 64bit
+226     // register in that case we&#39;ll get an non-concrete register for the second
+227     // half. We only need to tell the map the register once!
+228     //
+229     // However for the moment we disable this change and leave things as they
+230     // were.
+231 
+232     VMReg r = OptoReg::as_VMReg(OptoReg::Name(reg), framesize, max_inarg_slot);
+233 
+234     if (false &amp;&amp; r-&gt;is_reg() &amp;&amp; !r-&gt;is_concrete()) {
+235       continue;
+236     }
+237 
+238     // See if dead (no reaching def).
+239     Node *def = _defs[reg];     // Get reaching def
+240     assert( def, &quot;since live better have reaching def&quot; );
+241 
+242     // Classify the reaching def as oop, derived, callee-save, dead, or other
+243     const Type *t = def-&gt;bottom_type();
+<span class="line-modified">244     if( t-&gt;isa_oop_ptr() || // Oop or derived?</span>
+<span class="line-added">245        (C-&gt;do_stack_allocation() &amp;&amp; t-&gt;isa_rawptr() &amp;&amp; def-&gt;is_BoxLock())) {  // consider stack oops too</span>
+246       assert( !OptoReg::is_valid(_callees[reg]), &quot;oop can&#39;t be callee save&quot; );
+247 #ifdef _LP64
+248       // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+249       // Make sure both are record from the same reaching def, but do not
+250       // put both into the oopmap.
+251       if( (reg&amp;1) == 1 ) {      // High half of oop-pair?
+252         assert( _defs[reg-1] == _defs[reg], &quot;both halves from same reaching def&quot; );
+253         continue;               // Do not record high parts in oopmap
+254       }
+255 #endif
+256 
+257       // Check for a legal reg name in the oopMap and bailout if it is not.
+258       if (!omap-&gt;legal_vm_reg_name(r)) {
+259         regalloc-&gt;C-&gt;record_method_not_compilable(&quot;illegal oopMap register name&quot;);
+260         continue;
+261       }
+262       if( t-&gt;is_ptr()-&gt;_offset == 0 ) { // Not derived?
+263         if( mcall ) {
+264           // Outgoing argument GC mask responsibility belongs to the callee,
+265           // not the caller.  Inspect the inputs to the call, to see if
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="block.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="c2_globals.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

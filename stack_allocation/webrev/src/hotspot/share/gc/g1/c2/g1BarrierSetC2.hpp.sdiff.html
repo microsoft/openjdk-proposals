@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="g1BarrierSetC2.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../../parallel/psParallelCompact.inline.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 71                     uint oop_alias_idx,
+ 72                     Node* index,
+ 73                     Node* index_adr,
+ 74                     Node* buffer,
+ 75                     const TypeFunc* tf) const;
+ 76 
+ 77   // Helper for unsafe accesses, that may or may not be on the referent field.
+ 78   // Generates the guards that check whether the result of
+ 79   // Unsafe.getReference should be recorded in an SATB log buffer.
+ 80   void insert_pre_barrier(GraphKit* kit, Node* base_oop, Node* offset, Node* pre_val, bool need_mem_bar) const;
+ 81 
+ 82   static const TypeFunc* write_ref_field_pre_entry_Type();
+ 83   static const TypeFunc* write_ref_field_post_entry_Type();
+ 84 
+ 85   virtual Node* load_at_resolved(C2Access&amp; access, const Type* val_type) const;
+ 86 
+ 87  public:
+ 88   virtual bool is_gc_barrier_node(Node* node) const;
+ 89   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+ 90   virtual Node* step_over_gc_barrier(Node* c) const;
+
+
+ 91 
+ 92 #ifdef ASSERT
+ 93   virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const;
+ 94 #endif
+ 95 
+ 96   virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const;
+ 97 };
+ 98 
+ 99 #endif // SHARE_GC_G1_C2_G1BARRIERSETC2_HPP
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 71                     uint oop_alias_idx,
+ 72                     Node* index,
+ 73                     Node* index_adr,
+ 74                     Node* buffer,
+ 75                     const TypeFunc* tf) const;
+ 76 
+ 77   // Helper for unsafe accesses, that may or may not be on the referent field.
+ 78   // Generates the guards that check whether the result of
+ 79   // Unsafe.getReference should be recorded in an SATB log buffer.
+ 80   void insert_pre_barrier(GraphKit* kit, Node* base_oop, Node* offset, Node* pre_val, bool need_mem_bar) const;
+ 81 
+ 82   static const TypeFunc* write_ref_field_pre_entry_Type();
+ 83   static const TypeFunc* write_ref_field_post_entry_Type();
+ 84 
+ 85   virtual Node* load_at_resolved(C2Access&amp; access, const Type* val_type) const;
+ 86 
+ 87  public:
+ 88   virtual bool is_gc_barrier_node(Node* node) const;
+ 89   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+ 90   virtual Node* step_over_gc_barrier(Node* c) const;
+<span class="line-added"> 91   virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN&amp; igvn) const;</span>
+<span class="line-added"> 92 </span>
+ 93 
+ 94 #ifdef ASSERT
+ 95   virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const;
+ 96 #endif
+ 97 
+ 98   virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const;
+ 99 };
+100 
+101 #endif // SHARE_GC_G1_C2_G1BARRIERSETC2_HPP
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="g1BarrierSetC2.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../../parallel/psParallelCompact.inline.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

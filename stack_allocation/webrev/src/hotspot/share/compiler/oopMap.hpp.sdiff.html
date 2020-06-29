@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/compiler/oopMap.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="oopMap.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../gc/g1/c2/g1BarrierSetC2.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/oopMap.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+182   void set_callee_saved( VMReg local, VMReg caller_machine_register );
+183   void set_derived_oop ( VMReg local, VMReg derived_from_local_register );
+184 
+185   int heap_size() const;
+186   void copy_data_to(address addr) const;
+187   OopMap* deep_copy();
+188 
+189   bool legal_vm_reg_name(VMReg local) {
+190      return OopMapValue::legal_vm_reg_name(local);
+191   }
+192 
+193   // Printing
+194   void print_on(outputStream* st) const;
+195   void print() const;
+196   bool equals(const OopMap* other) const;
+197 };
+198 
+199 
+200 class OopMapSet : public ResourceObj {
+201   friend class VMStructs;
+
+202  private:
+203   GrowableArray&lt;OopMap*&gt; _list;
+204 
+205   void add(OopMap* value) { _list.append(value); }
+206 
+
+
+
+
+207  public:
+208   OopMapSet();
+209 
+210   // returns the number of OopMaps in this OopMapSet
+211   int size() const            { return _list.length(); }
+212   // returns the OopMap at a given index
+213   OopMap* at(int index) const { return _list.at(index); }
+214 
+215   // Collect OopMaps.
+216   void add_gc_map(int pc, OopMap* map);
+217 
+218   // Methods oops_do() and all_do() filter out NULL oops and
+219   // oop == CompressedOops::base() before passing oops
+220   // to closures.
+221 
+222   // Iterates through frame for a compiled method
+223   static void oops_do            (const frame* fr,
+224                                   const RegisterMap* reg_map, OopClosure* f);
+225   static void update_register_map(const frame* fr, RegisterMap *reg_map);
+226 
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+182   void set_callee_saved( VMReg local, VMReg caller_machine_register );
+183   void set_derived_oop ( VMReg local, VMReg derived_from_local_register );
+184 
+185   int heap_size() const;
+186   void copy_data_to(address addr) const;
+187   OopMap* deep_copy();
+188 
+189   bool legal_vm_reg_name(VMReg local) {
+190      return OopMapValue::legal_vm_reg_name(local);
+191   }
+192 
+193   // Printing
+194   void print_on(outputStream* st) const;
+195   void print() const;
+196   bool equals(const OopMap* other) const;
+197 };
+198 
+199 
+200 class OopMapSet : public ResourceObj {
+201   friend class VMStructs;
+<span class="line-added">202   friend class OopClosureWalker;</span>
+203  private:
+204   GrowableArray&lt;OopMap*&gt; _list;
+205 
+206   void add(OopMap* value) { _list.append(value); }
+207 
+<span class="line-added">208   static void stack_oop_do(oop *p, OopClosure* oop_fn,</span>
+<span class="line-added">209                       GrowableArray&lt;oop&gt; *stack_oops,</span>
+<span class="line-added">210                       intptr_t *stack_base, intptr_t *stack_top);</span>
+<span class="line-added">211 </span>
+212  public:
+213   OopMapSet();
+214 
+215   // returns the number of OopMaps in this OopMapSet
+216   int size() const            { return _list.length(); }
+217   // returns the OopMap at a given index
+218   OopMap* at(int index) const { return _list.at(index); }
+219 
+220   // Collect OopMaps.
+221   void add_gc_map(int pc, OopMap* map);
+222 
+223   // Methods oops_do() and all_do() filter out NULL oops and
+224   // oop == CompressedOops::base() before passing oops
+225   // to closures.
+226 
+227   // Iterates through frame for a compiled method
+228   static void oops_do            (const frame* fr,
+229                                   const RegisterMap* reg_map, OopClosure* f);
+230   static void update_register_map(const frame* fr, RegisterMap *reg_map);
+231 
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="oopMap.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../gc/g1/c2/g1BarrierSetC2.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

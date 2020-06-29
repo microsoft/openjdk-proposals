@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/java.base/share/classes/java/util/regex/Matcher.java</title>
+    <link rel="stylesheet" href="../../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../ArrayList.java.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../../../index.html" target="_top">index</a> next &gt;</center>    <h2>src/java.base/share/classes/java/util/regex/Matcher.java</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -242,12 +242,15 @@</span>
+      Matcher(Pattern parent, CharSequence text) {
+          this.parentPattern = parent;
+          this.text = text;
+  
+          // Allocate state storage
+<span class="udiff-line-modified-removed">-         int parentGroupCount = Math.max(parent.capturingGroupCount, 10);</span>
+<span class="udiff-line-modified-removed">-         groups = new int[parentGroupCount * 2];</span>
+<span class="udiff-line-modified-added">+         if (parent.capturingGroupCount &gt; 10) {</span>
+<span class="udiff-line-modified-added">+             groups = new int[parent.capturingGroupCount * 2];</span>
+<span class="udiff-line-added">+         } else {</span>
+<span class="udiff-line-added">+             groups = new int[20];</span>
+<span class="udiff-line-added">+         }</span>
+          locals = new int[parent.localCount];
+          localsPos = new IntHashSet[parent.localTCNCount];
+  
+          // Put fields into initial states
+          reset();
+</pre>
+<center><a href="../ArrayList.java.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../../../index.html" target="_top">index</a> next &gt;</center>  </body>
+</html>

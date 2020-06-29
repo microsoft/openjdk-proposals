@@ -1,0 +1,160 @@
+diff a/src/hotspot/share/compiler/oopMap.cpp b/src/hotspot/share/compiler/oopMap.cpp
+--- a/src/hotspot/share/compiler/oopMap.cpp
++++ b/src/hotspot/share/compiler/oopMap.cpp
+@@ -28,17 +28,18 @@
+ #include "code/nmethod.hpp"
+ #include "code/scopeDesc.hpp"
+ #include "compiler/oopMap.hpp"
+ #include "gc/shared/collectedHeap.hpp"
+ #include "memory/allocation.inline.hpp"
+-#include "memory/iterator.hpp"
++#include "memory/iterator.inline.hpp"
+ #include "memory/resourceArea.hpp"
+ #include "memory/universe.hpp"
+ #include "oops/compressedOops.hpp"
+ #include "runtime/frame.inline.hpp"
+ #include "runtime/handles.inline.hpp"
+ #include "runtime/signature.hpp"
++#include "runtime/vframe_hp.hpp"
+ #include "utilities/align.hpp"
+ #include "utilities/lockFreeStack.hpp"
+ #ifdef COMPILER1
+ #include "c1/c1_Defs.hpp"
+ #endif
+@@ -269,16 +270,28 @@
+       // equal to CompressedOops::base() when a narrow oop
+       // implicit null check is used in compiled code.
+       // The narrow_oop_base could be NULL or be the address
+       // of the page below heap depending on compressed oops mode.
+       if (base_loc != NULL && *base_loc != NULL && !CompressedOops::is_base(*base_loc)) {
++
++        if (UseStackAllocationRuntime) {
++          intptr_t *stack_base = fr->unextended_sp();
++          intptr_t *stack_top = stack_base + cb->frame_size();
++          intptr_t *oop_ptr = cast_from_oop<intptr_t *>(*base_loc);
++          if ((stack_base <= oop_ptr) && (oop_ptr < stack_top)) {
++            // If the base is a stack oop just continue because stack oops will not move
++            continue;
++          }
++        }
++
+         derived_oop_fn(base_loc, derived_loc);
+       }
+     }
+   }
+ 
+   {
++    GrowableArray<oop> stack_oops;
+     // We want coop and oop oop_types
+     for (OopMapStream oms(map); !oms.is_done(); oms.next()) {
+       OopMapValue omv = oms.current();
+       oop* loc = fr->oopmapreg_to_location(omv.reg(),reg_map);
+       // It should be an error if no location can be found for a
+@@ -294,10 +307,47 @@
+           // implicit null check is used in compiled code.
+           // The narrow_oop_base could be NULL or be the address
+           // of the page below heap depending on compressed oops mode.
+           continue;
+         }
++
++        // TODO can we check if a CodeBlob includes stack allocated objects?
++        // If macro.cpp tags the compilation as including stack allocated objects
++        // then it should be possible to set something on codeblob.
++        if (UseStackAllocationRuntime) {
++          intptr_t *base = fr->unextended_sp();
++          intptr_t *top = base + cb->frame_size();
++          intptr_t *oop_ptr = cast_from_oop<intptr_t *>(val);
++          // If a stack slot points to a stack allocated object handle it
++          if ((base <= oop_ptr) && (oop_ptr < top)) {
++            // If we are verifying the stack, do extra checking that this
++            // stack location is indeed one of the stack allocated objects we
++            // have described in the oop maps.
++            if (VerifyStack) {
++              Thread* current_thread = Thread::current();
++              ResourceMark rm(current_thread);
++              HandleMark hm(current_thread);
++
++              vframe*  vf = vframe::new_vframe(fr, reg_map, reg_map->thread());
++              if (vf->is_compiled_frame()) {
++                compiledVFrame* cvf = compiledVFrame::cast(vf);
++                GrowableArray<ScopeValue*>* objects = cvf->scope()->objects();
++
++                // Match the stack location offset to any described
++                // stack allocated objects.
++                // In case we didn't find this location in our described objects
++                // we just continue, it's not really a stack oop.
++                if (cvf->match_object_to_stack_oop(oop_ptr, base, objects) == NULL) {
++                  continue;
++                }
++              }
++            }
++
++            OopMapSet::stack_oop_do(loc, oop_fn, &stack_oops, base, top);
++            continue;
++          }
++        }
+ #ifdef ASSERT
+         if ((((uintptr_t)loc & (sizeof(*loc)-1)) != 0) ||
+             !Universe::heap()->is_in_or_null(*loc)) {
+           tty->print_cr("# Found non oop pointer.  Dumping state at failure");
+           // try to dump out some helpful debugging information
+@@ -326,10 +376,59 @@
+       }
+     }
+   }
+ }
+ 
++class OopClosureWalker: public BasicOopIterateClosure {
++protected:
++  OopClosure *_closure;
++  GrowableArray<oop> *_stack_oops;
++  intptr_t *_base;
++  intptr_t *_top;
++
++public:
++  OopClosureWalker(OopClosure *closure, GrowableArray<oop> *stack_oops, intptr_t *base, intptr_t *top) :
++    BasicOopIterateClosure(NULL),
++    _closure(closure),
++    _stack_oops(stack_oops),
++    _base(base),
++    _top(top) {}
++
++  void do_oop(oop *o) {
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(*o);
++    if ((_base <= oop_ptr) && (oop_ptr < _top)) {
++      OopMapSet::stack_oop_do(o, _closure, _stack_oops, _base, _top);
++    } else {
++      _closure->do_oop(o);
++    }
++  }
++  void do_oop(narrowOop *o) {
++    oop obj = RawAccess<>::oop_load(o);
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(obj);
++    if ((_base <= oop_ptr) && (oop_ptr < _top)) {
++      // no references to stack allocated oops in UseCompressedOops
++      assert(false, "unreachable");
++    } else {
++      _closure->do_oop(o);
++    }
++  }
++
++  debug_only(virtual bool should_verify_oops() { return false; })
++};
++
++void OopMapSet::stack_oop_do(oop *p, OopClosure* oop_fn, GrowableArray<oop> *stack_oops, intptr_t *stack_base, intptr_t *stack_top) {
++  oop o = RawAccess<IS_NOT_NULL>::oop_load(p);
++  Klass *t = o->klass();
++  assert(t->is_klass(), "Has to be a class");
++  if (!t->is_typeArray_klass()) {
++    if (stack_oops->append_if_missing(o)) {
++      OopClosureWalker walk_elements(oop_fn, stack_oops, stack_base, stack_top);
++      o->oop_iterate(&walk_elements);
++    }
++  }
++}
++
+ 
+ // Update callee-saved register info for the following frame
+ void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
+   ResourceMark rm;
+   CodeBlob* cb = fr->cb();

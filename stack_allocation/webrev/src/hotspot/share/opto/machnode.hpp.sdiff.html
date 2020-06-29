@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/machnode.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="loopnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="macro.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/machnode.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 829 
+ 830   virtual JVMState* jvms() const { return _jvms; }
+ 831   void set_jvms(JVMState* s) {
+ 832     _jvms = s;
+ 833   }
+ 834   virtual const Type    *bottom_type() const;
+ 835 
+ 836   virtual const RegMask &amp;in_RegMask(uint) const;
+ 837 
+ 838   // Functionality from old debug nodes
+ 839   Node *returnadr() const { return in(TypeFunc::ReturnAdr); }
+ 840   Node *frameptr () const { return in(TypeFunc::FramePtr); }
+ 841 
+ 842   Node *local(const JVMState* jvms, uint idx) const {
+ 843     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 844     return in(_jvmadj + jvms-&gt;locoff() + idx);
+ 845   }
+ 846   Node *stack(const JVMState* jvms, uint idx) const {
+ 847     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 848     return in(_jvmadj + jvms-&gt;stkoff() + idx);
+<span class="line-modified"> 849  }</span>
+
+
+
+
+ 850   Node *monitor_obj(const JVMState* jvms, uint idx) const {
+ 851     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 852     return in(_jvmadj + jvms-&gt;monitor_obj_offset(idx));
+ 853   }
+ 854   Node *monitor_box(const JVMState* jvms, uint idx) const {
+ 855     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 856     return in(_jvmadj + jvms-&gt;monitor_box_offset(idx));
+ 857   }
+ 858   void  set_local(const JVMState* jvms, uint idx, Node *c) {
+ 859     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 860     set_req(_jvmadj + jvms-&gt;locoff() + idx, c);
+ 861   }
+ 862   void  set_stack(const JVMState* jvms, uint idx, Node *c) {
+ 863     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 864     set_req(_jvmadj + jvms-&gt;stkoff() + idx, c);
+ 865   }
+ 866   void  set_monitor(const JVMState* jvms, uint idx, Node *c) {
+ 867     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 868     set_req(_jvmadj + jvms-&gt;monoff() + idx, c);
+ 869   }
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 829 
+ 830   virtual JVMState* jvms() const { return _jvms; }
+ 831   void set_jvms(JVMState* s) {
+ 832     _jvms = s;
+ 833   }
+ 834   virtual const Type    *bottom_type() const;
+ 835 
+ 836   virtual const RegMask &amp;in_RegMask(uint) const;
+ 837 
+ 838   // Functionality from old debug nodes
+ 839   Node *returnadr() const { return in(TypeFunc::ReturnAdr); }
+ 840   Node *frameptr () const { return in(TypeFunc::FramePtr); }
+ 841 
+ 842   Node *local(const JVMState* jvms, uint idx) const {
+ 843     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 844     return in(_jvmadj + jvms-&gt;locoff() + idx);
+ 845   }
+ 846   Node *stack(const JVMState* jvms, uint idx) const {
+ 847     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 848     return in(_jvmadj + jvms-&gt;stkoff() + idx);
+<span class="line-modified"> 849   }</span>
+<span class="line-added"> 850   Node *scalar(const JVMState* jvms, uint idx) const {</span>
+<span class="line-added"> 851     assert(verify_jvms(jvms), &quot;jvms must match&quot;);</span>
+<span class="line-added"> 852     return in(_jvmadj + jvms-&gt;scloff() + idx);</span>
+<span class="line-added"> 853   }</span>
+ 854   Node *monitor_obj(const JVMState* jvms, uint idx) const {
+ 855     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 856     return in(_jvmadj + jvms-&gt;monitor_obj_offset(idx));
+ 857   }
+ 858   Node *monitor_box(const JVMState* jvms, uint idx) const {
+ 859     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 860     return in(_jvmadj + jvms-&gt;monitor_box_offset(idx));
+ 861   }
+ 862   void  set_local(const JVMState* jvms, uint idx, Node *c) {
+ 863     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 864     set_req(_jvmadj + jvms-&gt;locoff() + idx, c);
+ 865   }
+ 866   void  set_stack(const JVMState* jvms, uint idx, Node *c) {
+ 867     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 868     set_req(_jvmadj + jvms-&gt;stkoff() + idx, c);
+ 869   }
+ 870   void  set_monitor(const JVMState* jvms, uint idx, Node *c) {
+ 871     assert(verify_jvms(jvms), &quot;jvms must match&quot;);
+ 872     set_req(_jvmadj + jvms-&gt;monoff() + idx, c);
+ 873   }
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="loopnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="macro.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>
