@@ -1,0 +1,59 @@
+diff a/src/hotspot/share/opto/escape.hpp b/src/hotspot/share/opto/escape.hpp
+--- a/src/hotspot/share/opto/escape.hpp
++++ b/src/hotspot/share/opto/escape.hpp
+@@ -331,10 +331,12 @@
+                                // is still being collected. If false,
+                                // no new nodes will be processed.
+ 
+   bool               _verify;  // verify graph
+ 
++  bool             _has_locks; // Used by stack allocation
++
+   JavaObjectNode*    null_obj;
+   Node*             _pcmp_neq; // ConI(#CC_GT)
+   Node*              _pcmp_eq; // ConI(#CC_EQ)
+ 
+   Compile*           _compile; // Compile object for current compilation
+@@ -598,12 +600,42 @@
+   }
+ 
+   void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+   bool add_final_edges_unsafe_access(Node* n, uint opcode);
+ 
++  // Helpers for stack allocation
++
++  // If an allocation is dominated by a loop, check to see if the lifetime of two instances
++  // may overlap. If they do this allocate is not eligible for stack allocation
++  bool allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi);
++  // Stack allocation has limited support for compressed references at the moment.
++  // This helper checks if an oop may be compressed at some point in the graph.
++  bool oop_may_be_compressed(Node* alloc_result);
++  // Check if the alloc node is eligible for stack allocation
++  bool eligible_for_stack_allocation(PointsToNode* ptn);
++  // Check if the alloc has uses that make it ineligible for stack allocation
++  bool all_uses_eligible_for_stack_allocation(PointsToNode *ptn);
++  // Verify object chains for stack allocated objects. Heap objects cannot point to stack allocated objects.
++  bool verify_stack_allocated_object_chains(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length);
++#ifndef PRODUCT
++  void print_stack_allocated_candidates(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length);
++#endif
++
+ #ifndef PRODUCT
+   void dump(GrowableArray<PointsToNode*>& ptnodes_worklist);
++
++  bool print_escape_analysis() {
++    return PrintEscapeAnalysis || _compile->directive()->PrintEscapeAnalysisOption;
++  }
++
++  bool print_eliminate_allocations() {
++    return PrintEliminateAllocations || _compile->directive()->PrintEliminateAllocationsOption;
++  }
++
++  bool print_stack_allocation() {
++    return PrintStackAllocation || _compile->directive()->PrintStackAllocationOption;
++  }
+ #endif
+ };
+ 
+ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+   _edges(CG->_compile->comp_arena(), 2, 0, NULL),

@@ -1,0 +1,15 @@
+diff a/src/hotspot/share/memory/iterator.cpp b/src/hotspot/share/memory/iterator.cpp
+--- a/src/hotspot/share/memory/iterator.cpp
++++ b/src/hotspot/share/memory/iterator.cpp
+@@ -24,10 +24,11 @@
+ 
+ #include "precompiled.hpp"
+ #include "code/nmethod.hpp"
+ #include "memory/iterator.inline.hpp"
+ #include "oops/oop.inline.hpp"
++#include "runtime/fieldDescriptor.inline.hpp"
+ #include "utilities/debug.hpp"
+ #include "utilities/globalDefinitions.hpp"
+ 
+ DoNothingClosure do_nothing_cl;
+ 

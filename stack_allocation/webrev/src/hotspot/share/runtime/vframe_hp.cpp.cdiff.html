@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/runtime/vframe_hp.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="deoptimization.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/runtime/vframe_hp.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 56,12 ***</span>
+  
+    // scv_list is the list of ScopeValues describing the JVM stack state.
+    // There is one scv_list entry for every JVM stack state in use.
+    int length = scv_list-&gt;length();
+    StackValueCollection* result = new StackValueCollection(length);
+    for (int i = 0; i &lt; length; i++) {
+<span class="line-modified">!     result-&gt;add(create_stack_value(scv_list-&gt;at(i)));</span>
+    }
+  
+    // Replace the original values with any stores that have been
+    // performed through compiledVFrame::update_locals.
+    GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+<span class="line-new-header">--- 56,13 ---</span>
+  
+    // scv_list is the list of ScopeValues describing the JVM stack state.
+    // There is one scv_list entry for every JVM stack state in use.
+    int length = scv_list-&gt;length();
+    StackValueCollection* result = new StackValueCollection(length);
+<span class="line-added">+   GrowableArray&lt;ScopeValue*&gt;* objects = scope()-&gt;objects();</span>
+    for (int i = 0; i &lt; length; i++) {
+<span class="line-modified">!     result-&gt;add(create_stack_value(get_scope_value(scv_list, i, objects)));</span>
+    }
+  
+    // Replace the original values with any stores that have been
+    // performed through compiledVFrame::update_locals.
+    GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 136,12 ***</span>
+  
+    // scv_list is the list of ScopeValues describing the JVM stack state.
+    // There is one scv_list entry for every JVM stack state in use.
+    int length = scv_list-&gt;length();
+    StackValueCollection* result = new StackValueCollection(length);
+    for (int i = 0; i &lt; length; i++) {
+<span class="line-modified">!     result-&gt;add(create_stack_value(scv_list-&gt;at(i)));</span>
+    }
+  
+    // Replace the original values with any stores that have been
+    // performed through compiledVFrame::update_stack.
+    GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+<span class="line-new-header">--- 137,13 ---</span>
+  
+    // scv_list is the list of ScopeValues describing the JVM stack state.
+    // There is one scv_list entry for every JVM stack state in use.
+    int length = scv_list-&gt;length();
+    StackValueCollection* result = new StackValueCollection(length);
+<span class="line-added">+   GrowableArray&lt;ScopeValue*&gt;* objects = scope()-&gt;objects();</span>
+    for (int i = 0; i &lt; length; i++) {
+<span class="line-modified">!     result-&gt;add(create_stack_value(get_scope_value(scv_list, i, objects)));</span>
+    }
+  
+    // Replace the original values with any stores that have been
+    // performed through compiledVFrame::update_stack.
+    GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread()-&gt;deferred_locals();
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 169,10 ***</span>
+<span class="line-new-header">--- 171,83 ---</span>
+  
+  BasicLock* compiledVFrame::resolve_monitor_lock(Location location) const {
+    return StackValue::resolve_monitor_lock(&amp;_fr, location);
+  }
+  
+<span class="line-added">+ ScopeValue *compiledVFrame::match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects) const {</span>
+<span class="line-added">+   if (objects == NULL) {</span>
+<span class="line-added">+     return NULL;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+   for (int j = 0; j &lt; objects-&gt;length(); j++) {</span>
+<span class="line-added">+     ScopeValue* o_sv = objects-&gt;at(j);</span>
+<span class="line-added">+     if (o_sv-&gt;is_object()) {</span>
+<span class="line-added">+       if (o_sv-&gt;as_ObjectValue()-&gt;is_stack_object()) {</span>
+<span class="line-added">+         StackObjectValue *sov = (StackObjectValue *)o_sv;</span>
+<span class="line-added">+         Location o_loc = sov-&gt;get_stack_location();</span>
+<span class="line-added">+         int o_offset = o_loc.stack_offset();</span>
+<span class="line-added">+         int l_offset = (address)oop_ptr - (address)sp_base;</span>
+<span class="line-added">+         if (o_offset == l_offset) {</span>
+<span class="line-added">+           return o_sv;</span>
+<span class="line-added">+         }</span>
+<span class="line-added">+       }</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   return NULL;</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ ScopeValue *compiledVFrame::get_scope_value(GrowableArray&lt;ScopeValue*&gt;* scv_list, int index, GrowableArray&lt;ScopeValue*&gt;* objects) const {</span>
+<span class="line-added">+   ScopeValue* sv = scv_list-&gt;at(index);</span>
+<span class="line-added">+   if (sv-&gt;is_location()) {</span>
+<span class="line-added">+     if ((objects != NULL) &amp;&amp; (objects-&gt;length() &gt; 0)) {</span>
+<span class="line-added">+       //printf(&quot;Attempting to swap svs\n&quot;);</span>
+<span class="line-added">+       LocationValue* lv = (LocationValue *)sv;</span>
+<span class="line-added">+       Location loc = lv-&gt;location();</span>
+<span class="line-added">+       intptr_t *oop_ptr;</span>
+<span class="line-added">+       intptr_t *sp_base = _fr.unextended_sp();</span>
+<span class="line-added">+       intptr_t *sp_top = sp_base + _fr.cb()-&gt;frame_size();</span>
+<span class="line-added">+       if (loc.is_stack() &amp;&amp; (loc.type() == Location::oop)) {</span>
+<span class="line-added">+         address value_addr = ((address)sp_base) + loc.stack_offset();</span>
+<span class="line-added">+         oop val = *(oop *)value_addr;</span>
+<span class="line-added">+         oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);</span>
+<span class="line-added">+       } else if (loc.is_register() &amp;&amp; (loc.type() == Location::oop)) {</span>
+<span class="line-added">+         address value_addr = register_map()-&gt;location(VMRegImpl::as_VMReg(loc.register_number()));</span>
+<span class="line-added">+         oop val = *(oop *)value_addr;</span>
+<span class="line-added">+         oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);</span>
+<span class="line-added">+       } else {</span>
+<span class="line-added">+         assert(loc.type() != Location::oop, &quot;Can not be an oop&quot;);</span>
+<span class="line-added">+         return sv;</span>
+<span class="line-added">+       }</span>
+<span class="line-added">+       if (sp_base &lt;= oop_ptr &amp;&amp; oop_ptr &lt; sp_top) {</span>
+<span class="line-added">+         ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);</span>
+<span class="line-added">+         if (o_sv != NULL) {</span>
+<span class="line-added">+           scv_list-&gt;at_put(index, o_sv);</span>
+<span class="line-added">+           sv = o_sv;</span>
+<span class="line-added">+         } else {</span>
+<span class="line-added">+           assert(false, &quot;did not find stack oop for object on stack&quot;);</span>
+<span class="line-added">+         }</span>
+<span class="line-added">+       }</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+   } else if (sv-&gt;is_object()) {</span>
+<span class="line-added">+     oop o = sv-&gt;as_ObjectValue()-&gt;value()();</span>
+<span class="line-added">+     intptr_t *sp_base = _fr.unextended_sp();</span>
+<span class="line-added">+     intptr_t *sp_top = sp_base + _fr.cb()-&gt;frame_size();</span>
+<span class="line-added">+     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(o);</span>
+<span class="line-added">+     if (sp_base &lt;= oop_ptr &amp;&amp; oop_ptr &lt; sp_top) {</span>
+<span class="line-added">+       ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);</span>
+<span class="line-added">+       if (o_sv != NULL) {</span>
+<span class="line-added">+         assert(sv == o_sv, &quot;Objects need to match&quot;);</span>
+<span class="line-added">+         sv = o_sv;</span>
+<span class="line-added">+       } else {</span>
+<span class="line-added">+         assert(false, &quot;did not find stack oop for object on stack&quot;);</span>
+<span class="line-added">+       }</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+     assert(oopDesc::is_oop_or_null(sv-&gt;as_ObjectValue()-&gt;value()()), &quot;needs to be an oop&quot;);</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+   return sv;</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+  
+  GrowableArray&lt;MonitorInfo*&gt;* compiledVFrame::monitors() const {
+    // Natives has no scope
+    if (scope() == NULL) {
+      CompiledMethod* nm = code();
+</pre>
+<center><a href="deoptimization.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

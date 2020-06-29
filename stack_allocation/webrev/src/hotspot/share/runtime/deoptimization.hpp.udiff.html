@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/runtime/deoptimization.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="deoptimization.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/runtime/deoptimization.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -168,12 +168,19 @@</span>
+  #if COMPILER2_OR_JVMCI
+   public:
+  
+    // Support for restoring non-escaping objects
+    static bool realloc_objects(JavaThread* thread, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, TRAPS);
+<span class="udiff-line-modified-removed">-   static void reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);</span>
+<span class="udiff-line-modified-removed">-   static void reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj);</span>
+<span class="udiff-line-modified-added">+   static void reassign_stack_allocated_fields(frame *fr, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue *sv, Handle obj, Klass* k);</span>
+<span class="udiff-line-modified-added">+   static void reassign_stack_allocated_type_array_elements(oop orig, oop newly_allocated, Klass *k);</span>
+<span class="udiff-line-added">+   static void reassign_stack_allocated_object_array_elements(oop orig, oop newly_allocated, intptr_t *sp_base, intptr_t *sp_top, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="udiff-line-added">+   static void reassign_scalar_replaced_fields(frame *fr, RegisterMap *reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue *sv, Handle obj, Klass* k, bool skip_internal);</span>
+<span class="udiff-line-added">+   static void reassign_scalar_replaced_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);</span>
+<span class="udiff-line-added">+   static void reassign_scalar_replaced_object_array_elements(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue* sv, objArrayOop obj);</span>
+<span class="udiff-line-added">+   static ScopeValue *get_scope_value(frame* fr, RegisterMap* reg_map, ScopeValue* sv, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="udiff-line-added">+   static ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects);</span>
+<span class="udiff-line-added">+   static void reassign_scalar_replaced_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, ObjectValue* sv, int svIndex, oop obj, bool skip_internal);</span>
+    static void reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures, bool skip_internal);
+    static void relock_objects(GrowableArray&lt;MonitorInfo*&gt;* monitors, JavaThread* thread, bool realloc_failures);
+    static void pop_frames_failed_reallocs(JavaThread* thread, vframeArray* array);
+    NOT_PRODUCT(static void print_objects(GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures);)
+  #endif // COMPILER2_OR_JVMCI
+</pre>
+<center><a href="deoptimization.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="vframe_hp.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

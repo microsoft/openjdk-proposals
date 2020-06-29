@@ -1,0 +1,62 @@
+diff a/src/hotspot/share/code/debugInfo.hpp b/src/hotspot/share/code/debugInfo.hpp
+--- a/src/hotspot/share/code/debugInfo.hpp
++++ b/src/hotspot/share/code/debugInfo.hpp
+@@ -143,12 +143,14 @@
+   bool                        is_visited() const        { return _visited; }
+ 
+   void                        set_value(oop value);
+   void                        set_visited(bool visited) { _visited = false; }
+ 
++  virtual bool                is_stack_object()         { return false; }
++
+   // Serialization of debugging information
+-  void read_object(DebugInfoReadStream* stream);
++  virtual void read_object(DebugInfoReadStream* stream);
+   void write_on(DebugInfoWriteStream* stream);
+ 
+   // Printing
+   void print_on(outputStream* st) const;
+   void print_fields_on(outputStream* st) const;
+@@ -183,10 +185,29 @@
+ 
+   // Printing
+   void print_on(outputStream* st) const;
+ };
+ 
++class StackObjectValue: public ObjectValue {
++private:
++  Location    _location;
++  ConstantIntValue *_field_length;
++public:
++  StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length);
++  StackObjectValue(int id) : ObjectValue(id), _location(), _field_length(NULL) { }
++
++  Location get_stack_location() { return _location; }
++  ConstantIntValue* get_field_length() { return _field_length; }
++
++  bool is_stack_object(){ return true; }
++
++    // Serialization of debugging information
++  void read_object(DebugInfoReadStream* stream);
++  void write_on(DebugInfoWriteStream* stream);
++};
++
++
+ class ConstantLongValue: public ScopeValue {
+  private:
+   jlong _value;
+  public:
+   ConstantLongValue(jlong value)       { _value = value; }
+@@ -302,11 +323,11 @@
+     Method* o = (Method*)(code()->metadata_at(read_int()));
+     // is_metadata() is a faster check than is_metaspace_object()
+     assert(o == NULL || o->is_metadata(), "meta data only");
+     return o;
+   }
+-  ScopeValue* read_object_value(bool is_auto_box);
++  ScopeValue* read_object_value(int type);
+   ScopeValue* get_cached_object();
+   // BCI encoding is mostly unsigned, but -1 is a distinguished value
+   int read_bci() { return read_int() + InvocationEntryBci; }
+ };
+ 

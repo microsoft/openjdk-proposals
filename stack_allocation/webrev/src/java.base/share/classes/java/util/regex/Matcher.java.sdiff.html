@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/java.base/share/classes/java/util/regex/Matcher.java</title>
+    <link rel="stylesheet" href="../../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../ArrayList.java.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../../index.html" target="_top">index</a> next &gt;</center>    <h2>src/java.base/share/classes/java/util/regex/Matcher.java</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 227 
+ 228     /**
+ 229      * Number of times this matcher&#39;s state has been modified
+ 230      */
+ 231     int modCount;
+ 232 
+ 233     /**
+ 234      * No default constructor.
+ 235      */
+ 236     Matcher() {
+ 237     }
+ 238 
+ 239     /**
+ 240      * All matchers have the state used by Pattern during a match.
+ 241      */
+ 242     Matcher(Pattern parent, CharSequence text) {
+ 243         this.parentPattern = parent;
+ 244         this.text = text;
+ 245 
+ 246         // Allocate state storage
+<span class="line-modified"> 247         int parentGroupCount = Math.max(parent.capturingGroupCount, 10);</span>
+<span class="line-modified"> 248         groups = new int[parentGroupCount * 2];</span>
+
+
+
+ 249         locals = new int[parent.localCount];
+ 250         localsPos = new IntHashSet[parent.localTCNCount];
+ 251 
+ 252         // Put fields into initial states
+ 253         reset();
+ 254     }
+ 255 
+ 256     /**
+ 257      * Returns the pattern that is interpreted by this matcher.
+ 258      *
+ 259      * @return  The pattern for which this matcher was created
+ 260      */
+ 261     public Pattern pattern() {
+ 262         return parentPattern;
+ 263     }
+ 264 
+ 265     /**
+ 266      * Returns the match state of this matcher as a {@link MatchResult}.
+ 267      * The result is unaffected by subsequent operations performed upon this
+ 268      * matcher.
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 227 
+ 228     /**
+ 229      * Number of times this matcher&#39;s state has been modified
+ 230      */
+ 231     int modCount;
+ 232 
+ 233     /**
+ 234      * No default constructor.
+ 235      */
+ 236     Matcher() {
+ 237     }
+ 238 
+ 239     /**
+ 240      * All matchers have the state used by Pattern during a match.
+ 241      */
+ 242     Matcher(Pattern parent, CharSequence text) {
+ 243         this.parentPattern = parent;
+ 244         this.text = text;
+ 245 
+ 246         // Allocate state storage
+<span class="line-modified"> 247         if (parent.capturingGroupCount &gt; 10) {</span>
+<span class="line-modified"> 248             groups = new int[parent.capturingGroupCount * 2];</span>
+<span class="line-added"> 249         } else {</span>
+<span class="line-added"> 250             groups = new int[20];</span>
+<span class="line-added"> 251         }</span>
+ 252         locals = new int[parent.localCount];
+ 253         localsPos = new IntHashSet[parent.localTCNCount];
+ 254 
+ 255         // Put fields into initial states
+ 256         reset();
+ 257     }
+ 258 
+ 259     /**
+ 260      * Returns the pattern that is interpreted by this matcher.
+ 261      *
+ 262      * @return  The pattern for which this matcher was created
+ 263      */
+ 264     public Pattern pattern() {
+ 265         return parentPattern;
+ 266     }
+ 267 
+ 268     /**
+ 269      * Returns the match state of this matcher as a {@link MatchResult}.
+ 270      * The result is unaffected by subsequent operations performed upon this
+ 271      * matcher.
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../ArrayList.java.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../../index.html" target="_top">index</a> next &gt;</center>  </body>
+</html>

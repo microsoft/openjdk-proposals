@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+ 1 /*
+ 2  * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ 3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ 4  *
+ 5  * This code is free software; you can redistribute it and/or modify it
+ 6  * under the terms of the GNU General Public License version 2 only, as
+ 7  * published by the Free Software Foundation.
+ 8  *
+ 9  * This code is distributed in the hope that it will be useful, but WITHOUT
+10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+12  * version 2 for more details (a copy is included in the LICENSE file that
+13  * accompanied this code).
+14  *
+15  * You should have received a copy of the GNU General Public License version
+16  * 2 along with this work; if not, write to the Free Software Foundation,
+17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+18  *
+19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+20  * or visit www.oracle.com if you need additional information or have any
+21  * questions.
+22  *
+23  */
+24 
+25 #ifndef SHARE_GC_G1_C2_G1BARRIERSETC2_HPP
+26 #define SHARE_GC_G1_C2_G1BARRIERSETC2_HPP
+27 
+28 #include &quot;gc/shared/c2/cardTableBarrierSetC2.hpp&quot;
+29 
+30 class PhaseTransform;
+31 class Type;
+32 class TypeFunc;
+33 
+34 class G1BarrierSetC2: public CardTableBarrierSetC2 {
+35 protected:
+36   virtual void pre_barrier(GraphKit* kit,
+37                            bool do_load,
+38                            Node* ctl,
+39                            Node* obj,
+40                            Node* adr,
+41                            uint adr_idx,
+42                            Node* val,
+43                            const TypeOopPtr* val_type,
+44                            Node* pre_val,
+45                            BasicType bt) const;
+46 
+47   virtual void post_barrier(GraphKit* kit,
+48                             Node* ctl,
+49                             Node* store,
+50                             Node* obj,
+51                             Node* adr,
+52                             uint adr_idx,
+53                             Node* val,
+54                             BasicType bt,
+55                             bool use_precise) const;
+56 
+57   bool g1_can_remove_pre_barrier(GraphKit* kit,
+58                                  PhaseTransform* phase,
+59                                  Node* adr,
+60                                  BasicType bt,
+61                                  uint adr_idx) const;
+62 
+63   bool g1_can_remove_post_barrier(GraphKit* kit,
+64                                   PhaseTransform* phase, Node* store,
+65                                   Node* adr) const;
+66 
+67   void g1_mark_card(GraphKit* kit,
+68                     IdealKit&amp; ideal,
+69                     Node* card_adr,
+70                     Node* oop_store,
+71                     uint oop_alias_idx,
+72                     Node* index,
+73                     Node* index_adr,
+74                     Node* buffer,
+75                     const TypeFunc* tf) const;
+76 
+77   // Helper for unsafe accesses, that may or may not be on the referent field.
+78   // Generates the guards that check whether the result of
+79   // Unsafe.getReference should be recorded in an SATB log buffer.
+80   void insert_pre_barrier(GraphKit* kit, Node* base_oop, Node* offset, Node* pre_val, bool need_mem_bar) const;
+81 
+82   static const TypeFunc* write_ref_field_pre_entry_Type();
+83   static const TypeFunc* write_ref_field_post_entry_Type();
+84 
+85   virtual Node* load_at_resolved(C2Access&amp; access, const Type* val_type) const;
+86 
+87  public:
+88   virtual bool is_gc_barrier_node(Node* node) const;
+89   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+90   virtual Node* step_over_gc_barrier(Node* c) const;
+91 
+92 #ifdef ASSERT
+93   virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const;
+94 #endif
+95 
+96   virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const;
+97 };
+98 
+99 #endif // SHARE_GC_G1_C2_G1BARRIERSETC2_HPP
+    </pre>
+  </body>
+</html>

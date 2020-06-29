@@ -1,0 +1,52 @@
+diff a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
+--- a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
++++ b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
+@@ -24,10 +24,28 @@
+ 
+ #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+ #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+ 
+ #include "gc/shared/c2/modRefBarrierSetC2.hpp"
++#include "utilities/growableArray.hpp"
++
++class CastP2XNode;
++
++class BarrierSetC2State : public ResourceObj {
++private:
++  GrowableArray<CastP2XNode*>* _enqueue_barriers;
++
++public:
++  BarrierSetC2State(Arena* comp_arena);
++
++  int enqueue_barriers_count() const;
++  CastP2XNode* enqueue_barrier(int idx) const;
++  void add_enqueue_barrier(CastP2XNode* n);
++  void remove_enqueue_barrier(CastP2XNode* n);
++  bool is_a_barrier(CastP2XNode* n);
++};
++
+ 
+ class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+ protected:
+   virtual void post_barrier(GraphKit* kit,
+                             Node* ctl,
+@@ -44,10 +62,19 @@
+ public:
+   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+   virtual bool is_gc_barrier_node(Node* node) const;
+   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
++  virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN& igvn) const;
++  virtual Node* step_over_gc_barrier(Node* c) const;
+ 
+   bool use_ReduceInitialCardMarks() const;
++
++  BarrierSetC2State* state() const;
++
++  virtual void register_potential_barrier_node(Node* node) const;
++  virtual void unregister_potential_barrier_node(Node* node) const;
++  virtual bool expand_barriers(Compile* C, PhaseIterGVN& igvn) const;
++  virtual void* create_barrier_state(Arena* comp_arena) const;
+ };
+ 
+ #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP

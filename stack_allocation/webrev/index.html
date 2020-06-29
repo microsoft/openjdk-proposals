@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Initial stack allocation prototype</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="nanoduke.ico" />
+  </head>
+  <body>
+    <div class="summary">
+      <h2 class="summary">Code Review for Initial stack allocation prototype</h2>
+      <table class="summary">        <tr>
+          <th>Prepared by:</th>
+          <td>Charlie Gracie on Mon Jun 29 11:13:41 EDT 2020</td>
+        </tr>        <tr>
+          <th>Compare against:</th>
+          <td><a href="https://github.com/openjdk/jdk">https://github.com/openjdk/jdk</a></td>
+        </tr>        <tr>
+          <th>Compare against version:</th>
+          <td><a href="https://github.com/openjdk/jdk/commit/c07ce7eec71aefbd3cb624e03ca53f5148d01f19">c07ce7ee</a></td>
+        </tr>        <tr>
+          <th>Summary of changes:</th>
+          <td>2118 lines changed; 1978 ins; 19 del; 121 mod; 46488 unchg</td>
+        </tr>        <tr>
+          <th>Patch of changes:</th>
+          <td><a href="Initial stack allocation prototype.patch">Initial stack allocation prototype.patch</a></td>
+        </tr>         <tr>
+           <th>Legend:</th>
+           <td><span class="file-modified">Modified file</span><br><span class="file-removed">Deleted file</span><br><span class="file-added">New file</span></td>
+        </tr>
+      </table>
+    </div><p>
+  <code>
+<a href="src/hotspot/share/code/debugInfo.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/code/debugInfo.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/code/debugInfo.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/code/debugInfo.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/code/debugInfo.cpp-.html">Old</a>
+<a href="src/hotspot/share/code/debugInfo.cpp.html">New</a>
+<a href="src/hotspot/share/code/debugInfo.cpp.patch">Patch</a>
+<a href="src/hotspot/share/code/debugInfo.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/code/debugInfo.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+58 lines changed; 49 ins; 5 del; 4 mod; 301 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/code/debugInfo.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/code/debugInfo.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/code/debugInfo.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/code/debugInfo.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/code/debugInfo.hpp-.html">Old</a>
+<a href="src/hotspot/share/code/debugInfo.hpp.html">New</a>
+<a href="src/hotspot/share/code/debugInfo.hpp.patch">Patch</a>
+<a href="src/hotspot/share/code/debugInfo.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/code/debugInfo.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+23 lines changed; 21 ins; 0 del; 2 mod; 326 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp-.html">Old</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.html">New</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp.patch">Patch</a>
+<a href="src/hotspot/share/compiler/compilerDefinitions.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/compiler/compilerDefinitions.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+9 lines changed; 9 ins; 0 del; 0 mod; 565 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp-.html">Old</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.html">New</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp.patch">Patch</a>
+<a href="src/hotspot/share/compiler/compilerDirectives.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/compiler/compilerDirectives.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+5 lines changed; 4 ins; 0 del; 1 mod; 216 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/compiler/oopMap.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp-.html">Old</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp.html">New</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp.patch">Patch</a>
+<a href="src/hotspot/share/compiler/oopMap.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/compiler/oopMap.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+100 lines changed; 99 ins; 0 del; 1 mod; 747 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/compiler/oopMap.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp-.html">Old</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp.html">New</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp.patch">Patch</a>
+<a href="src/hotspot/share/compiler/oopMap.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/compiler/oopMap.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+5 lines changed; 5 ins; 0 del; 0 mod; 448 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp-.html">Old</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.html">New</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+170 lines changed; 149 ins; 0 del; 21 mod; 851 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp-.html">Old</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.html">New</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+2 lines changed; 2 ins; 0 del; 0 mod; 99 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp-.html">Old</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.html">New</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+2 lines changed; 0 ins; 0 del; 2 mod; 142 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp-.html">Old</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.html">New</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/shared/c2/barrierSetC2.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/shared/c2/barrierSetC2.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+1 lines changed; 1 ins; 0 del; 0 mod; 306 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp-.html">Old</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.html">New</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+226 lines changed; 198 ins; 2 del; 26 mod; 162 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp-.html">Old</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.html">New</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+27 lines changed; 27 ins; 0 del; 0 mod; 53 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp-.html">Old</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.html">New</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp.patch">Patch</a>
+<a href="src/hotspot/share/gc/shared/cardTable.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/gc/shared/cardTable.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+2 lines changed; 2 ins; 0 del; 0 mod; 267 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/memory/iterator.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/memory/iterator.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/memory/iterator.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/memory/iterator.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/memory/iterator.cpp-.html">Old</a>
+<a href="src/hotspot/share/memory/iterator.cpp.html">New</a>
+<a href="src/hotspot/share/memory/iterator.cpp.patch">Patch</a>
+<a href="src/hotspot/share/memory/iterator.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/memory/iterator.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+1 lines changed; 1 ins; 0 del; 0 mod; 65 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/block.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/block.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/block.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/block.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/block.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/block.cpp.html">New</a>
+<a href="src/hotspot/share/opto/block.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/block.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/block.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+1 lines changed; 0 ins; 0 del; 1 mod; 1790 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.html">New</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/buildOopMap.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/buildOopMap.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+2 lines changed; 1 ins; 0 del; 1 mod; 684 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/c2_globals.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp.html">New</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/c2_globals.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/c2_globals.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+9 lines changed; 9 ins; 0 del; 0 mod; 779 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/callnode.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/callnode.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/callnode.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/callnode.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/callnode.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/callnode.cpp.html">New</a>
+<a href="src/hotspot/share/opto/callnode.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/callnode.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/callnode.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+37 lines changed; 30 ins; 1 del; 6 mod; 2088 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/callnode.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/callnode.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/callnode.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/callnode.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/callnode.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/callnode.hpp.html">New</a>
+<a href="src/hotspot/share/opto/callnode.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/callnode.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/callnode.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+10 lines changed; 10 ins; 0 del; 0 mod; 1133 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/compile.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/compile.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/compile.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/compile.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/compile.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/compile.cpp.html">New</a>
+<a href="src/hotspot/share/opto/compile.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/compile.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/compile.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+2 lines changed; 2 ins; 0 del; 0 mod; 4664 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/compile.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/compile.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/compile.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/compile.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/compile.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/compile.hpp.html">New</a>
+<a href="src/hotspot/share/opto/compile.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/compile.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/compile.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+11 lines changed; 9 ins; 0 del; 2 mod; 1180 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/escape.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/escape.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/escape.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/escape.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/escape.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/escape.cpp.html">New</a>
+<a href="src/hotspot/share/opto/escape.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/escape.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/escape.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+322 lines changed; 316 ins; 0 del; 6 mod; 3573 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/escape.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/escape.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/escape.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/escape.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/escape.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/escape.hpp.html">New</a>
+<a href="src/hotspot/share/opto/escape.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/escape.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/escape.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+32 lines changed; 32 ins; 0 del; 0 mod; 621 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/idealKit.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/idealKit.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/idealKit.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/idealKit.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/idealKit.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/idealKit.cpp.html">New</a>
+<a href="src/hotspot/share/opto/idealKit.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/idealKit.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/idealKit.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+31 lines changed; 31 ins; 0 del; 0 mod; 587 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/idealKit.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/idealKit.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/idealKit.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/idealKit.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/idealKit.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/idealKit.hpp.html">New</a>
+<a href="src/hotspot/share/opto/idealKit.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/idealKit.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/idealKit.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+10 lines changed; 10 ins; 0 del; 0 mod; 263 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/loopnode.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/loopnode.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/loopnode.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/loopnode.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/loopnode.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/loopnode.cpp.html">New</a>
+<a href="src/hotspot/share/opto/loopnode.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/loopnode.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/loopnode.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+1 lines changed; 0 ins; 0 del; 1 mod; 4795 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/machnode.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/machnode.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/machnode.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/machnode.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/machnode.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/machnode.hpp.html">New</a>
+<a href="src/hotspot/share/opto/machnode.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/machnode.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/machnode.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+5 lines changed; 4 ins; 0 del; 1 mod; 1122 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/macro.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/macro.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/macro.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/macro.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/macro.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/macro.cpp.html">New</a>
+<a href="src/hotspot/share/opto/macro.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/macro.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/macro.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+543 lines changed; 529 ins; 7 del; 7 mod; 2805 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/macro.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/macro.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/macro.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/macro.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/macro.hpp-.html">Old</a>
+<a href="src/hotspot/share/opto/macro.hpp.html">New</a>
+<a href="src/hotspot/share/opto/macro.hpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/macro.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/macro.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+30 lines changed; 30 ins; 0 del; 0 mod; 230 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/memnode.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/memnode.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/memnode.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/memnode.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/memnode.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/memnode.cpp.html">New</a>
+<a href="src/hotspot/share/opto/memnode.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/memnode.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/memnode.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+8 lines changed; 6 ins; 0 del; 2 mod; 4886 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/opto/output.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/opto/output.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/opto/output.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/opto/output.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/opto/output.cpp-.html">Old</a>
+<a href="src/hotspot/share/opto/output.cpp.html">New</a>
+<a href="src/hotspot/share/opto/output.cpp.patch">Patch</a>
+<a href="src/hotspot/share/opto/output.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/opto/output.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+66 lines changed; 51 ins; 1 del; 14 mod; 3499 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp-.html">Old</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.html">New</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp.patch">Patch</a>
+<a href="src/hotspot/share/runtime/deoptimization.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/runtime/deoptimization.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+267 lines changed; 249 ins; 3 del; 15 mod; 2616 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp-.html">Old</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.html">New</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp.patch">Patch</a>
+<a href="src/hotspot/share/runtime/deoptimization.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/runtime/deoptimization.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+9 lines changed; 7 ins; 0 del; 2 mod; 475 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.frames.html">Frames</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp-.html">Old</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.html">New</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp.patch">Patch</a>
+<a href="src/hotspot/share/runtime/vframe_hp.cpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/runtime/vframe_hp.cpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+77 lines changed; 75 ins; 0 del; 2 mod; 453 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.cdiff.html">Cdiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.udiff.html">Udiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.sdiff.html">Sdiffs</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.frames.html">Frames</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp-.html">Old</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.html">New</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp.patch">Patch</a>
+<a href="src/hotspot/share/runtime/vframe_hp.hpp">Raw</a>
+  </code>
+  <span class="file-modified">src/hotspot/share/runtime/vframe_hp.hpp</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+4 lines changed; 4 ins; 0 del; 0 mod; 165 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.cdiff.html">Cdiffs</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.udiff.html">Udiffs</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.sdiff.html">Sdiffs</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.frames.html">Frames</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java-.html">Old</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.html">New</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java.patch">Patch</a>
+<a href="src/java.base/share/classes/java/util/ArrayList.java">Raw</a>
+  </code>
+  <span class="file-modified">src/java.base/share/classes/java/util/ArrayList.java</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+5 lines changed; 3 ins; 0 del; 2 mod; 1728 unchg  </span></blockquote>
+
+<p>
+  <code>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.cdiff.html">Cdiffs</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.udiff.html">Udiffs</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.sdiff.html">Sdiffs</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.frames.html">Frames</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java-.html">Old</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.html">New</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java.patch">Patch</a>
+<a href="src/java.base/share/classes/java/util/regex/Matcher.java">Raw</a>
+  </code>
+  <span class="file-modified">src/java.base/share/classes/java/util/regex/Matcher.java</span>
+<p>
+<blockquote>
+  <pre>
+b5bcfd27: Initial stack allocation prototype  </pre>
+  <span class="stat">
+5 lines changed; 3 ins; 0 del; 2 mod; 1804 unchg  </span></blockquote>
+
+    <hr />
+    <p class="version">
+      This code review page was prepared using <b>webrev</b> version 971c746c36ad5c768b72fe35d8df9d48132153f6
+    </p>
+  </body>
+</html>

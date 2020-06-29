@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</title>
+    <link rel="stylesheet" href="../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../g1/c2/g1BarrierSetC2.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../shared/c2/barrierSetC2.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -112,15 +112,15 @@</span>
+      oop obj = CompressedOops::decode_not_null(heap_oop);
+      assert(ParallelScavengeHeap::heap()-&gt;is_in(obj), &quot;should be in heap&quot;);
+  
+      oop new_obj = (oop)summary_data().calc_new_pointer(obj, cm);
+      assert(new_obj != NULL,                    // is forwarding ptr?
+<span class="udiff-line-modified-removed">-            &quot;should be forwarded&quot;);</span>
+<span class="udiff-line-modified-added">+           &quot;should be forwarded&quot;);</span>
+      // Just always do the update unconditionally?
+      if (new_obj != NULL) {
+        assert(ParallelScavengeHeap::heap()-&gt;is_in_reserved(new_obj),
+<span class="udiff-line-modified-removed">-              &quot;should be in object space&quot;);</span>
+<span class="udiff-line-modified-added">+             &quot;should be in object space&quot;);</span>
+        RawAccess&lt;IS_NOT_NULL&gt;::oop_store(p, new_obj);
+      }
+    }
+  }
+  
+</pre>
+<center><a href="../g1/c2/g1BarrierSetC2.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../shared/c2/barrierSetC2.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

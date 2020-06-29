@@ -1,0 +1,2649 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/runtime/deoptimization.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+   1 
+   2 
+   3 /*
+   4  * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+   5  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+   6  *
+   7  * This code is free software; you can redistribute it and/or modify it
+   8  * under the terms of the GNU General Public License version 2 only, as
+   9  * published by the Free Software Foundation.
+  10  *
+  11  * This code is distributed in the hope that it will be useful, but WITHOUT
+  12  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  13  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  14  * version 2 for more details (a copy is included in the LICENSE file that
+  15  * accompanied this code).
+  16  *
+  17  * You should have received a copy of the GNU General Public License version
+  18  * 2 along with this work; if not, write to the Free Software Foundation,
+  19  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  20  *
+  21  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  22  * or visit www.oracle.com if you need additional information or have any
+  23  * questions.
+  24  *
+  25  */
+  26 
+  27 #include &quot;precompiled.hpp&quot;
+  28 #include &quot;jvm.h&quot;
+  29 #include &quot;classfile/javaClasses.inline.hpp&quot;
+  30 #include &quot;classfile/symbolTable.hpp&quot;
+  31 #include &quot;classfile/systemDictionary.hpp&quot;
+  32 #include &quot;code/codeCache.hpp&quot;
+  33 #include &quot;code/debugInfoRec.hpp&quot;
+  34 #include &quot;code/nmethod.hpp&quot;
+  35 #include &quot;code/pcDesc.hpp&quot;
+  36 #include &quot;code/scopeDesc.hpp&quot;
+  37 #include &quot;compiler/compilationPolicy.hpp&quot;
+  38 #include &quot;interpreter/bytecode.hpp&quot;
+  39 #include &quot;interpreter/interpreter.hpp&quot;
+  40 #include &quot;interpreter/oopMapCache.hpp&quot;
+  41 #include &quot;memory/allocation.inline.hpp&quot;
+  42 #include &quot;memory/oopFactory.hpp&quot;
+  43 #include &quot;memory/resourceArea.hpp&quot;
+  44 #include &quot;memory/universe.hpp&quot;
+  45 #include &quot;oops/constantPool.hpp&quot;
+  46 #include &quot;oops/method.hpp&quot;
+  47 #include &quot;oops/objArrayKlass.hpp&quot;
+  48 #include &quot;oops/objArrayOop.inline.hpp&quot;
+  49 #include &quot;oops/oop.inline.hpp&quot;
+  50 #include &quot;oops/fieldStreams.inline.hpp&quot;
+  51 #include &quot;oops/typeArrayOop.inline.hpp&quot;
+  52 #include &quot;oops/verifyOopClosure.hpp&quot;
+  53 #include &quot;prims/jvmtiThreadState.hpp&quot;
+  54 #include &quot;runtime/atomic.hpp&quot;
+  55 #include &quot;runtime/biasedLocking.hpp&quot;
+  56 #include &quot;runtime/deoptimization.hpp&quot;
+  57 #include &quot;runtime/fieldDescriptor.hpp&quot;
+  58 #include &quot;runtime/fieldDescriptor.inline.hpp&quot;
+  59 #include &quot;runtime/frame.inline.hpp&quot;
+  60 #include &quot;runtime/handles.inline.hpp&quot;
+  61 #include &quot;runtime/interfaceSupport.inline.hpp&quot;
+  62 #include &quot;runtime/jniHandles.inline.hpp&quot;
+  63 #include &quot;runtime/safepointVerifiers.hpp&quot;
+  64 #include &quot;runtime/sharedRuntime.hpp&quot;
+  65 #include &quot;runtime/signature.hpp&quot;
+  66 #include &quot;runtime/stubRoutines.hpp&quot;
+  67 #include &quot;runtime/thread.hpp&quot;
+  68 #include &quot;runtime/threadSMR.hpp&quot;
+  69 #include &quot;runtime/vframe.hpp&quot;
+  70 #include &quot;runtime/vframeArray.hpp&quot;
+  71 #include &quot;runtime/vframe_hp.hpp&quot;
+  72 #include &quot;utilities/events.hpp&quot;
+  73 #include &quot;utilities/macros.hpp&quot;
+  74 #include &quot;utilities/preserveException.hpp&quot;
+  75 #include &quot;utilities/xmlstream.hpp&quot;
+  76 #if INCLUDE_JFR
+  77 #include &quot;jfr/jfrEvents.hpp&quot;
+  78 #include &quot;jfr/metadata/jfrSerializer.hpp&quot;
+  79 #endif
+  80 
+  81 bool DeoptimizationMarker::_is_active = false;
+  82 
+  83 Deoptimization::UnrollBlock::UnrollBlock(int  size_of_deoptimized_frame,
+  84                                          int  caller_adjustment,
+  85                                          int  caller_actual_parameters,
+  86                                          int  number_of_frames,
+  87                                          intptr_t* frame_sizes,
+  88                                          address* frame_pcs,
+  89                                          BasicType return_type,
+  90                                          int exec_mode) {
+  91   _size_of_deoptimized_frame = size_of_deoptimized_frame;
+  92   _caller_adjustment         = caller_adjustment;
+  93   _caller_actual_parameters  = caller_actual_parameters;
+  94   _number_of_frames          = number_of_frames;
+  95   _frame_sizes               = frame_sizes;
+  96   _frame_pcs                 = frame_pcs;
+  97   _register_block            = NEW_C_HEAP_ARRAY(intptr_t, RegisterMap::reg_count * 2, mtCompiler);
+  98   _return_type               = return_type;
+  99   _initial_info              = 0;
+ 100   // PD (x86 only)
+ 101   _counter_temp              = 0;
+ 102   _unpack_kind               = exec_mode;
+ 103   _sender_sp_temp            = 0;
+ 104 
+ 105   _total_frame_sizes         = size_of_frames();
+ 106   assert(exec_mode &gt;= 0 &amp;&amp; exec_mode &lt; Unpack_LIMIT, &quot;Unexpected exec_mode&quot;);
+ 107 }
+ 108 
+ 109 
+ 110 Deoptimization::UnrollBlock::~UnrollBlock() {
+ 111   FREE_C_HEAP_ARRAY(intptr_t, _frame_sizes);
+ 112   FREE_C_HEAP_ARRAY(intptr_t, _frame_pcs);
+ 113   FREE_C_HEAP_ARRAY(intptr_t, _register_block);
+ 114 }
+ 115 
+ 116 
+ 117 intptr_t* Deoptimization::UnrollBlock::value_addr_at(int register_number) const {
+ 118   assert(register_number &lt; RegisterMap::reg_count, &quot;checking register number&quot;);
+ 119   return &amp;_register_block[register_number * 2];
+ 120 }
+ 121 
+ 122 
+ 123 
+ 124 int Deoptimization::UnrollBlock::size_of_frames() const {
+ 125   // Acount first for the adjustment of the initial frame
+ 126   int result = _caller_adjustment;
+ 127   for (int index = 0; index &lt; number_of_frames(); index++) {
+ 128     result += frame_sizes()[index];
+ 129   }
+ 130   return result;
+ 131 }
+ 132 
+ 133 
+ 134 void Deoptimization::UnrollBlock::print() {
+ 135   ttyLocker ttyl;
+ 136   tty-&gt;print_cr(&quot;UnrollBlock&quot;);
+ 137   tty-&gt;print_cr(&quot;  size_of_deoptimized_frame = %d&quot;, _size_of_deoptimized_frame);
+ 138   tty-&gt;print(   &quot;  frame_sizes: &quot;);
+ 139   for (int index = 0; index &lt; number_of_frames(); index++) {
+ 140     tty-&gt;print(INTX_FORMAT &quot; &quot;, frame_sizes()[index]);
+ 141   }
+ 142   tty-&gt;cr();
+ 143 }
+ 144 
+ 145 
+ 146 // In order to make fetch_unroll_info work properly with escape
+ 147 // analysis, The method was changed from JRT_LEAF to JRT_BLOCK_ENTRY and
+ 148 // ResetNoHandleMark and HandleMark were removed from it. The actual reallocation
+ 149 // of previously eliminated objects occurs in realloc_objects, which is
+ 150 // called from the method fetch_unroll_info_helper below.
+ 151 JRT_BLOCK_ENTRY(Deoptimization::UnrollBlock*, Deoptimization::fetch_unroll_info(JavaThread* thread, int exec_mode))
+ 152   // It is actually ok to allocate handles in a leaf method. It causes no safepoints,
+ 153   // but makes the entry a little slower. There is however a little dance we have to
+ 154   // do in debug mode to get around the NoHandleMark code in the JRT_LEAF macro
+ 155 
+ 156   // fetch_unroll_info() is called at the beginning of the deoptimization
+ 157   // handler. Note this fact before we start generating temporary frames
+ 158   // that can confuse an asynchronous stack walker. This counter is
+ 159   // decremented at the end of unpack_frames().
+ 160   if (TraceDeoptimization) {
+ 161     tty-&gt;print_cr(&quot;Deoptimizing thread &quot; INTPTR_FORMAT, p2i(thread));
+ 162   }
+ 163   thread-&gt;inc_in_deopt_handler();
+ 164 
+ 165   return fetch_unroll_info_helper(thread, exec_mode);
+ 166 JRT_END
+ 167 
+ 168 #if COMPILER2_OR_JVMCI
+ 169 static bool eliminate_allocations(JavaThread* thread, int exec_mode, CompiledMethod* compiled_method,
+ 170                                   frame&amp; deoptee, RegisterMap&amp; map, GrowableArray&lt;compiledVFrame*&gt;* chunk) {
+ 171   bool realloc_failures = false;
+ 172   assert (chunk-&gt;at(0)-&gt;scope() != NULL,&quot;expect only compiled java frames&quot;);
+ 173 
+ 174   GrowableArray&lt;ScopeValue*&gt;* objects = chunk-&gt;at(0)-&gt;scope()-&gt;objects();
+ 175 
+ 176   // The flag return_oop() indicates call sites which return oop
+ 177   // in compiled code. Such sites include java method calls,
+ 178   // runtime calls (for example, used to allocate new objects/arrays
+ 179   // on slow code path) and any other calls generated in compiled code.
+ 180   // It is not guaranteed that we can get such information here only
+ 181   // by analyzing bytecode in deoptimized frames. This is why this flag
+ 182   // is set during method compilation (see Compile::Process_OopMap_Node()).
+ 183   // If the previous frame was popped or if we are dispatching an exception,
+ 184   // we don&#39;t have an oop result.
+ 185   bool save_oop_result = chunk-&gt;at(0)-&gt;scope()-&gt;return_oop() &amp;&amp; !thread-&gt;popframe_forcing_deopt_reexecution() &amp;&amp; (exec_mode == Deoptimization::Unpack_deopt);
+ 186   Handle return_value;
+ 187   if (save_oop_result) {
+ 188     // Reallocation may trigger GC. If deoptimization happened on return from
+ 189     // call which returns oop we need to save it since it is not in oopmap.
+ 190     oop result = deoptee.saved_oop_result(&amp;map);
+ 191     assert(oopDesc::is_oop_or_null(result), &quot;must be oop&quot;);
+ 192     return_value = Handle(thread, result);
+ 193     assert(Universe::heap()-&gt;is_in_or_null(result), &quot;must be heap pointer&quot;);
+ 194     if (TraceDeoptimization) {
+ 195       ttyLocker ttyl;
+ 196       tty-&gt;print_cr(&quot;SAVED OOP RESULT &quot; INTPTR_FORMAT &quot; in thread &quot; INTPTR_FORMAT, p2i(result), p2i(thread));
+ 197     }
+ 198   }
+ 199   if (objects != NULL) {
+ 200     JRT_BLOCK
+ 201       realloc_failures = Deoptimization::realloc_objects(thread, &amp;deoptee, &amp;map, objects, THREAD);
+ 202     JRT_END
+ 203     bool skip_internal = (compiled_method != NULL) &amp;&amp; !compiled_method-&gt;is_compiled_by_jvmci();
+ 204     Deoptimization::reassign_fields(&amp;deoptee, &amp;map, objects, realloc_failures, skip_internal);
+ 205 #ifndef PRODUCT
+ 206     if (TraceDeoptimization) {
+ 207       ttyLocker ttyl;
+ 208       tty-&gt;print_cr(&quot;REALLOC OBJECTS in thread &quot; INTPTR_FORMAT, p2i(thread));
+ 209       Deoptimization::print_objects(objects, realloc_failures);
+ 210     }
+ 211 #endif
+ 212   }
+ 213   if (save_oop_result) {
+ 214     // Restore result.
+ 215     deoptee.set_saved_oop_result(&amp;map, return_value());
+ 216   }
+ 217   return realloc_failures;
+ 218 }
+ 219 
+ 220 static void eliminate_locks(JavaThread* thread, GrowableArray&lt;compiledVFrame*&gt;* chunk, bool realloc_failures) {
+ 221 #ifndef PRODUCT
+ 222   bool first = true;
+ 223 #endif
+ 224   for (int i = 0; i &lt; chunk-&gt;length(); i++) {
+ 225     compiledVFrame* cvf = chunk-&gt;at(i);
+ 226     assert (cvf-&gt;scope() != NULL,&quot;expect only compiled java frames&quot;);
+ 227     GrowableArray&lt;MonitorInfo*&gt;* monitors = cvf-&gt;monitors();
+ 228     if (monitors-&gt;is_nonempty()) {
+ 229       Deoptimization::relock_objects(monitors, thread, realloc_failures);
+ 230 #ifndef PRODUCT
+ 231       if (PrintDeoptimizationDetails) {
+ 232         ttyLocker ttyl;
+ 233         for (int j = 0; j &lt; monitors-&gt;length(); j++) {
+ 234           MonitorInfo* mi = monitors-&gt;at(j);
+ 235           if (mi-&gt;eliminated()) {
+ 236             if (first) {
+ 237               first = false;
+ 238               tty-&gt;print_cr(&quot;RELOCK OBJECTS in thread &quot; INTPTR_FORMAT, p2i(thread));
+ 239             }
+ 240             if (mi-&gt;owner_is_scalar_replaced()) {
+ 241               Klass* k = java_lang_Class::as_Klass(mi-&gt;owner_klass());
+ 242               tty-&gt;print_cr(&quot;     failed reallocation for klass %s&quot;, k-&gt;external_name());
+ 243             } else {
+ 244               tty-&gt;print_cr(&quot;     object &lt;&quot; INTPTR_FORMAT &quot;&gt; locked&quot;, p2i(mi-&gt;owner()));
+ 245             }
+ 246           }
+ 247         }
+ 248       }
+ 249 #endif // !PRODUCT
+ 250     }
+ 251   }
+ 252 }
+ 253 #endif // COMPILER2_OR_JVMCI
+ 254 
+ 255 // This is factored, since it is both called from a JRT_LEAF (deoptimization) and a JRT_ENTRY (uncommon_trap)
+ 256 Deoptimization::UnrollBlock* Deoptimization::fetch_unroll_info_helper(JavaThread* thread, int exec_mode) {
+ 257 
+ 258   // Note: there is a safepoint safety issue here. No matter whether we enter
+ 259   // via vanilla deopt or uncommon trap we MUST NOT stop at a safepoint once
+ 260   // the vframeArray is created.
+ 261   //
+ 262 
+ 263   // Allocate our special deoptimization ResourceMark
+ 264   DeoptResourceMark* dmark = new DeoptResourceMark(thread);
+ 265   assert(thread-&gt;deopt_mark() == NULL, &quot;Pending deopt!&quot;);
+ 266   thread-&gt;set_deopt_mark(dmark);
+ 267 
+ 268   frame stub_frame = thread-&gt;last_frame(); // Makes stack walkable as side effect
+ 269   RegisterMap map(thread, true);
+ 270   RegisterMap dummy_map(thread, false);
+ 271   // Now get the deoptee with a valid map
+ 272   frame deoptee = stub_frame.sender(&amp;map);
+ 273   // Set the deoptee nmethod
+ 274   assert(thread-&gt;deopt_compiled_method() == NULL, &quot;Pending deopt!&quot;);
+ 275   CompiledMethod* cm = deoptee.cb()-&gt;as_compiled_method_or_null();
+ 276   thread-&gt;set_deopt_compiled_method(cm);
+ 277 
+ 278   if (VerifyStack) {
+ 279     thread-&gt;validate_frame_layout();
+ 280   }
+ 281 
+ 282   // Create a growable array of VFrames where each VFrame represents an inlined
+ 283   // Java frame.  This storage is allocated with the usual system arena.
+ 284   assert(deoptee.is_compiled_frame(), &quot;Wrong frame type&quot;);
+ 285   GrowableArray&lt;compiledVFrame*&gt;* chunk = new GrowableArray&lt;compiledVFrame*&gt;(10);
+ 286   vframe* vf = vframe::new_vframe(&amp;deoptee, &amp;map, thread);
+ 287   while (!vf-&gt;is_top()) {
+ 288     assert(vf-&gt;is_compiled_frame(), &quot;Wrong frame type&quot;);
+ 289     chunk-&gt;push(compiledVFrame::cast(vf));
+ 290     vf = vf-&gt;sender();
+ 291   }
+ 292   assert(vf-&gt;is_compiled_frame(), &quot;Wrong frame type&quot;);
+ 293   chunk-&gt;push(compiledVFrame::cast(vf));
+ 294 
+ 295   bool realloc_failures = false;
+ 296 
+ 297 #if COMPILER2_OR_JVMCI
+ 298 #if INCLUDE_JVMCI
+ 299   bool jvmci_enabled = true;
+ 300 #else
+ 301   bool jvmci_enabled = false;
+ 302 #endif
+ 303 
+ 304   // Reallocate the non-escaping objects and restore their fields. Then
+ 305   // relock objects if synchronization on them was eliminated.
+ 306   if (jvmci_enabled COMPILER2_PRESENT( || (DoEscapeAnalysis &amp;&amp; EliminateAllocations) )) {
+ 307     realloc_failures = eliminate_allocations(thread, exec_mode, cm, deoptee, map, chunk);
+ 308   }
+ 309 #endif // COMPILER2_OR_JVMCI
+ 310 
+ 311   // Revoke biases, done with in java state.
+ 312   // No safepoints allowed after this
+ 313   revoke_from_deopt_handler(thread, deoptee, &amp;map);
+ 314 
+ 315   // Ensure that no safepoint is taken after pointers have been stored
+ 316   // in fields of rematerialized objects.  If a safepoint occurs from here on
+ 317   // out the java state residing in the vframeArray will be missed.
+ 318   // Locks may be rebaised in a safepoint.
+ 319   NoSafepointVerifier no_safepoint;
+ 320 
+ 321 #if COMPILER2_OR_JVMCI
+ 322   if (jvmci_enabled COMPILER2_PRESENT( || ((DoEscapeAnalysis || EliminateNestedLocks) &amp;&amp; EliminateLocks) )) {
+ 323     eliminate_locks(thread, chunk, realloc_failures);
+ 324   }
+ 325 #endif // COMPILER2_OR_JVMCI
+ 326 
+ 327   ScopeDesc* trap_scope = chunk-&gt;at(0)-&gt;scope();
+ 328   Handle exceptionObject;
+ 329   if (trap_scope-&gt;rethrow_exception()) {
+ 330     if (PrintDeoptimizationDetails) {
+ 331       tty-&gt;print_cr(&quot;Exception to be rethrown in the interpreter for method %s::%s at bci %d&quot;, trap_scope-&gt;method()-&gt;method_holder()-&gt;name()-&gt;as_C_string(), trap_scope-&gt;method()-&gt;name()-&gt;as_C_string(), trap_scope-&gt;bci());
+ 332     }
+ 333     GrowableArray&lt;ScopeValue*&gt;* expressions = trap_scope-&gt;expressions();
+ 334     guarantee(expressions != NULL &amp;&amp; expressions-&gt;length() &gt; 0, &quot;must have exception to throw&quot;);
+ 335     ScopeValue* topOfStack = expressions-&gt;top();
+ 336     exceptionObject = StackValue::create_stack_value(&amp;deoptee, &amp;map, topOfStack)-&gt;get_obj();
+ 337     guarantee(exceptionObject() != NULL, &quot;exception oop can not be null&quot;);
+ 338   }
+ 339 
+ 340   vframeArray* array = create_vframeArray(thread, deoptee, &amp;map, chunk, realloc_failures);
+ 341 #if COMPILER2_OR_JVMCI
+ 342   if (realloc_failures) {
+ 343     pop_frames_failed_reallocs(thread, array);
+ 344   }
+ 345 #endif
+ 346 
+ 347   assert(thread-&gt;vframe_array_head() == NULL, &quot;Pending deopt!&quot;);
+ 348   thread-&gt;set_vframe_array_head(array);
+ 349 
+ 350   // Now that the vframeArray has been created if we have any deferred local writes
+ 351   // added by jvmti then we can free up that structure as the data is now in the
+ 352   // vframeArray
+ 353 
+ 354   if (thread-&gt;deferred_locals() != NULL) {
+ 355     GrowableArray&lt;jvmtiDeferredLocalVariableSet*&gt;* list = thread-&gt;deferred_locals();
+ 356     int i = 0;
+ 357     do {
+ 358       // Because of inlining we could have multiple vframes for a single frame
+ 359       // and several of the vframes could have deferred writes. Find them all.
+ 360       if (list-&gt;at(i)-&gt;id() == array-&gt;original().id()) {
+ 361         jvmtiDeferredLocalVariableSet* dlv = list-&gt;at(i);
+ 362         list-&gt;remove_at(i);
+ 363         // individual jvmtiDeferredLocalVariableSet are CHeapObj&#39;s
+ 364         delete dlv;
+ 365       } else {
+ 366         i++;
+ 367       }
+ 368     } while ( i &lt; list-&gt;length() );
+ 369     if (list-&gt;length() == 0) {
+ 370       thread-&gt;set_deferred_locals(NULL);
+ 371       // free the list and elements back to C heap.
+ 372       delete list;
+ 373     }
+ 374 
+ 375   }
+ 376 
+ 377   // Compute the caller frame based on the sender sp of stub_frame and stored frame sizes info.
+ 378   CodeBlob* cb = stub_frame.cb();
+ 379   // Verify we have the right vframeArray
+ 380   assert(cb-&gt;frame_size() &gt;= 0, &quot;Unexpected frame size&quot;);
+ 381   intptr_t* unpack_sp = stub_frame.sp() + cb-&gt;frame_size();
+ 382 
+ 383   // If the deopt call site is a MethodHandle invoke call site we have
+ 384   // to adjust the unpack_sp.
+ 385   nmethod* deoptee_nm = deoptee.cb()-&gt;as_nmethod_or_null();
+ 386   if (deoptee_nm != NULL &amp;&amp; deoptee_nm-&gt;is_method_handle_return(deoptee.pc()))
+ 387     unpack_sp = deoptee.unextended_sp();
+ 388 
+ 389 #ifdef ASSERT
+ 390   assert(cb-&gt;is_deoptimization_stub() ||
+ 391          cb-&gt;is_uncommon_trap_stub() ||
+ 392          strcmp(&quot;Stub&lt;DeoptimizationStub.deoptimizationHandler&gt;&quot;, cb-&gt;name()) == 0 ||
+ 393          strcmp(&quot;Stub&lt;UncommonTrapStub.uncommonTrapHandler&gt;&quot;, cb-&gt;name()) == 0,
+ 394          &quot;unexpected code blob: %s&quot;, cb-&gt;name());
+ 395 #endif
+ 396 
+ 397   // This is a guarantee instead of an assert because if vframe doesn&#39;t match
+ 398   // we will unpack the wrong deoptimized frame and wind up in strange places
+ 399   // where it will be very difficult to figure out what went wrong. Better
+ 400   // to die an early death here than some very obscure death later when the
+ 401   // trail is cold.
+ 402   // Note: on ia64 this guarantee can be fooled by frames with no memory stack
+ 403   // in that it will fail to detect a problem when there is one. This needs
+ 404   // more work in tiger timeframe.
+ 405   guarantee(array-&gt;unextended_sp() == unpack_sp, &quot;vframe_array_head must contain the vframeArray to unpack&quot;);
+ 406 
+ 407   int number_of_frames = array-&gt;frames();
+ 408 
+ 409   // Compute the vframes&#39; sizes.  Note that frame_sizes[] entries are ordered from outermost to innermost
+ 410   // virtual activation, which is the reverse of the elements in the vframes array.
+ 411   intptr_t* frame_sizes = NEW_C_HEAP_ARRAY(intptr_t, number_of_frames, mtCompiler);
+ 412   // +1 because we always have an interpreter return address for the final slot.
+ 413   address* frame_pcs = NEW_C_HEAP_ARRAY(address, number_of_frames + 1, mtCompiler);
+ 414   int popframe_extra_args = 0;
+ 415   // Create an interpreter return address for the stub to use as its return
+ 416   // address so the skeletal frames are perfectly walkable
+ 417   frame_pcs[number_of_frames] = Interpreter::deopt_entry(vtos, 0);
+ 418 
+ 419   // PopFrame requires that the preserved incoming arguments from the recently-popped topmost
+ 420   // activation be put back on the expression stack of the caller for reexecution
+ 421   if (JvmtiExport::can_pop_frame() &amp;&amp; thread-&gt;popframe_forcing_deopt_reexecution()) {
+ 422     popframe_extra_args = in_words(thread-&gt;popframe_preserved_args_size_in_words());
+ 423   }
+ 424 
+ 425   // Find the current pc for sender of the deoptee. Since the sender may have been deoptimized
+ 426   // itself since the deoptee vframeArray was created we must get a fresh value of the pc rather
+ 427   // than simply use array-&gt;sender.pc(). This requires us to walk the current set of frames
+ 428   //
+ 429   frame deopt_sender = stub_frame.sender(&amp;dummy_map); // First is the deoptee frame
+ 430   deopt_sender = deopt_sender.sender(&amp;dummy_map);     // Now deoptee caller
+ 431 
+ 432   // It&#39;s possible that the number of parameters at the call site is
+ 433   // different than number of arguments in the callee when method
+ 434   // handles are used.  If the caller is interpreted get the real
+ 435   // value so that the proper amount of space can be added to it&#39;s
+ 436   // frame.
+ 437   bool caller_was_method_handle = false;
+ 438   if (deopt_sender.is_interpreted_frame()) {
+ 439     methodHandle method(thread, deopt_sender.interpreter_frame_method());
+ 440     Bytecode_invoke cur = Bytecode_invoke_check(method, deopt_sender.interpreter_frame_bci());
+ 441     if (cur.is_invokedynamic() || cur.is_invokehandle()) {
+ 442       // Method handle invokes may involve fairly arbitrary chains of
+ 443       // calls so it&#39;s impossible to know how much actual space the
+ 444       // caller has for locals.
+ 445       caller_was_method_handle = true;
+ 446     }
+ 447   }
+ 448 
+ 449   //
+ 450   // frame_sizes/frame_pcs[0] oldest frame (int or c2i)
+ 451   // frame_sizes/frame_pcs[1] next oldest frame (int)
+ 452   // frame_sizes/frame_pcs[n] youngest frame (int)
+ 453   //
+ 454   // Now a pc in frame_pcs is actually the return address to the frame&#39;s caller (a frame
+ 455   // owns the space for the return address to it&#39;s caller).  Confusing ain&#39;t it.
+ 456   //
+ 457   // The vframe array can address vframes with indices running from
+ 458   // 0.._frames-1. Index  0 is the youngest frame and _frame - 1 is the oldest (root) frame.
+ 459   // When we create the skeletal frames we need the oldest frame to be in the zero slot
+ 460   // in the frame_sizes/frame_pcs so the assembly code can do a trivial walk.
+ 461   // so things look a little strange in this loop.
+ 462   //
+ 463   int callee_parameters = 0;
+ 464   int callee_locals = 0;
+ 465   for (int index = 0; index &lt; array-&gt;frames(); index++ ) {
+ 466     // frame[number_of_frames - 1 ] = on_stack_size(youngest)
+ 467     // frame[number_of_frames - 2 ] = on_stack_size(sender(youngest))
+ 468     // frame[number_of_frames - 3 ] = on_stack_size(sender(sender(youngest)))
+ 469     frame_sizes[number_of_frames - 1 - index] = BytesPerWord * array-&gt;element(index)-&gt;on_stack_size(callee_parameters,
+ 470                                                                                                     callee_locals,
+ 471                                                                                                     index == 0,
+ 472                                                                                                     popframe_extra_args);
+ 473     // This pc doesn&#39;t have to be perfect just good enough to identify the frame
+ 474     // as interpreted so the skeleton frame will be walkable
+ 475     // The correct pc will be set when the skeleton frame is completely filled out
+ 476     // The final pc we store in the loop is wrong and will be overwritten below
+ 477     frame_pcs[number_of_frames - 1 - index ] = Interpreter::deopt_entry(vtos, 0) - frame::pc_return_offset;
+ 478 
+ 479     callee_parameters = array-&gt;element(index)-&gt;method()-&gt;size_of_parameters();
+ 480     callee_locals = array-&gt;element(index)-&gt;method()-&gt;max_locals();
+ 481     popframe_extra_args = 0;
+ 482   }
+ 483 
+ 484   // Compute whether the root vframe returns a float or double value.
+ 485   BasicType return_type;
+ 486   {
+ 487     methodHandle method(thread, array-&gt;element(0)-&gt;method());
+ 488     Bytecode_invoke invoke = Bytecode_invoke_check(method, array-&gt;element(0)-&gt;bci());
+ 489     return_type = invoke.is_valid() ? invoke.result_type() : T_ILLEGAL;
+ 490   }
+ 491 
+ 492   // Compute information for handling adapters and adjusting the frame size of the caller.
+ 493   int caller_adjustment = 0;
+ 494 
+ 495   // Compute the amount the oldest interpreter frame will have to adjust
+ 496   // its caller&#39;s stack by. If the caller is a compiled frame then
+ 497   // we pretend that the callee has no parameters so that the
+ 498   // extension counts for the full amount of locals and not just
+ 499   // locals-parms. This is because without a c2i adapter the parm
+ 500   // area as created by the compiled frame will not be usable by
+ 501   // the interpreter. (Depending on the calling convention there
+ 502   // may not even be enough space).
+ 503 
+ 504   // QQQ I&#39;d rather see this pushed down into last_frame_adjust
+ 505   // and have it take the sender (aka caller).
+ 506 
+ 507   if (deopt_sender.is_compiled_frame() || caller_was_method_handle) {
+ 508     caller_adjustment = last_frame_adjust(0, callee_locals);
+ 509   } else if (callee_locals &gt; callee_parameters) {
+ 510     // The caller frame may need extending to accommodate
+ 511     // non-parameter locals of the first unpacked interpreted frame.
+ 512     // Compute that adjustment.
+ 513     caller_adjustment = last_frame_adjust(callee_parameters, callee_locals);
+ 514   }
+ 515 
+ 516   // If the sender is deoptimized the we must retrieve the address of the handler
+ 517   // since the frame will &quot;magically&quot; show the original pc before the deopt
+ 518   // and we&#39;d undo the deopt.
+ 519 
+ 520   frame_pcs[0] = deopt_sender.raw_pc();
+ 521 
+ 522   assert(CodeCache::find_blob_unsafe(frame_pcs[0]) != NULL, &quot;bad pc&quot;);
+ 523 
+ 524 #if INCLUDE_JVMCI
+ 525   if (exceptionObject() != NULL) {
+ 526     thread-&gt;set_exception_oop(exceptionObject());
+ 527     exec_mode = Unpack_exception;
+ 528   }
+ 529 #endif
+ 530 
+ 531   if (thread-&gt;frames_to_pop_failed_realloc() &gt; 0 &amp;&amp; exec_mode != Unpack_uncommon_trap) {
+ 532     assert(thread-&gt;has_pending_exception(), &quot;should have thrown OOME&quot;);
+ 533     thread-&gt;set_exception_oop(thread-&gt;pending_exception());
+ 534     thread-&gt;clear_pending_exception();
+ 535     exec_mode = Unpack_exception;
+ 536   }
+ 537 
+ 538 #if INCLUDE_JVMCI
+ 539   if (thread-&gt;frames_to_pop_failed_realloc() &gt; 0) {
+ 540     thread-&gt;set_pending_monitorenter(false);
+ 541   }
+ 542 #endif
+ 543 
+ 544   UnrollBlock* info = new UnrollBlock(array-&gt;frame_size() * BytesPerWord,
+ 545                                       caller_adjustment * BytesPerWord,
+ 546                                       caller_was_method_handle ? 0 : callee_parameters,
+ 547                                       number_of_frames,
+ 548                                       frame_sizes,
+ 549                                       frame_pcs,
+ 550                                       return_type,
+ 551                                       exec_mode);
+ 552   // On some platforms, we need a way to pass some platform dependent
+ 553   // information to the unpacking code so the skeletal frames come out
+ 554   // correct (initial fp value, unextended sp, ...)
+ 555   info-&gt;set_initial_info((intptr_t) array-&gt;sender().initial_deoptimization_info());
+ 556 
+ 557   if (array-&gt;frames() &gt; 1) {
+ 558     if (VerifyStack &amp;&amp; TraceDeoptimization) {
+ 559       ttyLocker ttyl;
+ 560       tty-&gt;print_cr(&quot;Deoptimizing method containing inlining&quot;);
+ 561     }
+ 562   }
+ 563 
+ 564   array-&gt;set_unroll_block(info);
+ 565   return info;
+ 566 }
+ 567 
+ 568 // Called to cleanup deoptimization data structures in normal case
+ 569 // after unpacking to stack and when stack overflow error occurs
+ 570 void Deoptimization::cleanup_deopt_info(JavaThread *thread,
+ 571                                         vframeArray *array) {
+ 572 
+ 573   // Get array if coming from exception
+ 574   if (array == NULL) {
+ 575     array = thread-&gt;vframe_array_head();
+ 576   }
+ 577   thread-&gt;set_vframe_array_head(NULL);
+ 578 
+ 579   // Free the previous UnrollBlock
+ 580   vframeArray* old_array = thread-&gt;vframe_array_last();
+ 581   thread-&gt;set_vframe_array_last(array);
+ 582 
+ 583   if (old_array != NULL) {
+ 584     UnrollBlock* old_info = old_array-&gt;unroll_block();
+ 585     old_array-&gt;set_unroll_block(NULL);
+ 586     delete old_info;
+ 587     delete old_array;
+ 588   }
+ 589 
+ 590   // Deallocate any resource creating in this routine and any ResourceObjs allocated
+ 591   // inside the vframeArray (StackValueCollections)
+ 592 
+ 593   delete thread-&gt;deopt_mark();
+ 594   thread-&gt;set_deopt_mark(NULL);
+ 595   thread-&gt;set_deopt_compiled_method(NULL);
+ 596 
+ 597 
+ 598   if (JvmtiExport::can_pop_frame()) {
+ 599     // Regardless of whether we entered this routine with the pending
+ 600     // popframe condition bit set, we should always clear it now
+ 601     thread-&gt;clear_popframe_condition();
+ 602   }
+ 603 
+ 604   // unpack_frames() is called at the end of the deoptimization handler
+ 605   // and (in C2) at the end of the uncommon trap handler. Note this fact
+ 606   // so that an asynchronous stack walker can work again. This counter is
+ 607   // incremented at the beginning of fetch_unroll_info() and (in C2) at
+ 608   // the beginning of uncommon_trap().
+ 609   thread-&gt;dec_in_deopt_handler();
+ 610 }
+ 611 
+ 612 // Moved from cpu directories because none of the cpus has callee save values.
+ 613 // If a cpu implements callee save values, move this to deoptimization_&lt;cpu&gt;.cpp.
+ 614 void Deoptimization::unwind_callee_save_values(frame* f, vframeArray* vframe_array) {
+ 615 
+ 616   // This code is sort of the equivalent of C2IAdapter::setup_stack_frame back in
+ 617   // the days we had adapter frames. When we deoptimize a situation where a
+ 618   // compiled caller calls a compiled caller will have registers it expects
+ 619   // to survive the call to the callee. If we deoptimize the callee the only
+ 620   // way we can restore these registers is to have the oldest interpreter
+ 621   // frame that we create restore these values. That is what this routine
+ 622   // will accomplish.
+ 623 
+ 624   // At the moment we have modified c2 to not have any callee save registers
+ 625   // so this problem does not exist and this routine is just a place holder.
+ 626 
+ 627   assert(f-&gt;is_interpreted_frame(), &quot;must be interpreted&quot;);
+ 628 }
+ 629 
+ 630 // Return BasicType of value being returned
+ 631 JRT_LEAF(BasicType, Deoptimization::unpack_frames(JavaThread* thread, int exec_mode))
+ 632 
+ 633   // We are already active in the special DeoptResourceMark any ResourceObj&#39;s we
+ 634   // allocate will be freed at the end of the routine.
+ 635 
+ 636   // It is actually ok to allocate handles in a leaf method. It causes no safepoints,
+ 637   // but makes the entry a little slower. There is however a little dance we have to
+ 638   // do in debug mode to get around the NoHandleMark code in the JRT_LEAF macro
+ 639   ResetNoHandleMark rnhm; // No-op in release/product versions
+ 640   HandleMark hm;
+ 641 
+ 642   frame stub_frame = thread-&gt;last_frame();
+ 643 
+ 644   // Since the frame to unpack is the top frame of this thread, the vframe_array_head
+ 645   // must point to the vframeArray for the unpack frame.
+ 646   vframeArray* array = thread-&gt;vframe_array_head();
+ 647 
+ 648 #ifndef PRODUCT
+ 649   if (TraceDeoptimization) {
+ 650     ttyLocker ttyl;
+ 651     tty-&gt;print_cr(&quot;DEOPT UNPACKING thread &quot; INTPTR_FORMAT &quot; vframeArray &quot; INTPTR_FORMAT &quot; mode %d&quot;,
+ 652                   p2i(thread), p2i(array), exec_mode);
+ 653   }
+ 654 #endif
+ 655   Events::log_deopt_message(thread, &quot;DEOPT UNPACKING pc=&quot; INTPTR_FORMAT &quot; sp=&quot; INTPTR_FORMAT &quot; mode %d&quot;,
+ 656               p2i(stub_frame.pc()), p2i(stub_frame.sp()), exec_mode);
+ 657 
+ 658   UnrollBlock* info = array-&gt;unroll_block();
+ 659 
+ 660   // We set the last_Java frame. But the stack isn&#39;t really parsable here. So we
+ 661   // clear it to make sure JFR understands not to try and walk stacks from events
+ 662   // in here.
+ 663   intptr_t* sp = thread-&gt;frame_anchor()-&gt;last_Java_sp();
+ 664   thread-&gt;frame_anchor()-&gt;set_last_Java_sp(NULL);
+ 665 
+ 666   // Unpack the interpreter frames and any adapter frame (c2 only) we might create.
+ 667   array-&gt;unpack_to_stack(stub_frame, exec_mode, info-&gt;caller_actual_parameters());
+ 668 
+ 669   thread-&gt;frame_anchor()-&gt;set_last_Java_sp(sp);
+ 670 
+ 671   BasicType bt = info-&gt;return_type();
+ 672 
+ 673   // If we have an exception pending, claim that the return type is an oop
+ 674   // so the deopt_blob does not overwrite the exception_oop.
+ 675 
+ 676   if (exec_mode == Unpack_exception)
+ 677     bt = T_OBJECT;
+ 678 
+ 679   // Cleanup thread deopt data
+ 680   cleanup_deopt_info(thread, array);
+ 681 
+ 682 #ifndef PRODUCT
+ 683   if (VerifyStack) {
+ 684     ResourceMark res_mark;
+ 685     // Clear pending exception to not break verification code (restored afterwards)
+ 686     PRESERVE_EXCEPTION_MARK;
+ 687 
+ 688     thread-&gt;validate_frame_layout();
+ 689 
+ 690     // Verify that the just-unpacked frames match the interpreter&#39;s
+ 691     // notions of expression stack and locals
+ 692     vframeArray* cur_array = thread-&gt;vframe_array_last();
+ 693     RegisterMap rm(thread, false);
+ 694     rm.set_include_argument_oops(false);
+ 695     bool is_top_frame = true;
+ 696     int callee_size_of_parameters = 0;
+ 697     int callee_max_locals = 0;
+ 698     for (int i = 0; i &lt; cur_array-&gt;frames(); i++) {
+ 699       vframeArrayElement* el = cur_array-&gt;element(i);
+ 700       frame* iframe = el-&gt;iframe();
+ 701       guarantee(iframe-&gt;is_interpreted_frame(), &quot;Wrong frame type&quot;);
+ 702 
+ 703       // Get the oop map for this bci
+ 704       InterpreterOopMap mask;
+ 705       int cur_invoke_parameter_size = 0;
+ 706       bool try_next_mask = false;
+ 707       int next_mask_expression_stack_size = -1;
+ 708       int top_frame_expression_stack_adjustment = 0;
+ 709       methodHandle mh(thread, iframe-&gt;interpreter_frame_method());
+ 710       OopMapCache::compute_one_oop_map(mh, iframe-&gt;interpreter_frame_bci(), &amp;mask);
+ 711       BytecodeStream str(mh, iframe-&gt;interpreter_frame_bci());
+ 712       int max_bci = mh-&gt;code_size();
+ 713       // Get to the next bytecode if possible
+ 714       assert(str.bci() &lt; max_bci, &quot;bci in interpreter frame out of bounds&quot;);
+ 715       // Check to see if we can grab the number of outgoing arguments
+ 716       // at an uncommon trap for an invoke (where the compiler
+ 717       // generates debug info before the invoke has executed)
+ 718       Bytecodes::Code cur_code = str.next();
+ 719       if (Bytecodes::is_invoke(cur_code)) {
+ 720         Bytecode_invoke invoke(mh, iframe-&gt;interpreter_frame_bci());
+ 721         cur_invoke_parameter_size = invoke.size_of_parameters();
+ 722         if (i != 0 &amp;&amp; !invoke.is_invokedynamic() &amp;&amp; MethodHandles::has_member_arg(invoke.klass(), invoke.name())) {
+ 723           callee_size_of_parameters++;
+ 724         }
+ 725       }
+ 726       if (str.bci() &lt; max_bci) {
+ 727         Bytecodes::Code next_code = str.next();
+ 728         if (next_code &gt;= 0) {
+ 729           // The interpreter oop map generator reports results before
+ 730           // the current bytecode has executed except in the case of
+ 731           // calls. It seems to be hard to tell whether the compiler
+ 732           // has emitted debug information matching the &quot;state before&quot;
+ 733           // a given bytecode or the state after, so we try both
+ 734           if (!Bytecodes::is_invoke(cur_code) &amp;&amp; cur_code != Bytecodes::_athrow) {
+ 735             // Get expression stack size for the next bytecode
+ 736             InterpreterOopMap next_mask;
+ 737             OopMapCache::compute_one_oop_map(mh, str.bci(), &amp;next_mask);
+ 738             next_mask_expression_stack_size = next_mask.expression_stack_size();
+ 739             if (Bytecodes::is_invoke(next_code)) {
+ 740               Bytecode_invoke invoke(mh, str.bci());
+ 741               next_mask_expression_stack_size += invoke.size_of_parameters();
+ 742             }
+ 743             // Need to subtract off the size of the result type of
+ 744             // the bytecode because this is not described in the
+ 745             // debug info but returned to the interpreter in the TOS
+ 746             // caching register
+ 747             BasicType bytecode_result_type = Bytecodes::result_type(cur_code);
+ 748             if (bytecode_result_type != T_ILLEGAL) {
+ 749               top_frame_expression_stack_adjustment = type2size[bytecode_result_type];
+ 750             }
+ 751             assert(top_frame_expression_stack_adjustment &gt;= 0, &quot;stack adjustment must be positive&quot;);
+ 752             try_next_mask = true;
+ 753           }
+ 754         }
+ 755       }
+ 756 
+ 757       // Verify stack depth and oops in frame
+ 758       // This assertion may be dependent on the platform we&#39;re running on and may need modification (tested on x86 and sparc)
+ 759       if (!(
+ 760             /* SPARC */
+ 761             (iframe-&gt;interpreter_frame_expression_stack_size() == mask.expression_stack_size() + callee_size_of_parameters) ||
+ 762             /* x86 */
+ 763             (iframe-&gt;interpreter_frame_expression_stack_size() == mask.expression_stack_size() + callee_max_locals) ||
+ 764             (try_next_mask &amp;&amp;
+ 765              (iframe-&gt;interpreter_frame_expression_stack_size() == (next_mask_expression_stack_size -
+ 766                                                                     top_frame_expression_stack_adjustment))) ||
+ 767             (is_top_frame &amp;&amp; (exec_mode == Unpack_exception) &amp;&amp; iframe-&gt;interpreter_frame_expression_stack_size() == 0) ||
+ 768             (is_top_frame &amp;&amp; (exec_mode == Unpack_uncommon_trap || exec_mode == Unpack_reexecute || el-&gt;should_reexecute()) &amp;&amp;
+ 769              (iframe-&gt;interpreter_frame_expression_stack_size() == mask.expression_stack_size() + cur_invoke_parameter_size))
+ 770             )) {
+ 771         {
+ 772           ttyLocker ttyl;
+ 773 
+ 774           // Print out some information that will help us debug the problem
+ 775           tty-&gt;print_cr(&quot;Wrong number of expression stack elements during deoptimization&quot;);
+ 776           tty-&gt;print_cr(&quot;  Error occurred while verifying frame %d (0..%d, 0 is topmost)&quot;, i, cur_array-&gt;frames() - 1);
+ 777           tty-&gt;print_cr(&quot;  Fabricated interpreter frame had %d expression stack elements&quot;,
+ 778                         iframe-&gt;interpreter_frame_expression_stack_size());
+ 779           tty-&gt;print_cr(&quot;  Interpreter oop map had %d expression stack elements&quot;, mask.expression_stack_size());
+ 780           tty-&gt;print_cr(&quot;  try_next_mask = %d&quot;, try_next_mask);
+ 781           tty-&gt;print_cr(&quot;  next_mask_expression_stack_size = %d&quot;, next_mask_expression_stack_size);
+ 782           tty-&gt;print_cr(&quot;  callee_size_of_parameters = %d&quot;, callee_size_of_parameters);
+ 783           tty-&gt;print_cr(&quot;  callee_max_locals = %d&quot;, callee_max_locals);
+ 784           tty-&gt;print_cr(&quot;  top_frame_expression_stack_adjustment = %d&quot;, top_frame_expression_stack_adjustment);
+ 785           tty-&gt;print_cr(&quot;  exec_mode = %d&quot;, exec_mode);
+ 786           tty-&gt;print_cr(&quot;  cur_invoke_parameter_size = %d&quot;, cur_invoke_parameter_size);
+ 787           tty-&gt;print_cr(&quot;  Thread = &quot; INTPTR_FORMAT &quot;, thread ID = %d&quot;, p2i(thread), thread-&gt;osthread()-&gt;thread_id());
+ 788           tty-&gt;print_cr(&quot;  Interpreted frames:&quot;);
+ 789           for (int k = 0; k &lt; cur_array-&gt;frames(); k++) {
+ 790             vframeArrayElement* el = cur_array-&gt;element(k);
+ 791             tty-&gt;print_cr(&quot;    %s (bci %d)&quot;, el-&gt;method()-&gt;name_and_sig_as_C_string(), el-&gt;bci());
+ 792           }
+ 793           cur_array-&gt;print_on_2(tty);
+ 794         } // release tty lock before calling guarantee
+ 795         guarantee(false, &quot;wrong number of expression stack elements during deopt&quot;);
+ 796       }
+ 797       VerifyOopClosure verify;
+ 798       iframe-&gt;oops_interpreted_do(&amp;verify, &amp;rm, false);
+ 799       callee_size_of_parameters = mh-&gt;size_of_parameters();
+ 800       callee_max_locals = mh-&gt;max_locals();
+ 801       is_top_frame = false;
+ 802     }
+ 803   }
+ 804 #endif /* !PRODUCT */
+ 805 
+ 806   return bt;
+ 807 JRT_END
+ 808 
+ 809 class DeoptimizeMarkedClosure : public HandshakeClosure {
+ 810  public:
+ 811   DeoptimizeMarkedClosure() : HandshakeClosure(&quot;Deoptimize&quot;) {}
+ 812   void do_thread(Thread* thread) {
+ 813     JavaThread* jt = (JavaThread*)thread;
+ 814     jt-&gt;deoptimize_marked_methods();
+ 815   }
+ 816 };
+ 817 
+ 818 void Deoptimization::deoptimize_all_marked(nmethod* nmethod_only) {
+ 819   ResourceMark rm;
+ 820   DeoptimizationMarker dm;
+ 821 
+ 822   // Make the dependent methods not entrant
+ 823   if (nmethod_only != NULL) {
+ 824     nmethod_only-&gt;mark_for_deoptimization();
+ 825     nmethod_only-&gt;make_not_entrant();
+ 826   } else {
+ 827     MutexLocker mu(SafepointSynchronize::is_at_safepoint() ? NULL : CodeCache_lock, Mutex::_no_safepoint_check_flag);
+ 828     CodeCache::make_marked_nmethods_not_entrant();
+ 829   }
+ 830 
+ 831   DeoptimizeMarkedClosure deopt;
+ 832   if (SafepointSynchronize::is_at_safepoint()) {
+ 833     Threads::java_threads_do(&amp;deopt);
+ 834   } else {
+ 835     Handshake::execute(&amp;deopt);
+ 836   }
+ 837 }
+ 838 
+ 839 Deoptimization::DeoptAction Deoptimization::_unloaded_action
+ 840   = Deoptimization::Action_reinterpret;
+ 841 
+ 842 
+ 843 
+ 844 #if INCLUDE_JVMCI || INCLUDE_AOT
+ 845 template&lt;typename CacheType&gt;
+ 846 class BoxCacheBase : public CHeapObj&lt;mtCompiler&gt; {
+ 847 protected:
+ 848   static InstanceKlass* find_cache_klass(Symbol* klass_name, TRAPS) {
+ 849     ResourceMark rm;
+ 850     char* klass_name_str = klass_name-&gt;as_C_string();
+ 851     Klass* k = SystemDictionary::find(klass_name, Handle(), Handle(), THREAD);
+ 852     guarantee(k != NULL, &quot;%s must be loaded&quot;, klass_name_str);
+ 853     InstanceKlass* ik = InstanceKlass::cast(k);
+ 854     guarantee(ik-&gt;is_initialized(), &quot;%s must be initialized&quot;, klass_name_str);
+ 855     CacheType::compute_offsets(ik);
+ 856     return ik;
+ 857   }
+ 858 };
+ 859 
+ 860 template&lt;typename PrimitiveType, typename CacheType, typename BoxType&gt; class BoxCache  : public BoxCacheBase&lt;CacheType&gt; {
+ 861   PrimitiveType _low;
+ 862   PrimitiveType _high;
+ 863   jobject _cache;
+ 864 protected:
+ 865   static BoxCache&lt;PrimitiveType, CacheType, BoxType&gt; *_singleton;
+ 866   BoxCache(Thread* thread) {
+ 867     InstanceKlass* ik = BoxCacheBase&lt;CacheType&gt;::find_cache_klass(CacheType::symbol(), thread);
+ 868     objArrayOop cache = CacheType::cache(ik);
+ 869     assert(cache-&gt;length() &gt; 0, &quot;Empty cache&quot;);
+ 870     _low = BoxType::value(cache-&gt;obj_at(0));
+ 871     _high = _low + cache-&gt;length() - 1;
+ 872     _cache = JNIHandles::make_global(Handle(thread, cache));
+ 873   }
+ 874   ~BoxCache() {
+ 875     JNIHandles::destroy_global(_cache);
+ 876   }
+ 877 public:
+ 878   static BoxCache&lt;PrimitiveType, CacheType, BoxType&gt;* singleton(Thread* thread) {
+ 879     if (_singleton == NULL) {
+ 880       BoxCache&lt;PrimitiveType, CacheType, BoxType&gt;* s = new BoxCache&lt;PrimitiveType, CacheType, BoxType&gt;(thread);
+ 881       if (!Atomic::replace_if_null(&amp;_singleton, s)) {
+ 882         delete s;
+ 883       }
+ 884     }
+ 885     return _singleton;
+ 886   }
+ 887   oop lookup(PrimitiveType value) {
+ 888     if (_low &lt;= value &amp;&amp; value &lt;= _high) {
+ 889       int offset = value - _low;
+ 890       return objArrayOop(JNIHandles::resolve_non_null(_cache))-&gt;obj_at(offset);
+ 891     }
+ 892     return NULL;
+ 893   }
+ 894   oop lookup_raw(intptr_t raw_value) {
+ 895     // Have to cast to avoid little/big-endian problems.
+ 896     if (sizeof(PrimitiveType) &gt; sizeof(jint)) {
+ 897       jlong value = (jlong)raw_value;
+ 898       return lookup(value);
+ 899     }
+ 900     PrimitiveType value = (PrimitiveType)*((jint*)&amp;raw_value);
+ 901     return lookup(value);
+ 902   }
+ 903 };
+ 904 
+ 905 typedef BoxCache&lt;jint, java_lang_Integer_IntegerCache, java_lang_Integer&gt; IntegerBoxCache;
+ 906 typedef BoxCache&lt;jlong, java_lang_Long_LongCache, java_lang_Long&gt; LongBoxCache;
+ 907 typedef BoxCache&lt;jchar, java_lang_Character_CharacterCache, java_lang_Character&gt; CharacterBoxCache;
+ 908 typedef BoxCache&lt;jshort, java_lang_Short_ShortCache, java_lang_Short&gt; ShortBoxCache;
+ 909 typedef BoxCache&lt;jbyte, java_lang_Byte_ByteCache, java_lang_Byte&gt; ByteBoxCache;
+ 910 
+ 911 template&lt;&gt; BoxCache&lt;jint, java_lang_Integer_IntegerCache, java_lang_Integer&gt;* BoxCache&lt;jint, java_lang_Integer_IntegerCache, java_lang_Integer&gt;::_singleton = NULL;
+ 912 template&lt;&gt; BoxCache&lt;jlong, java_lang_Long_LongCache, java_lang_Long&gt;* BoxCache&lt;jlong, java_lang_Long_LongCache, java_lang_Long&gt;::_singleton = NULL;
+ 913 template&lt;&gt; BoxCache&lt;jchar, java_lang_Character_CharacterCache, java_lang_Character&gt;* BoxCache&lt;jchar, java_lang_Character_CharacterCache, java_lang_Character&gt;::_singleton = NULL;
+ 914 template&lt;&gt; BoxCache&lt;jshort, java_lang_Short_ShortCache, java_lang_Short&gt;* BoxCache&lt;jshort, java_lang_Short_ShortCache, java_lang_Short&gt;::_singleton = NULL;
+ 915 template&lt;&gt; BoxCache&lt;jbyte, java_lang_Byte_ByteCache, java_lang_Byte&gt;* BoxCache&lt;jbyte, java_lang_Byte_ByteCache, java_lang_Byte&gt;::_singleton = NULL;
+ 916 
+ 917 class BooleanBoxCache : public BoxCacheBase&lt;java_lang_Boolean&gt; {
+ 918   jobject _true_cache;
+ 919   jobject _false_cache;
+ 920 protected:
+ 921   static BooleanBoxCache *_singleton;
+ 922   BooleanBoxCache(Thread *thread) {
+ 923     InstanceKlass* ik = find_cache_klass(java_lang_Boolean::symbol(), thread);
+ 924     _true_cache = JNIHandles::make_global(Handle(thread, java_lang_Boolean::get_TRUE(ik)));
+ 925     _false_cache = JNIHandles::make_global(Handle(thread, java_lang_Boolean::get_FALSE(ik)));
+ 926   }
+ 927   ~BooleanBoxCache() {
+ 928     JNIHandles::destroy_global(_true_cache);
+ 929     JNIHandles::destroy_global(_false_cache);
+ 930   }
+ 931 public:
+ 932   static BooleanBoxCache* singleton(Thread* thread) {
+ 933     if (_singleton == NULL) {
+ 934       BooleanBoxCache* s = new BooleanBoxCache(thread);
+ 935       if (!Atomic::replace_if_null(&amp;_singleton, s)) {
+ 936         delete s;
+ 937       }
+ 938     }
+ 939     return _singleton;
+ 940   }
+ 941   oop lookup_raw(intptr_t raw_value) {
+ 942     // Have to cast to avoid little/big-endian problems.
+ 943     jboolean value = (jboolean)*((jint*)&amp;raw_value);
+ 944     return lookup(value);
+ 945   }
+ 946   oop lookup(jboolean value) {
+ 947     if (value != 0) {
+ 948       return JNIHandles::resolve_non_null(_true_cache);
+ 949     }
+ 950     return JNIHandles::resolve_non_null(_false_cache);
+ 951   }
+ 952 };
+ 953 
+ 954 BooleanBoxCache* BooleanBoxCache::_singleton = NULL;
+ 955 
+ 956 oop Deoptimization::get_cached_box(AutoBoxObjectValue* bv, frame* fr, RegisterMap* reg_map, TRAPS) {
+ 957    Klass* k = java_lang_Class::as_Klass(bv-&gt;klass()-&gt;as_ConstantOopReadValue()-&gt;value()());
+ 958    BasicType box_type = SystemDictionary::box_klass_type(k);
+ 959    if (box_type != T_OBJECT) {
+ 960      StackValue* value = StackValue::create_stack_value(fr, reg_map, bv-&gt;field_at(box_type == T_LONG ? 1 : 0));
+ 961      switch(box_type) {
+ 962        case T_INT:     return IntegerBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 963        case T_CHAR:    return CharacterBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 964        case T_SHORT:   return ShortBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 965        case T_BYTE:    return ByteBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 966        case T_BOOLEAN: return BooleanBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 967        case T_LONG:    return LongBoxCache::singleton(THREAD)-&gt;lookup_raw(value-&gt;get_int());
+ 968        default:;
+ 969      }
+ 970    }
+ 971    return NULL;
+ 972 }
+ 973 #endif // INCLUDE_JVMCI || INCLUDE_AOT
+ 974 
+ 975 #if COMPILER2_OR_JVMCI
+ 976 bool Deoptimization::realloc_objects(JavaThread* thread, frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, TRAPS) {
+ 977   Handle pending_exception(THREAD, thread-&gt;pending_exception());
+ 978   const char* exception_file = thread-&gt;exception_file();
+ 979   int exception_line = thread-&gt;exception_line();
+ 980   thread-&gt;clear_pending_exception();
+ 981 
+ 982   bool failures = false;
+ 983 
+ 984   for (int i = 0; i &lt; objects-&gt;length(); i++) {
+ 985     assert(objects-&gt;at(i)-&gt;is_object(), &quot;invalid debug information&quot;);
+ 986     ObjectValue* sv = (ObjectValue*) objects-&gt;at(i);
+ 987 
+ 988     Klass* k = java_lang_Class::as_Klass(sv-&gt;klass()-&gt;as_ConstantOopReadValue()-&gt;value()());
+ 989     oop obj = NULL;
+ 990 
+ 991     if (k-&gt;is_instance_klass()) {
+ 992 #if INCLUDE_JVMCI || INCLUDE_AOT
+ 993       CompiledMethod* cm = fr-&gt;cb()-&gt;as_compiled_method_or_null();
+ 994       if (cm-&gt;is_compiled_by_jvmci() &amp;&amp; sv-&gt;is_auto_box()) {
+ 995         AutoBoxObjectValue* abv = (AutoBoxObjectValue*) sv;
+ 996         obj = get_cached_box(abv, fr, reg_map, THREAD);
+ 997         if (obj != NULL) {
+ 998           // Set the flag to indicate the box came from a cache, so that we can skip the field reassignment for it.
+ 999           abv-&gt;set_cached(true);
+1000         }
+1001       }
+1002 #endif // INCLUDE_JVMCI || INCLUDE_AOT
+1003       InstanceKlass* ik = InstanceKlass::cast(k);
+1004       if (obj == NULL) {
+1005         obj = ik-&gt;allocate_instance(THREAD);
+1006       }
+1007     } else if (k-&gt;is_typeArray_klass()) {
+1008       TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+1009       assert(sv-&gt;field_size() % type2size[ak-&gt;element_type()] == 0, &quot;non-integral array length&quot;);
+1010       int len = sv-&gt;field_size() / type2size[ak-&gt;element_type()];
+1011       obj = ak-&gt;allocate(len, THREAD);
+1012     } else if (k-&gt;is_objArray_klass()) {
+1013       ObjArrayKlass* ak = ObjArrayKlass::cast(k);
+1014       obj = ak-&gt;allocate(sv-&gt;field_size(), THREAD);
+1015     }
+1016 
+1017     if (obj == NULL) {
+1018       failures = true;
+1019     }
+1020 
+1021     assert(sv-&gt;value().is_null(), &quot;redundant reallocation&quot;);
+1022     assert(obj != NULL || HAS_PENDING_EXCEPTION, &quot;allocation should succeed or we should get an exception&quot;);
+1023     CLEAR_PENDING_EXCEPTION;
+1024     sv-&gt;set_value(obj);
+1025   }
+1026 
+1027   if (failures) {
+1028     THROW_OOP_(Universe::out_of_memory_error_realloc_objects(), failures);
+1029   } else if (pending_exception.not_null()) {
+1030     thread-&gt;set_pending_exception(pending_exception(), exception_file, exception_line);
+1031   }
+1032 
+1033   return failures;
+1034 }
+1035 
+1036 #if INCLUDE_JVMCI
+1037 /**
+1038  * For primitive types whose kind gets &quot;erased&quot; at runtime (shorts become stack ints),
+1039  * we need to somehow be able to recover the actual kind to be able to write the correct
+1040  * amount of bytes.
+1041  * For that purpose, this method assumes that, for an entry spanning n bytes at index i,
+1042  * the entries at index n + 1 to n + i are &#39;markers&#39;.
+1043  * For example, if we were writing a short at index 4 of a byte array of size 8, the
+1044  * expected form of the array would be:
+1045  *
+1046  * {b0, b1, b2, b3, INT, marker, b6, b7}
+1047  *
+1048  * Thus, in order to get back the size of the entry, we simply need to count the number
+1049  * of marked entries
+1050  *
+1051  * @param virtualArray the virtualized byte array
+1052  * @param i index of the virtual entry we are recovering
+1053  * @return The number of bytes the entry spans
+1054  */
+1055 static int count_number_of_bytes_for_entry(ObjectValue *virtualArray, int i) {
+1056   int index = i;
+1057   while (++index &lt; virtualArray-&gt;field_size() &amp;&amp;
+1058            virtualArray-&gt;field_at(index)-&gt;is_marker()) {}
+1059   return index - i;
+1060 }
+1061 
+1062 /**
+1063  * If there was a guarantee for byte array to always start aligned to a long, we could
+1064  * do a simple check on the parity of the index. Unfortunately, that is not always the
+1065  * case. Thus, we check alignment of the actual address we are writing to.
+1066  * In the unlikely case index 0 is 5-aligned for example, it would then be possible to
+1067  * write a long to index 3.
+1068  */
+1069 static jbyte* check_alignment_get_addr(typeArrayOop obj, int index, int expected_alignment) {
+1070     jbyte* res = obj-&gt;byte_at_addr(index);
+1071     assert((((intptr_t) res) % expected_alignment) == 0, &quot;Non-aligned write&quot;);
+1072     return res;
+1073 }
+1074 
+1075 static void byte_array_put(typeArrayOop obj, intptr_t val, int index, int byte_count) {
+1076   switch (byte_count) {
+1077     case 1:
+1078       obj-&gt;byte_at_put(index, (jbyte) *((jint *) &amp;val));
+1079       break;
+1080     case 2:
+1081       *((jshort *) check_alignment_get_addr(obj, index, 2)) = (jshort) *((jint *) &amp;val);
+1082       break;
+1083     case 4:
+1084       *((jint *) check_alignment_get_addr(obj, index, 4)) = (jint) *((jint *) &amp;val);
+1085       break;
+1086     case 8:
+1087       *((jlong *) check_alignment_get_addr(obj, index, 8)) = (jlong) *((jlong *) &amp;val);
+1088       break;
+1089     default:
+1090       ShouldNotReachHere();
+1091   }
+1092 }
+1093 #endif // INCLUDE_JVMCI
+1094 
+1095 
+1096 // restore elements of an eliminated type array
+1097 void Deoptimization::reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type) {
+1098   int index = 0;
+1099   intptr_t val;
+1100 
+1101   for (int i = 0; i &lt; sv-&gt;field_size(); i++) {
+1102     StackValue* value = StackValue::create_stack_value(fr, reg_map, sv-&gt;field_at(i));
+1103     switch(type) {
+1104     case T_LONG: case T_DOUBLE: {
+1105       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1106       StackValue* low =
+1107         StackValue::create_stack_value(fr, reg_map, sv-&gt;field_at(++i));
+1108 #ifdef _LP64
+1109       jlong res = (jlong)low-&gt;get_int();
+1110 #else
+1111       jlong res = jlong_from((jint)value-&gt;get_int(), (jint)low-&gt;get_int());
+1112 #endif
+1113       obj-&gt;long_at_put(index, res);
+1114       break;
+1115     }
+1116 
+1117     // Have to cast to INT (32 bits) pointer to avoid little/big-endian problem.
+1118     case T_INT: case T_FLOAT: { // 4 bytes.
+1119       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1120       bool big_value = false;
+1121       if (i + 1 &lt; sv-&gt;field_size() &amp;&amp; type == T_INT) {
+1122         if (sv-&gt;field_at(i)-&gt;is_location()) {
+1123           Location::Type type = ((LocationValue*) sv-&gt;field_at(i))-&gt;location().type();
+1124           if (type == Location::dbl || type == Location::lng) {
+1125             big_value = true;
+1126           }
+1127         } else if (sv-&gt;field_at(i)-&gt;is_constant_int()) {
+1128           ScopeValue* next_scope_field = sv-&gt;field_at(i + 1);
+1129           if (next_scope_field-&gt;is_constant_long() || next_scope_field-&gt;is_constant_double()) {
+1130             big_value = true;
+1131           }
+1132         }
+1133       }
+1134 
+1135       if (big_value) {
+1136         StackValue* low = StackValue::create_stack_value(fr, reg_map, sv-&gt;field_at(++i));
+1137   #ifdef _LP64
+1138         jlong res = (jlong)low-&gt;get_int();
+1139   #else
+1140         jlong res = jlong_from((jint)value-&gt;get_int(), (jint)low-&gt;get_int());
+1141   #endif
+1142         obj-&gt;int_at_put(index, (jint)*((jint*)&amp;res));
+1143         obj-&gt;int_at_put(++index, (jint)*(((jint*)&amp;res) + 1));
+1144       } else {
+1145         val = value-&gt;get_int();
+1146         obj-&gt;int_at_put(index, (jint)*((jint*)&amp;val));
+1147       }
+1148       break;
+1149     }
+1150 
+1151     case T_SHORT:
+1152       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1153       val = value-&gt;get_int();
+1154       obj-&gt;short_at_put(index, (jshort)*((jint*)&amp;val));
+1155       break;
+1156 
+1157     case T_CHAR:
+1158       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1159       val = value-&gt;get_int();
+1160       obj-&gt;char_at_put(index, (jchar)*((jint*)&amp;val));
+1161       break;
+1162 
+1163     case T_BYTE: {
+1164       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1165       // The value we get is erased as a regular int. We will need to find its actual byte count &#39;by hand&#39;.
+1166       val = value-&gt;get_int();
+1167 #if INCLUDE_JVMCI
+1168       int byte_count = count_number_of_bytes_for_entry(sv, i);
+1169       byte_array_put(obj, val, index, byte_count);
+1170       // According to byte_count contract, the values from i + 1 to i + byte_count are illegal values. Skip.
+1171       i += byte_count - 1; // Balance the loop counter.
+1172       index += byte_count;
+1173       // index has been updated so continue at top of loop
+1174       continue;
+1175 #else
+1176       obj-&gt;byte_at_put(index, (jbyte)*((jint*)&amp;val));
+1177       break;
+1178 #endif // INCLUDE_JVMCI
+1179     }
+1180 
+1181     case T_BOOLEAN: {
+1182       assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1183       val = value-&gt;get_int();
+1184       obj-&gt;bool_at_put(index, (jboolean)*((jint*)&amp;val));
+1185       break;
+1186     }
+1187 
+1188       default:
+1189         ShouldNotReachHere();
+1190     }
+1191     index++;
+1192   }
+1193 }
+1194 
+1195 // restore fields of an eliminated object array
+1196 void Deoptimization::reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj) {
+1197   for (int i = 0; i &lt; sv-&gt;field_size(); i++) {
+1198     StackValue* value = StackValue::create_stack_value(fr, reg_map, sv-&gt;field_at(i));
+1199     assert(value-&gt;type() == T_OBJECT, &quot;object element expected&quot;);
+1200     obj-&gt;obj_at_put(i, value-&gt;get_obj()());
+1201   }
+1202 }
+1203 
+1204 class ReassignedField {
+1205 public:
+1206   int _offset;
+1207   BasicType _type;
+1208 public:
+1209   ReassignedField() {
+1210     _offset = 0;
+1211     _type = T_ILLEGAL;
+1212   }
+1213 };
+1214 
+1215 int compare(ReassignedField* left, ReassignedField* right) {
+1216   return left-&gt;_offset - right-&gt;_offset;
+1217 }
+1218 
+1219 // Restore fields of an eliminated instance object using the same field order
+1220 // returned by HotSpotResolvedObjectTypeImpl.getInstanceFields(true)
+1221 static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, ObjectValue* sv, int svIndex, oop obj, bool skip_internal) {
+1222   GrowableArray&lt;ReassignedField&gt;* fields = new GrowableArray&lt;ReassignedField&gt;();
+1223   InstanceKlass* ik = klass;
+1224   while (ik != NULL) {
+1225     for (AllFieldStream fs(ik); !fs.done(); fs.next()) {
+1226       if (!fs.access_flags().is_static() &amp;&amp; (!skip_internal || !fs.access_flags().is_internal())) {
+1227         ReassignedField field;
+1228         field._offset = fs.offset();
+1229         field._type = Signature::basic_type(fs.signature());
+1230         fields-&gt;append(field);
+1231       }
+1232     }
+1233     ik = ik-&gt;superklass();
+1234   }
+1235   fields-&gt;sort(compare);
+1236   for (int i = 0; i &lt; fields-&gt;length(); i++) {
+1237     intptr_t val;
+1238     ScopeValue* scope_field = sv-&gt;field_at(svIndex);
+1239     StackValue* value = StackValue::create_stack_value(fr, reg_map, scope_field);
+1240     int offset = fields-&gt;at(i)._offset;
+1241     BasicType type = fields-&gt;at(i)._type;
+1242     switch (type) {
+1243       case T_OBJECT: case T_ARRAY:
+1244         assert(value-&gt;type() == T_OBJECT, &quot;Agreement.&quot;);
+1245         obj-&gt;obj_field_put(offset, value-&gt;get_obj()());
+1246         break;
+1247 
+1248       // Have to cast to INT (32 bits) pointer to avoid little/big-endian problem.
+1249       case T_INT: case T_FLOAT: { // 4 bytes.
+1250         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1251         bool big_value = false;
+1252         if (i+1 &lt; fields-&gt;length() &amp;&amp; fields-&gt;at(i+1)._type == T_INT) {
+1253           if (scope_field-&gt;is_location()) {
+1254             Location::Type type = ((LocationValue*) scope_field)-&gt;location().type();
+1255             if (type == Location::dbl || type == Location::lng) {
+1256               big_value = true;
+1257             }
+1258           }
+1259           if (scope_field-&gt;is_constant_int()) {
+1260             ScopeValue* next_scope_field = sv-&gt;field_at(svIndex + 1);
+1261             if (next_scope_field-&gt;is_constant_long() || next_scope_field-&gt;is_constant_double()) {
+1262               big_value = true;
+1263             }
+1264           }
+1265         }
+1266 
+1267         if (big_value) {
+1268           i++;
+1269           assert(i &lt; fields-&gt;length(), &quot;second T_INT field needed&quot;);
+1270           assert(fields-&gt;at(i)._type == T_INT, &quot;T_INT field needed&quot;);
+1271         } else {
+1272           val = value-&gt;get_int();
+1273           obj-&gt;int_field_put(offset, (jint)*((jint*)&amp;val));
+1274           break;
+1275         }
+1276       }
+1277         /* no break */
+1278 
+1279       case T_LONG: case T_DOUBLE: {
+1280         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1281         StackValue* low = StackValue::create_stack_value(fr, reg_map, sv-&gt;field_at(++svIndex));
+1282 #ifdef _LP64
+1283         jlong res = (jlong)low-&gt;get_int();
+1284 #else
+1285         jlong res = jlong_from((jint)value-&gt;get_int(), (jint)low-&gt;get_int());
+1286 #endif
+1287         obj-&gt;long_field_put(offset, res);
+1288         break;
+1289       }
+1290 
+1291       case T_SHORT:
+1292         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1293         val = value-&gt;get_int();
+1294         obj-&gt;short_field_put(offset, (jshort)*((jint*)&amp;val));
+1295         break;
+1296 
+1297       case T_CHAR:
+1298         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1299         val = value-&gt;get_int();
+1300         obj-&gt;char_field_put(offset, (jchar)*((jint*)&amp;val));
+1301         break;
+1302 
+1303       case T_BYTE:
+1304         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1305         val = value-&gt;get_int();
+1306         obj-&gt;byte_field_put(offset, (jbyte)*((jint*)&amp;val));
+1307         break;
+1308 
+1309       case T_BOOLEAN:
+1310         assert(value-&gt;type() == T_INT, &quot;Agreement.&quot;);
+1311         val = value-&gt;get_int();
+1312         obj-&gt;bool_field_put(offset, (jboolean)*((jint*)&amp;val));
+1313         break;
+1314 
+1315       default:
+1316         ShouldNotReachHere();
+1317     }
+1318     svIndex++;
+1319   }
+1320   return svIndex;
+1321 }
+1322 
+1323 // restore fields of all eliminated objects and arrays
+1324 void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures, bool skip_internal) {
+1325   for (int i = 0; i &lt; objects-&gt;length(); i++) {
+1326     ObjectValue* sv = (ObjectValue*) objects-&gt;at(i);
+1327     Klass* k = java_lang_Class::as_Klass(sv-&gt;klass()-&gt;as_ConstantOopReadValue()-&gt;value()());
+1328     Handle obj = sv-&gt;value();
+1329     assert(obj.not_null() || realloc_failures, &quot;reallocation was missed&quot;);
+1330     if (PrintDeoptimizationDetails) {
+1331       tty-&gt;print_cr(&quot;reassign fields for object of type %s!&quot;, k-&gt;name()-&gt;as_C_string());
+1332     }
+1333     if (obj.is_null()) {
+1334       continue;
+1335     }
+1336 #if INCLUDE_JVMCI || INCLUDE_AOT
+1337     // Don&#39;t reassign fields of boxes that came from a cache. Caches may be in CDS.
+1338     if (sv-&gt;is_auto_box() &amp;&amp; ((AutoBoxObjectValue*) sv)-&gt;is_cached()) {
+1339       continue;
+1340     }
+1341 #endif // INCLUDE_JVMCI || INCLUDE_AOT
+1342     if (k-&gt;is_instance_klass()) {
+1343       InstanceKlass* ik = InstanceKlass::cast(k);
+1344       reassign_fields_by_klass(ik, fr, reg_map, sv, 0, obj(), skip_internal);
+1345     } else if (k-&gt;is_typeArray_klass()) {
+1346       TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+1347       reassign_type_array_elements(fr, reg_map, sv, (typeArrayOop) obj(), ak-&gt;element_type());
+1348     } else if (k-&gt;is_objArray_klass()) {
+1349       reassign_object_array_elements(fr, reg_map, sv, (objArrayOop) obj());
+1350     }
+1351   }
+1352 }
+1353 
+1354 
+1355 // relock objects for which synchronization was eliminated
+1356 void Deoptimization::relock_objects(GrowableArray&lt;MonitorInfo*&gt;* monitors, JavaThread* thread, bool realloc_failures) {
+1357   for (int i = 0; i &lt; monitors-&gt;length(); i++) {
+1358     MonitorInfo* mon_info = monitors-&gt;at(i);
+1359     if (mon_info-&gt;eliminated()) {
+1360       assert(!mon_info-&gt;owner_is_scalar_replaced() || realloc_failures, &quot;reallocation was missed&quot;);
+1361       if (!mon_info-&gt;owner_is_scalar_replaced()) {
+1362         Handle obj(thread, mon_info-&gt;owner());
+1363         markWord mark = obj-&gt;mark();
+1364         if (UseBiasedLocking &amp;&amp; mark.has_bias_pattern()) {
+1365           // New allocated objects may have the mark set to anonymously biased.
+1366           // Also the deoptimized method may called methods with synchronization
+1367           // where the thread-local object is bias locked to the current thread.
+1368           assert(mark.is_biased_anonymously() ||
+1369                  mark.biased_locker() == thread, &quot;should be locked to current thread&quot;);
+1370           // Reset mark word to unbiased prototype.
+1371           markWord unbiased_prototype = markWord::prototype().set_age(mark.age());
+1372           obj-&gt;set_mark(unbiased_prototype);
+1373         }
+1374         BasicLock* lock = mon_info-&gt;lock();
+1375         ObjectSynchronizer::enter(obj, lock, thread);
+1376         assert(mon_info-&gt;owner()-&gt;is_locked(), &quot;object must be locked now&quot;);
+1377       }
+1378     }
+1379   }
+1380 }
+1381 
+1382 
+1383 #ifndef PRODUCT
+1384 // print information about reallocated objects
+1385 void Deoptimization::print_objects(GrowableArray&lt;ScopeValue*&gt;* objects, bool realloc_failures) {
+1386   fieldDescriptor fd;
+1387 
+1388   for (int i = 0; i &lt; objects-&gt;length(); i++) {
+1389     ObjectValue* sv = (ObjectValue*) objects-&gt;at(i);
+1390     Klass* k = java_lang_Class::as_Klass(sv-&gt;klass()-&gt;as_ConstantOopReadValue()-&gt;value()());
+1391     Handle obj = sv-&gt;value();
+1392 
+1393     tty-&gt;print(&quot;     object &lt;&quot; INTPTR_FORMAT &quot;&gt; of type &quot;, p2i(sv-&gt;value()()));
+1394     k-&gt;print_value();
+1395     assert(obj.not_null() || realloc_failures, &quot;reallocation was missed&quot;);
+1396     if (obj.is_null()) {
+1397       tty-&gt;print(&quot; allocation failed&quot;);
+1398     } else {
+1399       tty-&gt;print(&quot; allocated (%d bytes)&quot;, obj-&gt;size() * HeapWordSize);
+1400     }
+1401     tty-&gt;cr();
+1402 
+1403     if (Verbose &amp;&amp; !obj.is_null()) {
+1404       k-&gt;oop_print_on(obj(), tty);
+1405     }
+1406   }
+1407 }
+1408 #endif
+1409 #endif // COMPILER2_OR_JVMCI
+1410 
+1411 vframeArray* Deoptimization::create_vframeArray(JavaThread* thread, frame fr, RegisterMap *reg_map, GrowableArray&lt;compiledVFrame*&gt;* chunk, bool realloc_failures) {
+1412   Events::log_deopt_message(thread, &quot;DEOPT PACKING pc=&quot; INTPTR_FORMAT &quot; sp=&quot; INTPTR_FORMAT, p2i(fr.pc()), p2i(fr.sp()));
+1413 
+1414 #ifndef PRODUCT
+1415   if (PrintDeoptimizationDetails) {
+1416     ttyLocker ttyl;
+1417     tty-&gt;print(&quot;DEOPT PACKING thread &quot; INTPTR_FORMAT &quot; &quot;, p2i(thread));
+1418     fr.print_on(tty);
+1419     tty-&gt;print_cr(&quot;     Virtual frames (innermost first):&quot;);
+1420     for (int index = 0; index &lt; chunk-&gt;length(); index++) {
+1421       compiledVFrame* vf = chunk-&gt;at(index);
+1422       tty-&gt;print(&quot;       %2d - &quot;, index);
+1423       vf-&gt;print_value();
+1424       int bci = chunk-&gt;at(index)-&gt;raw_bci();
+1425       const char* code_name;
+1426       if (bci == SynchronizationEntryBCI) {
+1427         code_name = &quot;sync entry&quot;;
+1428       } else {
+1429         Bytecodes::Code code = vf-&gt;method()-&gt;code_at(bci);
+1430         code_name = Bytecodes::name(code);
+1431       }
+1432       tty-&gt;print(&quot; - %s&quot;, code_name);
+1433       tty-&gt;print_cr(&quot; @ bci %d &quot;, bci);
+1434       if (Verbose) {
+1435         vf-&gt;print();
+1436         tty-&gt;cr();
+1437       }
+1438     }
+1439   }
+1440 #endif
+1441 
+1442   // Register map for next frame (used for stack crawl).  We capture
+1443   // the state of the deopt&#39;ing frame&#39;s caller.  Thus if we need to
+1444   // stuff a C2I adapter we can properly fill in the callee-save
+1445   // register locations.
+1446   frame caller = fr.sender(reg_map);
+1447   int frame_size = caller.sp() - fr.sp();
+1448 
+1449   frame sender = caller;
+1450 
+1451   // Since the Java thread being deoptimized will eventually adjust it&#39;s own stack,
+1452   // the vframeArray containing the unpacking information is allocated in the C heap.
+1453   // For Compiler1, the caller of the deoptimized frame is saved for use by unpack_frames().
+1454   vframeArray* array = vframeArray::allocate(thread, frame_size, chunk, reg_map, sender, caller, fr, realloc_failures);
+1455 
+1456   // Compare the vframeArray to the collected vframes
+1457   assert(array-&gt;structural_compare(thread, chunk), &quot;just checking&quot;);
+1458 
+1459 #ifndef PRODUCT
+1460   if (PrintDeoptimizationDetails) {
+1461     ttyLocker ttyl;
+1462     tty-&gt;print_cr(&quot;     Created vframeArray &quot; INTPTR_FORMAT, p2i(array));
+1463   }
+1464 #endif // PRODUCT
+1465 
+1466   return array;
+1467 }
+1468 
+1469 #if COMPILER2_OR_JVMCI
+1470 void Deoptimization::pop_frames_failed_reallocs(JavaThread* thread, vframeArray* array) {
+1471   // Reallocation of some scalar replaced objects failed. Record
+1472   // that we need to pop all the interpreter frames for the
+1473   // deoptimized compiled frame.
+1474   assert(thread-&gt;frames_to_pop_failed_realloc() == 0, &quot;missed frames to pop?&quot;);
+1475   thread-&gt;set_frames_to_pop_failed_realloc(array-&gt;frames());
+1476   // Unlock all monitors here otherwise the interpreter will see a
+1477   // mix of locked and unlocked monitors (because of failed
+1478   // reallocations of synchronized objects) and be confused.
+1479   for (int i = 0; i &lt; array-&gt;frames(); i++) {
+1480     MonitorChunk* monitors = array-&gt;element(i)-&gt;monitors();
+1481     if (monitors != NULL) {
+1482       for (int j = 0; j &lt; monitors-&gt;number_of_monitors(); j++) {
+1483         BasicObjectLock* src = monitors-&gt;at(j);
+1484         if (src-&gt;obj() != NULL) {
+1485           ObjectSynchronizer::exit(src-&gt;obj(), src-&gt;lock(), thread);
+1486         }
+1487       }
+1488       array-&gt;element(i)-&gt;free_monitors(thread);
+1489 #ifdef ASSERT
+1490       array-&gt;element(i)-&gt;set_removed_monitors();
+1491 #endif
+1492     }
+1493   }
+1494 }
+1495 #endif
+1496 
+1497 static void collect_monitors(compiledVFrame* cvf, GrowableArray&lt;Handle&gt;* objects_to_revoke) {
+1498   GrowableArray&lt;MonitorInfo*&gt;* monitors = cvf-&gt;monitors();
+1499   Thread* thread = Thread::current();
+1500   for (int i = 0; i &lt; monitors-&gt;length(); i++) {
+1501     MonitorInfo* mon_info = monitors-&gt;at(i);
+1502     if (!mon_info-&gt;eliminated() &amp;&amp; mon_info-&gt;owner() != NULL) {
+1503       objects_to_revoke-&gt;append(Handle(thread, mon_info-&gt;owner()));
+1504     }
+1505   }
+1506 }
+1507 
+1508 static void get_monitors_from_stack(GrowableArray&lt;Handle&gt;* objects_to_revoke, JavaThread* thread, frame fr, RegisterMap* map) {
+1509   // Unfortunately we don&#39;t have a RegisterMap available in most of
+1510   // the places we want to call this routine so we need to walk the
+1511   // stack again to update the register map.
+1512   if (map == NULL || !map-&gt;update_map()) {
+1513     StackFrameStream sfs(thread, true);
+1514     bool found = false;
+1515     while (!found &amp;&amp; !sfs.is_done()) {
+1516       frame* cur = sfs.current();
+1517       sfs.next();
+1518       found = cur-&gt;id() == fr.id();
+1519     }
+1520     assert(found, &quot;frame to be deoptimized not found on target thread&#39;s stack&quot;);
+1521     map = sfs.register_map();
+1522   }
+1523 
+1524   vframe* vf = vframe::new_vframe(&amp;fr, map, thread);
+1525   compiledVFrame* cvf = compiledVFrame::cast(vf);
+1526   // Revoke monitors&#39; biases in all scopes
+1527   while (!cvf-&gt;is_top()) {
+1528     collect_monitors(cvf, objects_to_revoke);
+1529     cvf = compiledVFrame::cast(cvf-&gt;sender());
+1530   }
+1531   collect_monitors(cvf, objects_to_revoke);
+1532 }
+1533 
+1534 void Deoptimization::revoke_from_deopt_handler(JavaThread* thread, frame fr, RegisterMap* map) {
+1535   if (!UseBiasedLocking) {
+1536     return;
+1537   }
+1538   GrowableArray&lt;Handle&gt;* objects_to_revoke = new GrowableArray&lt;Handle&gt;();
+1539   get_monitors_from_stack(objects_to_revoke, thread, fr, map);
+1540 
+1541   int len = objects_to_revoke-&gt;length();
+1542   for (int i = 0; i &lt; len; i++) {
+1543     oop obj = (objects_to_revoke-&gt;at(i))();
+1544     BiasedLocking::revoke_own_lock(objects_to_revoke-&gt;at(i), thread);
+1545     assert(!obj-&gt;mark().has_bias_pattern(), &quot;biases should be revoked by now&quot;);
+1546   }
+1547 }
+1548 
+1549 
+1550 void Deoptimization::deoptimize_single_frame(JavaThread* thread, frame fr, Deoptimization::DeoptReason reason) {
+1551   assert(fr.can_be_deoptimized(), &quot;checking frame type&quot;);
+1552 
+1553   gather_statistics(reason, Action_none, Bytecodes::_illegal);
+1554 
+1555   if (LogCompilation &amp;&amp; xtty != NULL) {
+1556     CompiledMethod* cm = fr.cb()-&gt;as_compiled_method_or_null();
+1557     assert(cm != NULL, &quot;only compiled methods can deopt&quot;);
+1558 
+1559     ttyLocker ttyl;
+1560     xtty-&gt;begin_head(&quot;deoptimized thread=&#39;&quot; UINTX_FORMAT &quot;&#39; reason=&#39;%s&#39; pc=&#39;&quot; INTPTR_FORMAT &quot;&#39;&quot;,(uintx)thread-&gt;osthread()-&gt;thread_id(), trap_reason_name(reason), p2i(fr.pc()));
+1561     cm-&gt;log_identity(xtty);
+1562     xtty-&gt;end_head();
+1563     for (ScopeDesc* sd = cm-&gt;scope_desc_at(fr.pc()); ; sd = sd-&gt;sender()) {
+1564       xtty-&gt;begin_elem(&quot;jvms bci=&#39;%d&#39;&quot;, sd-&gt;bci());
+1565       xtty-&gt;method(sd-&gt;method());
+1566       xtty-&gt;end_elem();
+1567       if (sd-&gt;is_top())  break;
+1568     }
+1569     xtty-&gt;tail(&quot;deoptimized&quot;);
+1570   }
+1571 
+1572   // Patch the compiled method so that when execution returns to it we will
+1573   // deopt the execution state and return to the interpreter.
+1574   fr.deoptimize(thread);
+1575 }
+1576 
+1577 void Deoptimization::deoptimize(JavaThread* thread, frame fr, DeoptReason reason) {
+1578   // Deoptimize only if the frame comes from compile code.
+1579   // Do not deoptimize the frame which is already patched
+1580   // during the execution of the loops below.
+1581   if (!fr.is_compiled_frame() || fr.is_deoptimized_frame()) {
+1582     return;
+1583   }
+1584   ResourceMark rm;
+1585   DeoptimizationMarker dm;
+1586   deoptimize_single_frame(thread, fr, reason);
+1587 }
+1588 
+1589 #if INCLUDE_JVMCI
+1590 address Deoptimization::deoptimize_for_missing_exception_handler(CompiledMethod* cm) {
+1591   // there is no exception handler for this pc =&gt; deoptimize
+1592   cm-&gt;make_not_entrant();
+1593 
+1594   // Use Deoptimization::deoptimize for all of its side-effects:
+1595   // gathering traps statistics, logging...
+1596   // it also patches the return pc but we do not care about that
+1597   // since we return a continuation to the deopt_blob below.
+1598   JavaThread* thread = JavaThread::current();
+1599   RegisterMap reg_map(thread, false);
+1600   frame runtime_frame = thread-&gt;last_frame();
+1601   frame caller_frame = runtime_frame.sender(&amp;reg_map);
+1602   assert(caller_frame.cb()-&gt;as_compiled_method_or_null() == cm, &quot;expect top frame compiled method&quot;);
+1603   Deoptimization::deoptimize(thread, caller_frame, Deoptimization::Reason_not_compiled_exception_handler);
+1604 
+1605   MethodData* trap_mdo = get_method_data(thread, methodHandle(thread, cm-&gt;method()), true);
+1606   if (trap_mdo != NULL) {
+1607     trap_mdo-&gt;inc_trap_count(Deoptimization::Reason_not_compiled_exception_handler);
+1608   }
+1609 
+1610   return SharedRuntime::deopt_blob()-&gt;unpack_with_exception_in_tls();
+1611 }
+1612 #endif
+1613 
+1614 void Deoptimization::deoptimize_frame_internal(JavaThread* thread, intptr_t* id, DeoptReason reason) {
+1615   assert(thread == Thread::current() || SafepointSynchronize::is_at_safepoint(),
+1616          &quot;can only deoptimize other thread at a safepoint&quot;);
+1617   // Compute frame and register map based on thread and sp.
+1618   RegisterMap reg_map(thread, false);
+1619   frame fr = thread-&gt;last_frame();
+1620   while (fr.id() != id) {
+1621     fr = fr.sender(&amp;reg_map);
+1622   }
+1623   deoptimize(thread, fr, reason);
+1624 }
+1625 
+1626 
+1627 void Deoptimization::deoptimize_frame(JavaThread* thread, intptr_t* id, DeoptReason reason) {
+1628   if (thread == Thread::current()) {
+1629     Deoptimization::deoptimize_frame_internal(thread, id, reason);
+1630   } else {
+1631     VM_DeoptimizeFrame deopt(thread, id, reason);
+1632     VMThread::execute(&amp;deopt);
+1633   }
+1634 }
+1635 
+1636 void Deoptimization::deoptimize_frame(JavaThread* thread, intptr_t* id) {
+1637   deoptimize_frame(thread, id, Reason_constraint);
+1638 }
+1639 
+1640 // JVMTI PopFrame support
+1641 JRT_LEAF(void, Deoptimization::popframe_preserve_args(JavaThread* thread, int bytes_to_save, void* start_address))
+1642 {
+1643   thread-&gt;popframe_preserve_args(in_ByteSize(bytes_to_save), start_address);
+1644 }
+1645 JRT_END
+1646 
+1647 MethodData*
+1648 Deoptimization::get_method_data(JavaThread* thread, const methodHandle&amp; m,
+1649                                 bool create_if_missing) {
+1650   Thread* THREAD = thread;
+1651   MethodData* mdo = m()-&gt;method_data();
+1652   if (mdo == NULL &amp;&amp; create_if_missing &amp;&amp; !HAS_PENDING_EXCEPTION) {
+1653     // Build an MDO.  Ignore errors like OutOfMemory;
+1654     // that simply means we won&#39;t have an MDO to update.
+1655     Method::build_interpreter_method_data(m, THREAD);
+1656     if (HAS_PENDING_EXCEPTION) {
+1657       assert((PENDING_EXCEPTION-&gt;is_a(SystemDictionary::OutOfMemoryError_klass())), &quot;we expect only an OOM error here&quot;);
+1658       CLEAR_PENDING_EXCEPTION;
+1659     }
+1660     mdo = m()-&gt;method_data();
+1661   }
+1662   return mdo;
+1663 }
+1664 
+1665 #if COMPILER2_OR_JVMCI
+1666 void Deoptimization::load_class_by_index(const constantPoolHandle&amp; constant_pool, int index, TRAPS) {
+1667   // In case of an unresolved klass entry, load the class.
+1668   // This path is exercised from case _ldc in Parse::do_one_bytecode,
+1669   // and probably nowhere else.
+1670   // Even that case would benefit from simply re-interpreting the
+1671   // bytecode, without paying special attention to the class index.
+1672   // So this whole &quot;class index&quot; feature should probably be removed.
+1673 
+1674   if (constant_pool-&gt;tag_at(index).is_unresolved_klass()) {
+1675     Klass* tk = constant_pool-&gt;klass_at_ignore_error(index, CHECK);
+1676     return;
+1677   }
+1678 
+1679   assert(!constant_pool-&gt;tag_at(index).is_symbol(),
+1680          &quot;no symbolic names here, please&quot;);
+1681 }
+1682 
+1683 
+1684 void Deoptimization::load_class_by_index(const constantPoolHandle&amp; constant_pool, int index) {
+1685   EXCEPTION_MARK;
+1686   load_class_by_index(constant_pool, index, THREAD);
+1687   if (HAS_PENDING_EXCEPTION) {
+1688     // Exception happened during classloading. We ignore the exception here, since it
+1689     // is going to be rethrown since the current activation is going to be deoptimized and
+1690     // the interpreter will re-execute the bytecode.
+1691     CLEAR_PENDING_EXCEPTION;
+1692     // Class loading called java code which may have caused a stack
+1693     // overflow. If the exception was thrown right before the return
+1694     // to the runtime the stack is no longer guarded. Reguard the
+1695     // stack otherwise if we return to the uncommon trap blob and the
+1696     // stack bang causes a stack overflow we crash.
+1697     assert(THREAD-&gt;is_Java_thread(), &quot;only a java thread can be here&quot;);
+1698     JavaThread* thread = (JavaThread*)THREAD;
+1699     bool guard_pages_enabled = thread-&gt;stack_guards_enabled();
+1700     if (!guard_pages_enabled) guard_pages_enabled = thread-&gt;reguard_stack();
+1701     assert(guard_pages_enabled, &quot;stack banging in uncommon trap blob may cause crash&quot;);
+1702   }
+1703 }
+1704 
+1705 #if INCLUDE_JFR
+1706 
+1707 class DeoptReasonSerializer : public JfrSerializer {
+1708  public:
+1709   void serialize(JfrCheckpointWriter&amp; writer) {
+1710     writer.write_count((u4)(Deoptimization::Reason_LIMIT + 1)); // + Reason::many (-1)
+1711     for (int i = -1; i &lt; Deoptimization::Reason_LIMIT; ++i) {
+1712       writer.write_key((u8)i);
+1713       writer.write(Deoptimization::trap_reason_name(i));
+1714     }
+1715   }
+1716 };
+1717 
+1718 class DeoptActionSerializer : public JfrSerializer {
+1719  public:
+1720   void serialize(JfrCheckpointWriter&amp; writer) {
+1721     static const u4 nof_actions = Deoptimization::Action_LIMIT;
+1722     writer.write_count(nof_actions);
+1723     for (u4 i = 0; i &lt; Deoptimization::Action_LIMIT; ++i) {
+1724       writer.write_key(i);
+1725       writer.write(Deoptimization::trap_action_name((int)i));
+1726     }
+1727   }
+1728 };
+1729 
+1730 static void register_serializers() {
+1731   static int critical_section = 0;
+1732   if (1 == critical_section || Atomic::cmpxchg(&amp;critical_section, 0, 1) == 1) {
+1733     return;
+1734   }
+1735   JfrSerializer::register_serializer(TYPE_DEOPTIMIZATIONREASON, true, new DeoptReasonSerializer());
+1736   JfrSerializer::register_serializer(TYPE_DEOPTIMIZATIONACTION, true, new DeoptActionSerializer());
+1737 }
+1738 
+1739 static void post_deoptimization_event(CompiledMethod* nm,
+1740                                       const Method* method,
+1741                                       int trap_bci,
+1742                                       int instruction,
+1743                                       Deoptimization::DeoptReason reason,
+1744                                       Deoptimization::DeoptAction action) {
+1745   assert(nm != NULL, &quot;invariant&quot;);
+1746   assert(method != NULL, &quot;invariant&quot;);
+1747   if (EventDeoptimization::is_enabled()) {
+1748     static bool serializers_registered = false;
+1749     if (!serializers_registered) {
+1750       register_serializers();
+1751       serializers_registered = true;
+1752     }
+1753     EventDeoptimization event;
+1754     event.set_compileId(nm-&gt;compile_id());
+1755     event.set_compiler(nm-&gt;compiler_type());
+1756     event.set_method(method);
+1757     event.set_lineNumber(method-&gt;line_number_from_bci(trap_bci));
+1758     event.set_bci(trap_bci);
+1759     event.set_instruction(instruction);
+1760     event.set_reason(reason);
+1761     event.set_action(action);
+1762     event.commit();
+1763   }
+1764 }
+1765 
+1766 #endif // INCLUDE_JFR
+1767 
+1768 JRT_ENTRY(void, Deoptimization::uncommon_trap_inner(JavaThread* thread, jint trap_request)) {
+1769   HandleMark hm;
+1770 
+1771   // uncommon_trap() is called at the beginning of the uncommon trap
+1772   // handler. Note this fact before we start generating temporary frames
+1773   // that can confuse an asynchronous stack walker. This counter is
+1774   // decremented at the end of unpack_frames().
+1775   thread-&gt;inc_in_deopt_handler();
+1776 
+1777   // We need to update the map if we have biased locking.
+1778 #if INCLUDE_JVMCI
+1779   // JVMCI might need to get an exception from the stack, which in turn requires the register map to be valid
+1780   RegisterMap reg_map(thread, true);
+1781 #else
+1782   RegisterMap reg_map(thread, UseBiasedLocking);
+1783 #endif
+1784   frame stub_frame = thread-&gt;last_frame();
+1785   frame fr = stub_frame.sender(&amp;reg_map);
+1786   // Make sure the calling nmethod is not getting deoptimized and removed
+1787   // before we are done with it.
+1788   nmethodLocker nl(fr.pc());
+1789 
+1790   // Log a message
+1791   Events::log_deopt_message(thread, &quot;Uncommon trap: trap_request=&quot; PTR32_FORMAT &quot; fr.pc=&quot; INTPTR_FORMAT &quot; relative=&quot; INTPTR_FORMAT,
+1792               trap_request, p2i(fr.pc()), fr.pc() - fr.cb()-&gt;code_begin());
+1793 
+1794   {
+1795     ResourceMark rm;
+1796 
+1797     DeoptReason reason = trap_request_reason(trap_request);
+1798     DeoptAction action = trap_request_action(trap_request);
+1799 #if INCLUDE_JVMCI
+1800     int debug_id = trap_request_debug_id(trap_request);
+1801 #endif
+1802     jint unloaded_class_index = trap_request_index(trap_request); // CP idx or -1
+1803 
+1804     vframe*  vf  = vframe::new_vframe(&amp;fr, &amp;reg_map, thread);
+1805     compiledVFrame* cvf = compiledVFrame::cast(vf);
+1806 
+1807     CompiledMethod* nm = cvf-&gt;code();
+1808 
+1809     ScopeDesc*      trap_scope  = cvf-&gt;scope();
+1810 
+1811     if (TraceDeoptimization) {
+1812       ttyLocker ttyl;
+1813       tty-&gt;print_cr(&quot;  bci=%d pc=&quot; INTPTR_FORMAT &quot;, relative_pc=&quot; INTPTR_FORMAT &quot;, method=%s&quot; JVMCI_ONLY(&quot;, debug_id=%d&quot;), trap_scope-&gt;bci(), p2i(fr.pc()), fr.pc() - nm-&gt;code_begin(), trap_scope-&gt;method()-&gt;name_and_sig_as_C_string()
+1814 #if INCLUDE_JVMCI
+1815           , debug_id
+1816 #endif
+1817           );
+1818     }
+1819 
+1820     methodHandle    trap_method(THREAD, trap_scope-&gt;method());
+1821     int             trap_bci    = trap_scope-&gt;bci();
+1822 #if INCLUDE_JVMCI
+1823     jlong           speculation = thread-&gt;pending_failed_speculation();
+1824     if (nm-&gt;is_compiled_by_jvmci() &amp;&amp; nm-&gt;is_nmethod()) { // Exclude AOTed methods
+1825       nm-&gt;as_nmethod()-&gt;update_speculation(thread);
+1826     } else {
+1827       assert(speculation == 0, &quot;There should not be a speculation for methods compiled by non-JVMCI compilers&quot;);
+1828     }
+1829 
+1830     if (trap_bci == SynchronizationEntryBCI) {
+1831       trap_bci = 0;
+1832       thread-&gt;set_pending_monitorenter(true);
+1833     }
+1834 
+1835     if (reason == Deoptimization::Reason_transfer_to_interpreter) {
+1836       thread-&gt;set_pending_transfer_to_interpreter(true);
+1837     }
+1838 #endif
+1839 
+1840     Bytecodes::Code trap_bc     = trap_method-&gt;java_code_at(trap_bci);
+1841     // Record this event in the histogram.
+1842     gather_statistics(reason, action, trap_bc);
+1843 
+1844     // Ensure that we can record deopt. history:
+1845     // Need MDO to record RTM code generation state.
+1846     bool create_if_missing = ProfileTraps || UseCodeAging RTM_OPT_ONLY( || UseRTMLocking );
+1847 
+1848     methodHandle profiled_method;
+1849 #if INCLUDE_JVMCI
+1850     if (nm-&gt;is_compiled_by_jvmci()) {
+1851       profiled_method = methodHandle(THREAD, nm-&gt;method());
+1852     } else {
+1853       profiled_method = trap_method;
+1854     }
+1855 #else
+1856     profiled_method = trap_method;
+1857 #endif
+1858 
+1859     MethodData* trap_mdo =
+1860       get_method_data(thread, profiled_method, create_if_missing);
+1861 
+1862     JFR_ONLY(post_deoptimization_event(nm, trap_method(), trap_bci, trap_bc, reason, action);)
+1863 
+1864     // Log a message
+1865     Events::log_deopt_message(thread, &quot;Uncommon trap: reason=%s action=%s pc=&quot; INTPTR_FORMAT &quot; method=%s @ %d %s&quot;,
+1866                               trap_reason_name(reason), trap_action_name(action), p2i(fr.pc()),
+1867                               trap_method-&gt;name_and_sig_as_C_string(), trap_bci, nm-&gt;compiler_name());
+1868 
+1869     // Print a bunch of diagnostics, if requested.
+1870     if (TraceDeoptimization || LogCompilation) {
+1871       ResourceMark rm;
+1872       ttyLocker ttyl;
+1873       char buf[100];
+1874       if (xtty != NULL) {
+1875         xtty-&gt;begin_head(&quot;uncommon_trap thread=&#39;&quot; UINTX_FORMAT &quot;&#39; %s&quot;,
+1876                          os::current_thread_id(),
+1877                          format_trap_request(buf, sizeof(buf), trap_request));
+1878 #if INCLUDE_JVMCI
+1879         if (speculation != 0) {
+1880           xtty-&gt;print(&quot; speculation=&#39;&quot; JLONG_FORMAT &quot;&#39;&quot;, speculation);
+1881         }
+1882 #endif
+1883         nm-&gt;log_identity(xtty);
+1884       }
+1885       Symbol* class_name = NULL;
+1886       bool unresolved = false;
+1887       if (unloaded_class_index &gt;= 0) {
+1888         constantPoolHandle constants (THREAD, trap_method-&gt;constants());
+1889         if (constants-&gt;tag_at(unloaded_class_index).is_unresolved_klass()) {
+1890           class_name = constants-&gt;klass_name_at(unloaded_class_index);
+1891           unresolved = true;
+1892           if (xtty != NULL)
+1893             xtty-&gt;print(&quot; unresolved=&#39;1&#39;&quot;);
+1894         } else if (constants-&gt;tag_at(unloaded_class_index).is_symbol()) {
+1895           class_name = constants-&gt;symbol_at(unloaded_class_index);
+1896         }
+1897         if (xtty != NULL)
+1898           xtty-&gt;name(class_name);
+1899       }
+1900       if (xtty != NULL &amp;&amp; trap_mdo != NULL &amp;&amp; (int)reason &lt; (int)MethodData::_trap_hist_limit) {
+1901         // Dump the relevant MDO state.
+1902         // This is the deopt count for the current reason, any previous
+1903         // reasons or recompiles seen at this point.
+1904         int dcnt = trap_mdo-&gt;trap_count(reason);
+1905         if (dcnt != 0)
+1906           xtty-&gt;print(&quot; count=&#39;%d&#39;&quot;, dcnt);
+1907         ProfileData* pdata = trap_mdo-&gt;bci_to_data(trap_bci);
+1908         int dos = (pdata == NULL)? 0: pdata-&gt;trap_state();
+1909         if (dos != 0) {
+1910           xtty-&gt;print(&quot; state=&#39;%s&#39;&quot;, format_trap_state(buf, sizeof(buf), dos));
+1911           if (trap_state_is_recompiled(dos)) {
+1912             int recnt2 = trap_mdo-&gt;overflow_recompile_count();
+1913             if (recnt2 != 0)
+1914               xtty-&gt;print(&quot; recompiles2=&#39;%d&#39;&quot;, recnt2);
+1915           }
+1916         }
+1917       }
+1918       if (xtty != NULL) {
+1919         xtty-&gt;stamp();
+1920         xtty-&gt;end_head();
+1921       }
+1922       if (TraceDeoptimization) {  // make noise on the tty
+1923         tty-&gt;print(&quot;Uncommon trap occurred in&quot;);
+1924         nm-&gt;method()-&gt;print_short_name(tty);
+1925         tty-&gt;print(&quot; compiler=%s compile_id=%d&quot;, nm-&gt;compiler_name(), nm-&gt;compile_id());
+1926 #if INCLUDE_JVMCI
+1927         if (nm-&gt;is_nmethod()) {
+1928           const char* installed_code_name = nm-&gt;as_nmethod()-&gt;jvmci_name();
+1929           if (installed_code_name != NULL) {
+1930             tty-&gt;print(&quot; (JVMCI: installed code name=%s) &quot;, installed_code_name);
+1931           }
+1932         }
+1933 #endif
+1934         tty-&gt;print(&quot; (@&quot; INTPTR_FORMAT &quot;) thread=&quot; UINTX_FORMAT &quot; reason=%s action=%s unloaded_class_index=%d&quot; JVMCI_ONLY(&quot; debug_id=%d&quot;),
+1935                    p2i(fr.pc()),
+1936                    os::current_thread_id(),
+1937                    trap_reason_name(reason),
+1938                    trap_action_name(action),
+1939                    unloaded_class_index
+1940 #if INCLUDE_JVMCI
+1941                    , debug_id
+1942 #endif
+1943                    );
+1944         if (class_name != NULL) {
+1945           tty-&gt;print(unresolved ? &quot; unresolved class: &quot; : &quot; symbol: &quot;);
+1946           class_name-&gt;print_symbol_on(tty);
+1947         }
+1948         tty-&gt;cr();
+1949       }
+1950       if (xtty != NULL) {
+1951         // Log the precise location of the trap.
+1952         for (ScopeDesc* sd = trap_scope; ; sd = sd-&gt;sender()) {
+1953           xtty-&gt;begin_elem(&quot;jvms bci=&#39;%d&#39;&quot;, sd-&gt;bci());
+1954           xtty-&gt;method(sd-&gt;method());
+1955           xtty-&gt;end_elem();
+1956           if (sd-&gt;is_top())  break;
+1957         }
+1958         xtty-&gt;tail(&quot;uncommon_trap&quot;);
+1959       }
+1960     }
+1961     // (End diagnostic printout.)
+1962 
+1963     // Load class if necessary
+1964     if (unloaded_class_index &gt;= 0) {
+1965       constantPoolHandle constants(THREAD, trap_method-&gt;constants());
+1966       load_class_by_index(constants, unloaded_class_index);
+1967     }
+1968 
+1969     // Flush the nmethod if necessary and desirable.
+1970     //
+1971     // We need to avoid situations where we are re-flushing the nmethod
+1972     // because of a hot deoptimization site.  Repeated flushes at the same
+1973     // point need to be detected by the compiler and avoided.  If the compiler
+1974     // cannot avoid them (or has a bug and &quot;refuses&quot; to avoid them), this
+1975     // module must take measures to avoid an infinite cycle of recompilation
+1976     // and deoptimization.  There are several such measures:
+1977     //
+1978     //   1. If a recompilation is ordered a second time at some site X
+1979     //   and for the same reason R, the action is adjusted to &#39;reinterpret&#39;,
+1980     //   to give the interpreter time to exercise the method more thoroughly.
+1981     //   If this happens, the method&#39;s overflow_recompile_count is incremented.
+1982     //
+1983     //   2. If the compiler fails to reduce the deoptimization rate, then
+1984     //   the method&#39;s overflow_recompile_count will begin to exceed the set
+1985     //   limit PerBytecodeRecompilationCutoff.  If this happens, the action
+1986     //   is adjusted to &#39;make_not_compilable&#39;, and the method is abandoned
+1987     //   to the interpreter.  This is a performance hit for hot methods,
+1988     //   but is better than a disastrous infinite cycle of recompilations.
+1989     //   (Actually, only the method containing the site X is abandoned.)
+1990     //
+1991     //   3. In parallel with the previous measures, if the total number of
+1992     //   recompilations of a method exceeds the much larger set limit
+1993     //   PerMethodRecompilationCutoff, the method is abandoned.
+1994     //   This should only happen if the method is very large and has
+1995     //   many &quot;lukewarm&quot; deoptimizations.  The code which enforces this
+1996     //   limit is elsewhere (class nmethod, class Method).
+1997     //
+1998     // Note that the per-BCI &#39;is_recompiled&#39; bit gives the compiler one chance
+1999     // to recompile at each bytecode independently of the per-BCI cutoff.
+2000     //
+2001     // The decision to update code is up to the compiler, and is encoded
+2002     // in the Action_xxx code.  If the compiler requests Action_none
+2003     // no trap state is changed, no compiled code is changed, and the
+2004     // computation suffers along in the interpreter.
+2005     //
+2006     // The other action codes specify various tactics for decompilation
+2007     // and recompilation.  Action_maybe_recompile is the loosest, and
+2008     // allows the compiled code to stay around until enough traps are seen,
+2009     // and until the compiler gets around to recompiling the trapping method.
+2010     //
+2011     // The other actions cause immediate removal of the present code.
+2012 
+2013     // Traps caused by injected profile shouldn&#39;t pollute trap counts.
+2014     bool injected_profile_trap = trap_method-&gt;has_injected_profile() &amp;&amp;
+2015                                  (reason == Reason_intrinsic || reason == Reason_unreached);
+2016 
+2017     bool update_trap_state = (reason != Reason_tenured) &amp;&amp; !injected_profile_trap;
+2018     bool make_not_entrant = false;
+2019     bool make_not_compilable = false;
+2020     bool reprofile = false;
+2021     switch (action) {
+2022     case Action_none:
+2023       // Keep the old code.
+2024       update_trap_state = false;
+2025       break;
+2026     case Action_maybe_recompile:
+2027       // Do not need to invalidate the present code, but we can
+2028       // initiate another
+2029       // Start compiler without (necessarily) invalidating the nmethod.
+2030       // The system will tolerate the old code, but new code should be
+2031       // generated when possible.
+2032       break;
+2033     case Action_reinterpret:
+2034       // Go back into the interpreter for a while, and then consider
+2035       // recompiling form scratch.
+2036       make_not_entrant = true;
+2037       // Reset invocation counter for outer most method.
+2038       // This will allow the interpreter to exercise the bytecodes
+2039       // for a while before recompiling.
+2040       // By contrast, Action_make_not_entrant is immediate.
+2041       //
+2042       // Note that the compiler will track null_check, null_assert,
+2043       // range_check, and class_check events and log them as if they
+2044       // had been traps taken from compiled code.  This will update
+2045       // the MDO trap history so that the next compilation will
+2046       // properly detect hot trap sites.
+2047       reprofile = true;
+2048       break;
+2049     case Action_make_not_entrant:
+2050       // Request immediate recompilation, and get rid of the old code.
+2051       // Make them not entrant, so next time they are called they get
+2052       // recompiled.  Unloaded classes are loaded now so recompile before next
+2053       // time they are called.  Same for uninitialized.  The interpreter will
+2054       // link the missing class, if any.
+2055       make_not_entrant = true;
+2056       break;
+2057     case Action_make_not_compilable:
+2058       // Give up on compiling this method at all.
+2059       make_not_entrant = true;
+2060       make_not_compilable = true;
+2061       break;
+2062     default:
+2063       ShouldNotReachHere();
+2064     }
+2065 
+2066     // Setting +ProfileTraps fixes the following, on all platforms:
+2067     // 4852688: ProfileInterpreter is off by default for ia64.  The result is
+2068     // infinite heroic-opt-uncommon-trap/deopt/recompile cycles, since the
+2069     // recompile relies on a MethodData* to record heroic opt failures.
+2070 
+2071     // Whether the interpreter is producing MDO data or not, we also need
+2072     // to use the MDO to detect hot deoptimization points and control
+2073     // aggressive optimization.
+2074     bool inc_recompile_count = false;
+2075     ProfileData* pdata = NULL;
+2076     if (ProfileTraps &amp;&amp; !is_client_compilation_mode_vm() &amp;&amp; update_trap_state &amp;&amp; trap_mdo != NULL) {
+2077       assert(trap_mdo == get_method_data(thread, profiled_method, false), &quot;sanity&quot;);
+2078       uint this_trap_count = 0;
+2079       bool maybe_prior_trap = false;
+2080       bool maybe_prior_recompile = false;
+2081       pdata = query_update_method_data(trap_mdo, trap_bci, reason, true,
+2082 #if INCLUDE_JVMCI
+2083                                    nm-&gt;is_compiled_by_jvmci() &amp;&amp; nm-&gt;is_osr_method(),
+2084 #endif
+2085                                    nm-&gt;method(),
+2086                                    //outputs:
+2087                                    this_trap_count,
+2088                                    maybe_prior_trap,
+2089                                    maybe_prior_recompile);
+2090       // Because the interpreter also counts null, div0, range, and class
+2091       // checks, these traps from compiled code are double-counted.
+2092       // This is harmless; it just means that the PerXTrapLimit values
+2093       // are in effect a little smaller than they look.
+2094 
+2095       DeoptReason per_bc_reason = reason_recorded_per_bytecode_if_any(reason);
+2096       if (per_bc_reason != Reason_none) {
+2097         // Now take action based on the partially known per-BCI history.
+2098         if (maybe_prior_trap
+2099             &amp;&amp; this_trap_count &gt;= (uint)PerBytecodeTrapLimit) {
+2100           // If there are too many traps at this BCI, force a recompile.
+2101           // This will allow the compiler to see the limit overflow, and
+2102           // take corrective action, if possible.  The compiler generally
+2103           // does not use the exact PerBytecodeTrapLimit value, but instead
+2104           // changes its tactics if it sees any traps at all.  This provides
+2105           // a little hysteresis, delaying a recompile until a trap happens
+2106           // several times.
+2107           //
+2108           // Actually, since there is only one bit of counter per BCI,
+2109           // the possible per-BCI counts are {0,1,(per-method count)}.
+2110           // This produces accurate results if in fact there is only
+2111           // one hot trap site, but begins to get fuzzy if there are
+2112           // many sites.  For example, if there are ten sites each
+2113           // trapping two or more times, they each get the blame for
+2114           // all of their traps.
+2115           make_not_entrant = true;
+2116         }
+2117 
+2118         // Detect repeated recompilation at the same BCI, and enforce a limit.
+2119         if (make_not_entrant &amp;&amp; maybe_prior_recompile) {
+2120           // More than one recompile at this point.
+2121           inc_recompile_count = maybe_prior_trap;
+2122         }
+2123       } else {
+2124         // For reasons which are not recorded per-bytecode, we simply
+2125         // force recompiles unconditionally.
+2126         // (Note that PerMethodRecompilationCutoff is enforced elsewhere.)
+2127         make_not_entrant = true;
+2128       }
+2129 
+2130       // Go back to the compiler if there are too many traps in this method.
+2131       if (this_trap_count &gt;= per_method_trap_limit(reason)) {
+2132         // If there are too many traps in this method, force a recompile.
+2133         // This will allow the compiler to see the limit overflow, and
+2134         // take corrective action, if possible.
+2135         // (This condition is an unlikely backstop only, because the
+2136         // PerBytecodeTrapLimit is more likely to take effect first,
+2137         // if it is applicable.)
+2138         make_not_entrant = true;
+2139       }
+2140 
+2141       // Here&#39;s more hysteresis:  If there has been a recompile at
+2142       // this trap point already, run the method in the interpreter
+2143       // for a while to exercise it more thoroughly.
+2144       if (make_not_entrant &amp;&amp; maybe_prior_recompile &amp;&amp; maybe_prior_trap) {
+2145         reprofile = true;
+2146       }
+2147     }
+2148 
+2149     // Take requested actions on the method:
+2150 
+2151     // Recompile
+2152     if (make_not_entrant) {
+2153       if (!nm-&gt;make_not_entrant()) {
+2154         return; // the call did not change nmethod&#39;s state
+2155       }
+2156 
+2157       if (pdata != NULL) {
+2158         // Record the recompilation event, if any.
+2159         int tstate0 = pdata-&gt;trap_state();
+2160         int tstate1 = trap_state_set_recompiled(tstate0, true);
+2161         if (tstate1 != tstate0)
+2162           pdata-&gt;set_trap_state(tstate1);
+2163       }
+2164 
+2165 #if INCLUDE_RTM_OPT
+2166       // Restart collecting RTM locking abort statistic if the method
+2167       // is recompiled for a reason other than RTM state change.
+2168       // Assume that in new recompiled code the statistic could be different,
+2169       // for example, due to different inlining.
+2170       if ((reason != Reason_rtm_state_change) &amp;&amp; (trap_mdo != NULL) &amp;&amp;
+2171           UseRTMDeopt &amp;&amp; (nm-&gt;as_nmethod()-&gt;rtm_state() != ProfileRTM)) {
+2172         trap_mdo-&gt;atomic_set_rtm_state(ProfileRTM);
+2173       }
+2174 #endif
+2175       // For code aging we count traps separately here, using make_not_entrant()
+2176       // as a guard against simultaneous deopts in multiple threads.
+2177       if (reason == Reason_tenured &amp;&amp; trap_mdo != NULL) {
+2178         trap_mdo-&gt;inc_tenure_traps();
+2179       }
+2180     }
+2181 
+2182     if (inc_recompile_count) {
+2183       trap_mdo-&gt;inc_overflow_recompile_count();
+2184       if ((uint)trap_mdo-&gt;overflow_recompile_count() &gt;
+2185           (uint)PerBytecodeRecompilationCutoff) {
+2186         // Give up on the method containing the bad BCI.
+2187         if (trap_method() == nm-&gt;method()) {
+2188           make_not_compilable = true;
+2189         } else {
+2190           trap_method-&gt;set_not_compilable(&quot;overflow_recompile_count &gt; PerBytecodeRecompilationCutoff&quot;, CompLevel_full_optimization);
+2191           // But give grace to the enclosing nm-&gt;method().
+2192         }
+2193       }
+2194     }
+2195 
+2196     // Reprofile
+2197     if (reprofile) {
+2198       CompilationPolicy::policy()-&gt;reprofile(trap_scope, nm-&gt;is_osr_method());
+2199     }
+2200 
+2201     // Give up compiling
+2202     if (make_not_compilable &amp;&amp; !nm-&gt;method()-&gt;is_not_compilable(CompLevel_full_optimization)) {
+2203       assert(make_not_entrant, &quot;consistent&quot;);
+2204       nm-&gt;method()-&gt;set_not_compilable(&quot;give up compiling&quot;, CompLevel_full_optimization);
+2205     }
+2206 
+2207   } // Free marked resources
+2208 
+2209 }
+2210 JRT_END
+2211 
+2212 ProfileData*
+2213 Deoptimization::query_update_method_data(MethodData* trap_mdo,
+2214                                          int trap_bci,
+2215                                          Deoptimization::DeoptReason reason,
+2216                                          bool update_total_trap_count,
+2217 #if INCLUDE_JVMCI
+2218                                          bool is_osr,
+2219 #endif
+2220                                          Method* compiled_method,
+2221                                          //outputs:
+2222                                          uint&amp; ret_this_trap_count,
+2223                                          bool&amp; ret_maybe_prior_trap,
+2224                                          bool&amp; ret_maybe_prior_recompile) {
+2225   bool maybe_prior_trap = false;
+2226   bool maybe_prior_recompile = false;
+2227   uint this_trap_count = 0;
+2228   if (update_total_trap_count) {
+2229     uint idx = reason;
+2230 #if INCLUDE_JVMCI
+2231     if (is_osr) {
+2232       idx += Reason_LIMIT;
+2233     }
+2234 #endif
+2235     uint prior_trap_count = trap_mdo-&gt;trap_count(idx);
+2236     this_trap_count  = trap_mdo-&gt;inc_trap_count(idx);
+2237 
+2238     // If the runtime cannot find a place to store trap history,
+2239     // it is estimated based on the general condition of the method.
+2240     // If the method has ever been recompiled, or has ever incurred
+2241     // a trap with the present reason , then this BCI is assumed
+2242     // (pessimistically) to be the culprit.
+2243     maybe_prior_trap      = (prior_trap_count != 0);
+2244     maybe_prior_recompile = (trap_mdo-&gt;decompile_count() != 0);
+2245   }
+2246   ProfileData* pdata = NULL;
+2247 
+2248 
+2249   // For reasons which are recorded per bytecode, we check per-BCI data.
+2250   DeoptReason per_bc_reason = reason_recorded_per_bytecode_if_any(reason);
+2251   assert(per_bc_reason != Reason_none || update_total_trap_count, &quot;must be&quot;);
+2252   if (per_bc_reason != Reason_none) {
+2253     // Find the profile data for this BCI.  If there isn&#39;t one,
+2254     // try to allocate one from the MDO&#39;s set of spares.
+2255     // This will let us detect a repeated trap at this point.
+2256     pdata = trap_mdo-&gt;allocate_bci_to_data(trap_bci, reason_is_speculate(reason) ? compiled_method : NULL);
+2257 
+2258     if (pdata != NULL) {
+2259       if (reason_is_speculate(reason) &amp;&amp; !pdata-&gt;is_SpeculativeTrapData()) {
+2260         if (LogCompilation &amp;&amp; xtty != NULL) {
+2261           ttyLocker ttyl;
+2262           // no more room for speculative traps in this MDO
+2263           xtty-&gt;elem(&quot;speculative_traps_oom&quot;);
+2264         }
+2265       }
+2266       // Query the trap state of this profile datum.
+2267       int tstate0 = pdata-&gt;trap_state();
+2268       if (!trap_state_has_reason(tstate0, per_bc_reason))
+2269         maybe_prior_trap = false;
+2270       if (!trap_state_is_recompiled(tstate0))
+2271         maybe_prior_recompile = false;
+2272 
+2273       // Update the trap state of this profile datum.
+2274       int tstate1 = tstate0;
+2275       // Record the reason.
+2276       tstate1 = trap_state_add_reason(tstate1, per_bc_reason);
+2277       // Store the updated state on the MDO, for next time.
+2278       if (tstate1 != tstate0)
+2279         pdata-&gt;set_trap_state(tstate1);
+2280     } else {
+2281       if (LogCompilation &amp;&amp; xtty != NULL) {
+2282         ttyLocker ttyl;
+2283         // Missing MDP?  Leave a small complaint in the log.
+2284         xtty-&gt;elem(&quot;missing_mdp bci=&#39;%d&#39;&quot;, trap_bci);
+2285       }
+2286     }
+2287   }
+2288 
+2289   // Return results:
+2290   ret_this_trap_count = this_trap_count;
+2291   ret_maybe_prior_trap = maybe_prior_trap;
+2292   ret_maybe_prior_recompile = maybe_prior_recompile;
+2293   return pdata;
+2294 }
+2295 
+2296 void
+2297 Deoptimization::update_method_data_from_interpreter(MethodData* trap_mdo, int trap_bci, int reason) {
+2298   ResourceMark rm;
+2299   // Ignored outputs:
+2300   uint ignore_this_trap_count;
+2301   bool ignore_maybe_prior_trap;
+2302   bool ignore_maybe_prior_recompile;
+2303   assert(!reason_is_speculate(reason), &quot;reason speculate only used by compiler&quot;);
+2304   // JVMCI uses the total counts to determine if deoptimizations are happening too frequently -&gt; do not adjust total counts
+2305   bool update_total_counts = true JVMCI_ONLY( &amp;&amp; !UseJVMCICompiler);
+2306   query_update_method_data(trap_mdo, trap_bci,
+2307                            (DeoptReason)reason,
+2308                            update_total_counts,
+2309 #if INCLUDE_JVMCI
+2310                            false,
+2311 #endif
+2312                            NULL,
+2313                            ignore_this_trap_count,
+2314                            ignore_maybe_prior_trap,
+2315                            ignore_maybe_prior_recompile);
+2316 }
+2317 
+2318 Deoptimization::UnrollBlock* Deoptimization::uncommon_trap(JavaThread* thread, jint trap_request, jint exec_mode) {
+2319   if (TraceDeoptimization) {
+2320     tty-&gt;print(&quot;Uncommon trap &quot;);
+2321   }
+2322   // Still in Java no safepoints
+2323   {
+2324     // This enters VM and may safepoint
+2325     uncommon_trap_inner(thread, trap_request);
+2326   }
+2327   return fetch_unroll_info_helper(thread, exec_mode);
+2328 }
+2329 
+2330 // Local derived constants.
+2331 // Further breakdown of DataLayout::trap_state, as promised by DataLayout.
+2332 const int DS_REASON_MASK   = ((uint)DataLayout::trap_mask) &gt;&gt; 1;
+2333 const int DS_RECOMPILE_BIT = DataLayout::trap_mask - DS_REASON_MASK;
+2334 
+2335 //---------------------------trap_state_reason---------------------------------
+2336 Deoptimization::DeoptReason
+2337 Deoptimization::trap_state_reason(int trap_state) {
+2338   // This assert provides the link between the width of DataLayout::trap_bits
+2339   // and the encoding of &quot;recorded&quot; reasons.  It ensures there are enough
+2340   // bits to store all needed reasons in the per-BCI MDO profile.
+2341   assert(DS_REASON_MASK &gt;= Reason_RECORDED_LIMIT, &quot;enough bits&quot;);
+2342   int recompile_bit = (trap_state &amp; DS_RECOMPILE_BIT);
+2343   trap_state -= recompile_bit;
+2344   if (trap_state == DS_REASON_MASK) {
+2345     return Reason_many;
+2346   } else {
+2347     assert((int)Reason_none == 0, &quot;state=0 =&gt; Reason_none&quot;);
+2348     return (DeoptReason)trap_state;
+2349   }
+2350 }
+2351 //-------------------------trap_state_has_reason-------------------------------
+2352 int Deoptimization::trap_state_has_reason(int trap_state, int reason) {
+2353   assert(reason_is_recorded_per_bytecode((DeoptReason)reason), &quot;valid reason&quot;);
+2354   assert(DS_REASON_MASK &gt;= Reason_RECORDED_LIMIT, &quot;enough bits&quot;);
+2355   int recompile_bit = (trap_state &amp; DS_RECOMPILE_BIT);
+2356   trap_state -= recompile_bit;
+2357   if (trap_state == DS_REASON_MASK) {
+2358     return -1;  // true, unspecifically (bottom of state lattice)
+2359   } else if (trap_state == reason) {
+2360     return 1;   // true, definitely
+2361   } else if (trap_state == 0) {
+2362     return 0;   // false, definitely (top of state lattice)
+2363   } else {
+2364     return 0;   // false, definitely
+2365   }
+2366 }
+2367 //-------------------------trap_state_add_reason-------------------------------
+2368 int Deoptimization::trap_state_add_reason(int trap_state, int reason) {
+2369   assert(reason_is_recorded_per_bytecode((DeoptReason)reason) || reason == Reason_many, &quot;valid reason&quot;);
+2370   int recompile_bit = (trap_state &amp; DS_RECOMPILE_BIT);
+2371   trap_state -= recompile_bit;
+2372   if (trap_state == DS_REASON_MASK) {
+2373     return trap_state + recompile_bit;     // already at state lattice bottom
+2374   } else if (trap_state == reason) {
+2375     return trap_state + recompile_bit;     // the condition is already true
+2376   } else if (trap_state == 0) {
+2377     return reason + recompile_bit;          // no condition has yet been true
+2378   } else {
+2379     return DS_REASON_MASK + recompile_bit;  // fall to state lattice bottom
+2380   }
+2381 }
+2382 //-----------------------trap_state_is_recompiled------------------------------
+2383 bool Deoptimization::trap_state_is_recompiled(int trap_state) {
+2384   return (trap_state &amp; DS_RECOMPILE_BIT) != 0;
+2385 }
+2386 //-----------------------trap_state_set_recompiled-----------------------------
+2387 int Deoptimization::trap_state_set_recompiled(int trap_state, bool z) {
+2388   if (z)  return trap_state |  DS_RECOMPILE_BIT;
+2389   else    return trap_state &amp; ~DS_RECOMPILE_BIT;
+2390 }
+2391 //---------------------------format_trap_state---------------------------------
+2392 // This is used for debugging and diagnostics, including LogFile output.
+2393 const char* Deoptimization::format_trap_state(char* buf, size_t buflen,
+2394                                               int trap_state) {
+2395   assert(buflen &gt; 0, &quot;sanity&quot;);
+2396   DeoptReason reason      = trap_state_reason(trap_state);
+2397   bool        recomp_flag = trap_state_is_recompiled(trap_state);
+2398   // Re-encode the state from its decoded components.
+2399   int decoded_state = 0;
+2400   if (reason_is_recorded_per_bytecode(reason) || reason == Reason_many)
+2401     decoded_state = trap_state_add_reason(decoded_state, reason);
+2402   if (recomp_flag)
+2403     decoded_state = trap_state_set_recompiled(decoded_state, recomp_flag);
+2404   // If the state re-encodes properly, format it symbolically.
+2405   // Because this routine is used for debugging and diagnostics,
+2406   // be robust even if the state is a strange value.
+2407   size_t len;
+2408   if (decoded_state != trap_state) {
+2409     // Random buggy state that doesn&#39;t decode??
+2410     len = jio_snprintf(buf, buflen, &quot;#%d&quot;, trap_state);
+2411   } else {
+2412     len = jio_snprintf(buf, buflen, &quot;%s%s&quot;,
+2413                        trap_reason_name(reason),
+2414                        recomp_flag ? &quot; recompiled&quot; : &quot;&quot;);
+2415   }
+2416   return buf;
+2417 }
+2418 
+2419 
+2420 //--------------------------------statics--------------------------------------
+2421 const char* Deoptimization::_trap_reason_name[] = {
+2422   // Note:  Keep this in sync. with enum DeoptReason.
+2423   &quot;none&quot;,
+2424   &quot;null_check&quot;,
+2425   &quot;null_assert&quot; JVMCI_ONLY(&quot;_or_unreached0&quot;),
+2426   &quot;range_check&quot;,
+2427   &quot;class_check&quot;,
+2428   &quot;array_check&quot;,
+2429   &quot;intrinsic&quot; JVMCI_ONLY(&quot;_or_type_checked_inlining&quot;),
+2430   &quot;bimorphic&quot; JVMCI_ONLY(&quot;_or_optimized_type_check&quot;),
+2431   &quot;profile_predicate&quot;,
+2432   &quot;unloaded&quot;,
+2433   &quot;uninitialized&quot;,
+2434   &quot;initialized&quot;,
+2435   &quot;unreached&quot;,
+2436   &quot;unhandled&quot;,
+2437   &quot;constraint&quot;,
+2438   &quot;div0_check&quot;,
+2439   &quot;age&quot;,
+2440   &quot;predicate&quot;,
+2441   &quot;loop_limit_check&quot;,
+2442   &quot;speculate_class_check&quot;,
+2443   &quot;speculate_null_check&quot;,
+2444   &quot;speculate_null_assert&quot;,
+2445   &quot;rtm_state_change&quot;,
+2446   &quot;unstable_if&quot;,
+2447   &quot;unstable_fused_if&quot;,
+2448 #if INCLUDE_JVMCI
+2449   &quot;aliasing&quot;,
+2450   &quot;transfer_to_interpreter&quot;,
+2451   &quot;not_compiled_exception_handler&quot;,
+2452   &quot;unresolved&quot;,
+2453   &quot;jsr_mismatch&quot;,
+2454 #endif
+2455   &quot;tenured&quot;
+2456 };
+2457 const char* Deoptimization::_trap_action_name[] = {
+2458   // Note:  Keep this in sync. with enum DeoptAction.
+2459   &quot;none&quot;,
+2460   &quot;maybe_recompile&quot;,
+2461   &quot;reinterpret&quot;,
+2462   &quot;make_not_entrant&quot;,
+2463   &quot;make_not_compilable&quot;
+2464 };
+2465 
+2466 const char* Deoptimization::trap_reason_name(int reason) {
+2467   // Check that every reason has a name
+2468   STATIC_ASSERT(sizeof(_trap_reason_name)/sizeof(const char*) == Reason_LIMIT);
+2469 
+2470   if (reason == Reason_many)  return &quot;many&quot;;
+2471   if ((uint)reason &lt; Reason_LIMIT)
+2472     return _trap_reason_name[reason];
+2473   static char buf[20];
+2474   sprintf(buf, &quot;reason%d&quot;, reason);
+2475   return buf;
+2476 }
+2477 const char* Deoptimization::trap_action_name(int action) {
+2478   // Check that every action has a name
+2479   STATIC_ASSERT(sizeof(_trap_action_name)/sizeof(const char*) == Action_LIMIT);
+2480 
+2481   if ((uint)action &lt; Action_LIMIT)
+2482     return _trap_action_name[action];
+2483   static char buf[20];
+2484   sprintf(buf, &quot;action%d&quot;, action);
+2485   return buf;
+2486 }
+2487 
+2488 // This is used for debugging and diagnostics, including LogFile output.
+2489 const char* Deoptimization::format_trap_request(char* buf, size_t buflen,
+2490                                                 int trap_request) {
+2491   jint unloaded_class_index = trap_request_index(trap_request);
+2492   const char* reason = trap_reason_name(trap_request_reason(trap_request));
+2493   const char* action = trap_action_name(trap_request_action(trap_request));
+2494 #if INCLUDE_JVMCI
+2495   int debug_id = trap_request_debug_id(trap_request);
+2496 #endif
+2497   size_t len;
+2498   if (unloaded_class_index &lt; 0) {
+2499     len = jio_snprintf(buf, buflen, &quot;reason=&#39;%s&#39; action=&#39;%s&#39;&quot; JVMCI_ONLY(&quot; debug_id=&#39;%d&#39;&quot;),
+2500                        reason, action
+2501 #if INCLUDE_JVMCI
+2502                        ,debug_id
+2503 #endif
+2504                        );
+2505   } else {
+2506     len = jio_snprintf(buf, buflen, &quot;reason=&#39;%s&#39; action=&#39;%s&#39; index=&#39;%d&#39;&quot; JVMCI_ONLY(&quot; debug_id=&#39;%d&#39;&quot;),
+2507                        reason, action, unloaded_class_index
+2508 #if INCLUDE_JVMCI
+2509                        ,debug_id
+2510 #endif
+2511                        );
+2512   }
+2513   return buf;
+2514 }
+2515 
+2516 juint Deoptimization::_deoptimization_hist
+2517         [Deoptimization::Reason_LIMIT]
+2518     [1 + Deoptimization::Action_LIMIT]
+2519         [Deoptimization::BC_CASE_LIMIT]
+2520   = {0};
+2521 
+2522 enum {
+2523   LSB_BITS = 8,
+2524   LSB_MASK = right_n_bits(LSB_BITS)
+2525 };
+2526 
+2527 void Deoptimization::gather_statistics(DeoptReason reason, DeoptAction action,
+2528                                        Bytecodes::Code bc) {
+2529   assert(reason &gt;= 0 &amp;&amp; reason &lt; Reason_LIMIT, &quot;oob&quot;);
+2530   assert(action &gt;= 0 &amp;&amp; action &lt; Action_LIMIT, &quot;oob&quot;);
+2531   _deoptimization_hist[Reason_none][0][0] += 1;  // total
+2532   _deoptimization_hist[reason][0][0]      += 1;  // per-reason total
+2533   juint* cases = _deoptimization_hist[reason][1+action];
+2534   juint* bc_counter_addr = NULL;
+2535   juint  bc_counter      = 0;
+2536   // Look for an unused counter, or an exact match to this BC.
+2537   if (bc != Bytecodes::_illegal) {
+2538     for (int bc_case = 0; bc_case &lt; BC_CASE_LIMIT; bc_case++) {
+2539       juint* counter_addr = &amp;cases[bc_case];
+2540       juint  counter = *counter_addr;
+2541       if ((counter == 0 &amp;&amp; bc_counter_addr == NULL)
+2542           || (Bytecodes::Code)(counter &amp; LSB_MASK) == bc) {
+2543         // this counter is either free or is already devoted to this BC
+2544         bc_counter_addr = counter_addr;
+2545         bc_counter = counter | bc;
+2546       }
+2547     }
+2548   }
+2549   if (bc_counter_addr == NULL) {
+2550     // Overflow, or no given bytecode.
+2551     bc_counter_addr = &amp;cases[BC_CASE_LIMIT-1];
+2552     bc_counter = (*bc_counter_addr &amp; ~LSB_MASK);  // clear LSB
+2553   }
+2554   *bc_counter_addr = bc_counter + (1 &lt;&lt; LSB_BITS);
+2555 }
+2556 
+2557 jint Deoptimization::total_deoptimization_count() {
+2558   return _deoptimization_hist[Reason_none][0][0];
+2559 }
+2560 
+2561 void Deoptimization::print_statistics() {
+2562   juint total = total_deoptimization_count();
+2563   juint account = total;
+2564   if (total != 0) {
+2565     ttyLocker ttyl;
+2566     if (xtty != NULL)  xtty-&gt;head(&quot;statistics type=&#39;deoptimization&#39;&quot;);
+2567     tty-&gt;print_cr(&quot;Deoptimization traps recorded:&quot;);
+2568     #define PRINT_STAT_LINE(name, r) \
+2569       tty-&gt;print_cr(&quot;  %4d (%4.1f%%) %s&quot;, (int)(r), ((r) * 100.0) / total, name);
+2570     PRINT_STAT_LINE(&quot;total&quot;, total);
+2571     // For each non-zero entry in the histogram, print the reason,
+2572     // the action, and (if specifically known) the type of bytecode.
+2573     for (int reason = 0; reason &lt; Reason_LIMIT; reason++) {
+2574       for (int action = 0; action &lt; Action_LIMIT; action++) {
+2575         juint* cases = _deoptimization_hist[reason][1+action];
+2576         for (int bc_case = 0; bc_case &lt; BC_CASE_LIMIT; bc_case++) {
+2577           juint counter = cases[bc_case];
+2578           if (counter != 0) {
+2579             char name[1*K];
+2580             Bytecodes::Code bc = (Bytecodes::Code)(counter &amp; LSB_MASK);
+2581             if (bc_case == BC_CASE_LIMIT &amp;&amp; (int)bc == 0)
+2582               bc = Bytecodes::_illegal;
+2583             sprintf(name, &quot;%s/%s/%s&quot;,
+2584                     trap_reason_name(reason),
+2585                     trap_action_name(action),
+2586                     Bytecodes::is_defined(bc)? Bytecodes::name(bc): &quot;other&quot;);
+2587             juint r = counter &gt;&gt; LSB_BITS;
+2588             tty-&gt;print_cr(&quot;  %40s: &quot; UINT32_FORMAT &quot; (%.1f%%)&quot;, name, r, (r * 100.0) / total);
+2589             account -= r;
+2590           }
+2591         }
+2592       }
+2593     }
+2594     if (account != 0) {
+2595       PRINT_STAT_LINE(&quot;unaccounted&quot;, account);
+2596     }
+2597     #undef PRINT_STAT_LINE
+2598     if (xtty != NULL)  xtty-&gt;tail(&quot;statistics&quot;);
+2599   }
+2600 }
+2601 #else // COMPILER2_OR_JVMCI
+2602 
+2603 
+2604 // Stubs for C1 only system.
+2605 bool Deoptimization::trap_state_is_recompiled(int trap_state) {
+2606   return false;
+2607 }
+2608 
+2609 const char* Deoptimization::trap_reason_name(int reason) {
+2610   return &quot;unknown&quot;;
+2611 }
+2612 
+2613 void Deoptimization::print_statistics() {
+2614   // no output
+2615 }
+2616 
+2617 void
+2618 Deoptimization::update_method_data_from_interpreter(MethodData* trap_mdo, int trap_bci, int reason) {
+2619   // no udpate
+2620 }
+2621 
+2622 int Deoptimization::trap_state_has_reason(int trap_state, int reason) {
+2623   return 0;
+2624 }
+2625 
+2626 void Deoptimization::gather_statistics(DeoptReason reason, DeoptAction action,
+2627                                        Bytecodes::Code bc) {
+2628   // no update
+2629 }
+2630 
+2631 const char* Deoptimization::format_trap_state(char* buf, size_t buflen,
+2632                                               int trap_state) {
+2633   jio_snprintf(buf, buflen, &quot;#%d&quot;, trap_state);
+2634   return buf;
+2635 }
+2636 
+2637 #endif // COMPILER2_OR_JVMCI
+    </pre>
+  </body>
+</html>

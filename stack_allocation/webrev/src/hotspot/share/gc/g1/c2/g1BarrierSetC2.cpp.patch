@@ -1,0 +1,268 @@
+diff a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
+--- a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
++++ b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
+@@ -410,10 +410,14 @@
+ 
+   IdealKit ideal(kit, true);
+ 
+   Node* tls = __ thread(); // ThreadLocalStorage
+ 
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++
+   Node* no_base = __ top();
+   float likely = PROB_LIKELY_MAG(3);
+   float unlikely = PROB_UNLIKELY_MAG(3);
+   Node* young_card = __ ConI((jint)G1CardTable::g1_young_card_val());
+   Node* dirty_card = __ ConI((jint)G1CardTable::dirty_card_val());
+@@ -457,40 +461,66 @@
+     Node* xor_res =  __ URShiftX ( __ XorX( cast,  __ CastPX(__ ctrl(), val)), __ ConI(HeapRegion::LogOfHRGrainBytes));
+ 
+     // if (xor_res == 0) same region so skip
+     __ if_then(xor_res, BoolTest::ne, zeroX, likely); {
+ 
+-      // No barrier if we are storing a NULL
+-      __ if_then(val, BoolTest::ne, kit->null(), likely); {
++      // if ((unsigned)(card_offset - low_map_offset) >= (high_map_offset - low_map_offset)) stack allocated object, so skip
++      if (kit->C->do_stack_allocation()) {
++        state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++        Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++        Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++        Node* sub_off = __ SubL(cast, low_off);
+ 
+-        // Ok must mark the card if not already dirty
++        __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
+ 
+-        // load the original value of the card
+-        Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++          // No barrier if we are storing a NULL
++          __ if_then(val, BoolTest::ne, kit->null(), likely); {
++
++            // Ok must mark the card if not already dirty
++
++            // load the original value of the card
++            Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+ 
+-        __ if_then(card_val, BoolTest::ne, young_card, unlikely); {
+-          kit->sync_kit(ideal);
+-          kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
+-          __ sync_kit(kit);
++            __ if_then(card_val, BoolTest::ne, young_card, unlikely); {
++              kit->sync_kit(ideal);
++              kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
++              __ sync_kit(kit);
+ 
+-          Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+-          __ if_then(card_val_reload, BoolTest::ne, dirty_card); {
+-            g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++              Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++              __ if_then(card_val_reload, BoolTest::ne, dirty_card); {
++                g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++              } __ end_if();
++            } __ end_if();
+           } __ end_if();
+-        } __ end_if();
+-      } __ end_if();
++      } if (kit->C->do_stack_allocation()) {
++        __ end_if();
++      }
+     } __ end_if();
+   } else {
+     // The Object.clone() intrinsic uses this path if !ReduceInitialCardMarks.
+     // We don't need a barrier here if the destination is a newly allocated object
+     // in Eden. Otherwise, GC verification breaks because we assume that cards in Eden
+     // are set to 'g1_young_gen' (see G1CardTable::verify_g1_young_region()).
+     assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
+-    Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+-    __ if_then(card_val, BoolTest::ne, young_card); {
+-      g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
+-    } __ end_if();
++
++    // if ((unsigned)(card_offset - low_map_offset) >= (high_map_offset - low_map_offset)) stack allocated object, so skip
++    if (kit->C->do_stack_allocation()) {
++      state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++      Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++      Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++      Node* sub_off = __ SubL(cast, low_off);
++
++      __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
++
++        Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++        __ if_then(card_val, BoolTest::ne, young_card); {
++          g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++        } __ end_if();
++
++      } if (kit->C->do_stack_allocation()) {
++        __ end_if();
++      }
+   }
+ 
+   // Final sync IdealKit and GraphKit.
+   kit->final_sync(ideal);
+ }
+@@ -659,17 +689,125 @@
+   }
+ 
+   return strcmp(call->_name, "write_ref_field_pre_entry") == 0 || strcmp(call->_name, "write_ref_field_post_entry") == 0;
+ }
+ 
++bool G1BarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN& igvn) const {
++  assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
++
++  // Must have a control node
++  if (node->in(0) == NULL) {
++    return false;
++  }
++
++  // Search for CastP2X->Xor->URShift->Cmp path which
++  // checks if the store done to a different from the value's region.
++  Node* xorx = node->find_out_with(Op_XorX);
++  BoolNode* bool_node = NULL;
++
++  if (xorx != NULL) {
++
++    Node* shift = shift = xorx->unique_out();
++    Node* cmpx = shift->unique_out();
++
++    assert(cmpx->is_Cmp() && cmpx->unique_out()->is_Bool() &&
++            cmpx->unique_out()->as_Bool()->_test._test == BoolTest::ne,
++            "missing region check in G1 post barrier");
++
++    Node* bol = cmpx->unique_out();
++    assert(bol->unique_out()->is_If(), "should find if after the bool node");
++    Node* if_node = bol->unique_out();
++    Node* if_true = if_node->find_out_with(Op_IfTrue);
++    assert(if_true != NULL, "there should be false projection");
++
++    Node* iff_check = if_true->find_out_with(Op_If);
++    // Not a barrier with bound check
++    if (iff_check == NULL) {
++      return false;
++    }
++
++    Node* iff_check_in_1_node = iff_check->in(1);
++    if (!iff_check_in_1_node->is_Bool()) {
++      return false;
++    }
++    bool_node = iff_check_in_1_node->as_Bool();
++
++  } else {
++    // this "could" be the the path followed when !use_ReduceInitialCardMarks() is
++    // used or when the two sides of the barrier are scalar replaced
++    //assert(false, "we managed to get here!!! process_barrier_node");
++    Node *addl_node = node->find_out_with(Op_AddL);
++    if (addl_node == NULL) {
++      return false;
++    }
++
++    Node* cmpx = addl_node->unique_out();
++    assert(cmpx->is_Cmp() && cmpx->unique_out()->is_Bool() &&
++          cmpx->unique_out()->as_Bool()->_test._test == BoolTest::le,
++          "missing region check in G1 post barrier");
++
++    bool_node = cmpx->unique_out()->as_Bool();
++  }
++
++  if (bool_node->_test._test != BoolTest::le) {
++    return false;
++  }
++
++  // the input to the bool is the CMPX
++  Node* bool_node_in_1_node = bool_node->in(1);
++  if (!bool_node_in_1_node->is_Cmp()) {
++    return false;
++  }
++  CmpNode* cmp_node = bool_node_in_1_node->as_Cmp();
++
++  // the input to the CMPX is the card_table_top_offset constant
++  Node* cmp_node_in_2_node = cmp_node->in(2);
++  if (!cmp_node_in_2_node->is_Con()) {
++    return false;
++  }
++
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++  size_t constant = ct->byte_map_top_offset() - ct->byte_map_bottom_offset();
++
++  // Check that the input to this CMP node is the expected constant
++  const TypeX* otype = cmp_node_in_2_node->find_intptr_t_type();
++  if (otype != NULL && otype->is_con() &&
++      size_t(otype->get_con()) != constant) {
++    // Constant offset but not the card table size constant so just return
++    return false;
++  }
++
++  // we can't change the compare or the constant so create a new constant(0) and replace the variable
++  Node* cmp_node_in_1_node = cmp_node->in(1);
++  ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);
++  if (cmp_node_in_1_node->_idx == zeroConstant_node->_idx) {
++    // we can get here via different nodes - but we only want to change the input once
++    return false;
++  }
++
++  igvn.rehash_node_delayed(cmp_node);
++  int numReplaced = cmp_node->replace_edge(cmp_node_in_1_node, zeroConstant_node);
++  assert(numReplaced == 1, "Failed to replace the card_offset with Conx(0)");
++  return true;
++}
++
+ void G1BarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+   assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
+-  assert(node->outcnt() <= 2, "expects 1 or 2 users: Xor and URShift nodes");
++  assert(node->outcnt() <= 3, "expects 1, 2 or 3 users: Xor, URShift and SubL nodes");
+   // It could be only one user, URShift node, in Object.clone() intrinsic
+   // but the new allocation is passed to arraycopy stub and it could not
+   // be scalar replaced. So we don't check the case.
+ 
++  // Certain loop optimisations may introduce a CastP2X node with
++  // ConvL2I in case of an AllocateArray op. Check for that case
++  // here and do not attempt to eliminate it as write barrier.
++  if (macro->C->do_stack_allocation() && !state()->is_a_barrier(static_cast<CastP2XNode*>(node))) {
++    return;
++  }
++
+   // An other case of only one user (Xor) is when the value check for NULL
+   // in G1 post barrier is folded after CCP so the code which used URShift
+   // is removed.
+ 
+   // Take Region node before eliminating post barrier since it also
+@@ -718,11 +856,18 @@
+           }
+         }
+       }
+     }
+   } else {
+-    assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
++    // In a scenario where the two sides of the barrier are scalar replaced
++    // or stack allocated, the XorX node will be visited more than once, because
++    // both edges will be CastP2X nodes from two distinct allocates. In certain
++    // instances, the removal of the CastP2X node will result in removal of the
++    // XorX node, causing the assert below to be hit when eliminate_gc_barrier is
++    // called for the second node.
++    // assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
++
+     // This is a G1 post barrier emitted by the Object.clone() intrinsic.
+     // Search for the CastP2X->URShiftX->AddP->LoadB->Cmp path which checks if the card
+     // is marked as young_gen and replace the Cmp with 0 (false) to collapse the barrier.
+     Node* shift = node->find_out_with(Op_URShiftX);
+     assert(shift != NULL, "missing G1 post barrier");
+@@ -736,12 +881,16 @@
+     macro->replace_node(cmpx, macro->makecon(TypeInt::CC_EQ));
+     // There is no G1 pre barrier in this case
+   }
+   // Now CastP2X can be removed since it is used only on dead path
+   // which currently still alive until igvn optimize it.
+-  assert(node->outcnt() == 0 || node->unique_out()->Opcode() == Op_URShiftX, "");
++  // TODO: fix this following assert becuase of SUBL
++  // assert(node->outcnt() == 0 || node->unique_out()->Opcode() == Op_URShiftX, "");
+   macro->replace_node(node, macro->top());
++
++  // Remove this node from our state
++  state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
+ }
+ 
+ Node* G1BarrierSetC2::step_over_gc_barrier(Node* c) const {
+   if (!use_ReduceInitialCardMarks() &&
+       c != NULL && c->is_Region() && c->req() == 3) {

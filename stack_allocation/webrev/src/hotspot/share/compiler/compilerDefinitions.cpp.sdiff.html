@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/compiler/compilerDefinitions.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="../code/debugInfo.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compilerDirectives.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/compilerDefinitions.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+505   }
+506 #ifndef PRODUCT
+507   if (!IncrementalInline) {
+508     AlwaysIncrementalInline = false;
+509   }
+510   if (FLAG_IS_CMDLINE(PrintIdealGraph) &amp;&amp; !PrintIdealGraph) {
+511     FLAG_SET_ERGO(PrintIdealGraphLevel, -1);
+512   }
+513 #endif
+514   if (!UseTypeSpeculation &amp;&amp; FLAG_IS_DEFAULT(TypeProfileLevel)) {
+515     // nothing to use the profiling, turn if off
+516     FLAG_SET_DEFAULT(TypeProfileLevel, 0);
+517   }
+518   if (!FLAG_IS_DEFAULT(OptoLoopAlignment) &amp;&amp; FLAG_IS_DEFAULT(MaxLoopPad)) {
+519     FLAG_SET_DEFAULT(MaxLoopPad, OptoLoopAlignment-1);
+520   }
+521   if (FLAG_IS_DEFAULT(LoopStripMiningIterShortLoop)) {
+522     // blind guess
+523     LoopStripMiningIterShortLoop = LoopStripMiningIter / 10;
+524   }
+
+
+
+
+
+
+
+
+
+525 #endif // COMPILER2
+526 }
+527 
+528 static CompLevel highest_compile_level() {
+529   return TieredCompilation ? MIN2((CompLevel) TieredStopAtLevel, CompLevel_highest_tier) : CompLevel_highest_tier;
+530 }
+531 
+532 bool is_c1_or_interpreter_only() {
+533   if (Arguments::is_interpreter_only()) {
+534     return true;
+535   }
+536 
+537 #if INCLUDE_AOT
+538   if (UseAOT) {
+539     return false;
+540   }
+541 #endif
+542 
+543   if (highest_compile_level() &lt; CompLevel_full_optimization) {
+544 #if INCLUDE_JVMCI
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+505   }
+506 #ifndef PRODUCT
+507   if (!IncrementalInline) {
+508     AlwaysIncrementalInline = false;
+509   }
+510   if (FLAG_IS_CMDLINE(PrintIdealGraph) &amp;&amp; !PrintIdealGraph) {
+511     FLAG_SET_ERGO(PrintIdealGraphLevel, -1);
+512   }
+513 #endif
+514   if (!UseTypeSpeculation &amp;&amp; FLAG_IS_DEFAULT(TypeProfileLevel)) {
+515     // nothing to use the profiling, turn if off
+516     FLAG_SET_DEFAULT(TypeProfileLevel, 0);
+517   }
+518   if (!FLAG_IS_DEFAULT(OptoLoopAlignment) &amp;&amp; FLAG_IS_DEFAULT(MaxLoopPad)) {
+519     FLAG_SET_DEFAULT(MaxLoopPad, OptoLoopAlignment-1);
+520   }
+521   if (FLAG_IS_DEFAULT(LoopStripMiningIterShortLoop)) {
+522     // blind guess
+523     LoopStripMiningIterShortLoop = LoopStripMiningIter / 10;
+524   }
+<span class="line-added">525   if (UseStackAllocation) {</span>
+<span class="line-added">526     if (!(UseSerialGC || UseParallelGC || UseG1GC)) {</span>
+<span class="line-added">527       vm_exit_during_initialization(&quot;UseStackAllocation is not supported with selected GC&quot;, GCConfig::hs_err_name());</span>
+<span class="line-added">528       FLAG_SET_DEFAULT(UseStackAllocation, false);</span>
+<span class="line-added">529       FLAG_SET_ERGO(UseStackAllocationRuntime, false);</span>
+<span class="line-added">530     } else {</span>
+<span class="line-added">531       FLAG_SET_ERGO(UseStackAllocationRuntime, true);</span>
+<span class="line-added">532     }</span>
+<span class="line-added">533   }</span>
+534 #endif // COMPILER2
+535 }
+536 
+537 static CompLevel highest_compile_level() {
+538   return TieredCompilation ? MIN2((CompLevel) TieredStopAtLevel, CompLevel_highest_tier) : CompLevel_highest_tier;
+539 }
+540 
+541 bool is_c1_or_interpreter_only() {
+542   if (Arguments::is_interpreter_only()) {
+543     return true;
+544   }
+545 
+546 #if INCLUDE_AOT
+547   if (UseAOT) {
+548     return false;
+549   }
+550 #endif
+551 
+552   if (highest_compile_level() &lt; CompLevel_full_optimization) {
+553 #if INCLUDE_JVMCI
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../code/debugInfo.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compilerDirectives.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

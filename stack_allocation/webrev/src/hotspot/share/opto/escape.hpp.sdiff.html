@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/escape.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="escape.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/escape.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+316   inline PointsToNode* get() const { return ((PointsToNode*)node)-&gt;as_Field()-&gt;base(i); }
+317 };
+318 
+319 
+320 class ConnectionGraph: public ResourceObj {
+321   friend class PointsToNode;
+322 private:
+323   GrowableArray&lt;PointsToNode*&gt;  _nodes; // Map from ideal nodes to
+324                                         // ConnectionGraph nodes.
+325 
+326   GrowableArray&lt;PointsToNode*&gt;  _worklist; // Nodes to be processed
+327   VectorSet                  _in_worklist;
+328   uint                         _next_pidx;
+329 
+330   bool            _collecting; // Indicates whether escape information
+331                                // is still being collected. If false,
+332                                // no new nodes will be processed.
+333 
+334   bool               _verify;  // verify graph
+335 
+
+
+336   JavaObjectNode*    null_obj;
+337   Node*             _pcmp_neq; // ConI(#CC_GT)
+338   Node*              _pcmp_eq; // ConI(#CC_EQ)
+339 
+340   Compile*           _compile; // Compile object for current compilation
+341   PhaseIterGVN*         _igvn; // Value numbering
+342 
+343   Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
+344 
+345 public:
+346   JavaObjectNode* phantom_obj; // Unknown object
+347 
+348 private:
+349   // Address of an element in _nodes.  Used when the element is to be modified
+350   PointsToNode* ptnode_adr(int idx) const {
+351     // There should be no new ideal nodes during ConnectionGraph build,
+352     // growableArray::at() will throw assert otherwise.
+353     return _nodes.at(idx);
+354   }
+355   uint nodes_size() const { return _nodes.length(); }
+</pre>
+<hr />
+<pre>
+583       add_local_var(n, es);
+584       if (ptn == NULL) {
+585         delayed_worklist-&gt;push(n);
+586         return; // Process it later.
+587       }
+588     } else {
+589       assert(ptn != NULL, &quot;node should be registered&quot;);
+590     }
+591     add_edge(ptnode_adr(n-&gt;_idx), ptn);
+592   }
+593 
+594   // Map ideal node to existing PointsTo node (usually phantom_object).
+595   void map_ideal_node(Node *n, PointsToNode* ptn) {
+596     assert(ptn != NULL, &quot;only existing PointsTo node&quot;);
+597     _nodes.at_put(n-&gt;_idx, ptn);
+598   }
+599 
+600   void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+601   bool add_final_edges_unsafe_access(Node* n, uint opcode);
+602 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+603 #ifndef PRODUCT
+604   void dump(GrowableArray&lt;PointsToNode*&gt;&amp; ptnodes_worklist);
+
+
+
+
+
+
+
+
+
+
+
+
+605 #endif
+606 };
+607 
+608 inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+609   _edges(CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+610   _uses (CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+611   _type((u1)type),
+612   _flags(ScalarReplaceable),
+613   _escape((u1)es),
+614   _fields_escape((u1)es),
+615   _node(n),
+616   _idx(n-&gt;_idx),
+617   _pidx(CG-&gt;next_pidx()) {
+618   assert(n != NULL &amp;&amp; es != UnknownEscape, &quot;sanity&quot;);
+619 }
+620 
+621 #endif // SHARE_OPTO_ESCAPE_HPP
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+316   inline PointsToNode* get() const { return ((PointsToNode*)node)-&gt;as_Field()-&gt;base(i); }
+317 };
+318 
+319 
+320 class ConnectionGraph: public ResourceObj {
+321   friend class PointsToNode;
+322 private:
+323   GrowableArray&lt;PointsToNode*&gt;  _nodes; // Map from ideal nodes to
+324                                         // ConnectionGraph nodes.
+325 
+326   GrowableArray&lt;PointsToNode*&gt;  _worklist; // Nodes to be processed
+327   VectorSet                  _in_worklist;
+328   uint                         _next_pidx;
+329 
+330   bool            _collecting; // Indicates whether escape information
+331                                // is still being collected. If false,
+332                                // no new nodes will be processed.
+333 
+334   bool               _verify;  // verify graph
+335 
+<span class="line-added">336   bool             _has_locks; // Used by stack allocation</span>
+<span class="line-added">337 </span>
+338   JavaObjectNode*    null_obj;
+339   Node*             _pcmp_neq; // ConI(#CC_GT)
+340   Node*              _pcmp_eq; // ConI(#CC_EQ)
+341 
+342   Compile*           _compile; // Compile object for current compilation
+343   PhaseIterGVN*         _igvn; // Value numbering
+344 
+345   Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
+346 
+347 public:
+348   JavaObjectNode* phantom_obj; // Unknown object
+349 
+350 private:
+351   // Address of an element in _nodes.  Used when the element is to be modified
+352   PointsToNode* ptnode_adr(int idx) const {
+353     // There should be no new ideal nodes during ConnectionGraph build,
+354     // growableArray::at() will throw assert otherwise.
+355     return _nodes.at(idx);
+356   }
+357   uint nodes_size() const { return _nodes.length(); }
+</pre>
+<hr />
+<pre>
+585       add_local_var(n, es);
+586       if (ptn == NULL) {
+587         delayed_worklist-&gt;push(n);
+588         return; // Process it later.
+589       }
+590     } else {
+591       assert(ptn != NULL, &quot;node should be registered&quot;);
+592     }
+593     add_edge(ptnode_adr(n-&gt;_idx), ptn);
+594   }
+595 
+596   // Map ideal node to existing PointsTo node (usually phantom_object).
+597   void map_ideal_node(Node *n, PointsToNode* ptn) {
+598     assert(ptn != NULL, &quot;only existing PointsTo node&quot;);
+599     _nodes.at_put(n-&gt;_idx, ptn);
+600   }
+601 
+602   void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+603   bool add_final_edges_unsafe_access(Node* n, uint opcode);
+604 
+<span class="line-added">605   // Helpers for stack allocation</span>
+<span class="line-added">606 </span>
+<span class="line-added">607   // If an allocation is dominated by a loop, check to see if the lifetime of two instances</span>
+<span class="line-added">608   // may overlap. If they do this allocate is not eligible for stack allocation</span>
+<span class="line-added">609   bool allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi);</span>
+<span class="line-added">610   // Stack allocation has limited support for compressed references at the moment.</span>
+<span class="line-added">611   // This helper checks if an oop may be compressed at some point in the graph.</span>
+<span class="line-added">612   bool oop_may_be_compressed(Node* alloc_result);</span>
+<span class="line-added">613   // Check if the alloc node is eligible for stack allocation</span>
+<span class="line-added">614   bool eligible_for_stack_allocation(PointsToNode* ptn);</span>
+<span class="line-added">615   // Check if the alloc has uses that make it ineligible for stack allocation</span>
+<span class="line-added">616   bool all_uses_eligible_for_stack_allocation(PointsToNode *ptn);</span>
+<span class="line-added">617   // Verify object chains for stack allocated objects. Heap objects cannot point to stack allocated objects.</span>
+<span class="line-added">618   bool verify_stack_allocated_object_chains(GrowableArray&lt;JavaObjectNode*&gt; &amp;non_escaped_worklist, int non_escaped_length);</span>
+<span class="line-added">619 #ifndef PRODUCT</span>
+<span class="line-added">620   void print_stack_allocated_candidates(GrowableArray&lt;JavaObjectNode*&gt; &amp;non_escaped_worklist, int non_escaped_length);</span>
+<span class="line-added">621 #endif</span>
+<span class="line-added">622 </span>
+623 #ifndef PRODUCT
+624   void dump(GrowableArray&lt;PointsToNode*&gt;&amp; ptnodes_worklist);
+<span class="line-added">625 </span>
+<span class="line-added">626   bool print_escape_analysis() {</span>
+<span class="line-added">627     return PrintEscapeAnalysis || _compile-&gt;directive()-&gt;PrintEscapeAnalysisOption;</span>
+<span class="line-added">628   }</span>
+<span class="line-added">629 </span>
+<span class="line-added">630   bool print_eliminate_allocations() {</span>
+<span class="line-added">631     return PrintEliminateAllocations || _compile-&gt;directive()-&gt;PrintEliminateAllocationsOption;</span>
+<span class="line-added">632   }</span>
+<span class="line-added">633 </span>
+<span class="line-added">634   bool print_stack_allocation() {</span>
+<span class="line-added">635     return PrintStackAllocation || _compile-&gt;directive()-&gt;PrintStackAllocationOption;</span>
+<span class="line-added">636   }</span>
+637 #endif
+638 };
+639 
+640 inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+641   _edges(CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+642   _uses (CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+643   _type((u1)type),
+644   _flags(ScalarReplaceable),
+645   _escape((u1)es),
+646   _fields_escape((u1)es),
+647   _node(n),
+648   _idx(n-&gt;_idx),
+649   _pidx(CG-&gt;next_pidx()) {
+650   assert(n != NULL &amp;&amp; es != UnknownEscape, &quot;sanity&quot;);
+651 }
+652 
+653 #endif // SHARE_OPTO_ESCAPE_HPP
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="escape.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

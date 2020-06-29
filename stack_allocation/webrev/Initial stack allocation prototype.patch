@@ -1,0 +1,3597 @@
+diff a/src/hotspot/share/code/debugInfo.cpp b/src/hotspot/share/code/debugInfo.cpp
+--- a/src/hotspot/share/code/debugInfo.cpp
++++ b/src/hotspot/share/code/debugInfo.cpp
+@@ -62,19 +62,33 @@
+   }
+   assert(oopDesc::is_oop_or_null(o), "oop only");
+   return o;
+ }
+ 
+-ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
++enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,
++                          CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,
++                          OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,
++                          AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8,
++                          STACK_OBJECT_CODE = 9 };
++
++ScopeValue* DebugInfoReadStream::read_object_value(int type) {
+   int id = read_int();
+ #ifdef ASSERT
+   assert(_obj_pool != NULL, "object pool does not exist");
+   for (int i = _obj_pool->length() - 1; i >= 0; i--) {
+     assert(_obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+   }
+ #endif
+-  ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);
++  ObjectValue* result;
++  if (type == AUTO_BOX_OBJECT_CODE) {
++    result = new AutoBoxObjectValue(id);
++  } else if (type == STACK_OBJECT_CODE) {
++    result = new StackObjectValue(id);
++  } else {
++    assert(type == OBJECT_CODE, "has to be an object");
++    result = new ObjectValue(id);
++  }
+   // Cache the object since an object field could reference it.
+   _obj_pool->push(result);
+   result->read_object(this);
+   return result;
+ }
+@@ -92,25 +106,21 @@
+   return NULL;
+ }
+ 
+ // Serializing scope values
+ 
+-enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,
+-                          CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,
+-                          OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,
+-                          AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8 };
+-
+ ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+   ScopeValue* result = NULL;
+   switch(stream->read_int()) {
+    case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+    case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+    case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+    case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+    case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+-   case OBJECT_CODE:          result = stream->read_object_value(false /*is_auto_box*/); break;
+-   case AUTO_BOX_OBJECT_CODE: result = stream->read_object_value(true /*is_auto_box*/);  break;
++   case OBJECT_CODE:          result = stream->read_object_value(OBJECT_CODE);           break;
++   case AUTO_BOX_OBJECT_CODE: result = stream->read_object_value(AUTO_BOX_OBJECT_CODE);  break;
++   case STACK_OBJECT_CODE:    result = stream->read_object_value(STACK_OBJECT_CODE);     break;
+    case OBJECT_ID_CODE:       result = stream->get_cached_object();                      break;
+    case MARKER_CODE:          result = new MarkerValue();                                break;
+    default: ShouldNotReachHere();
+   }
+   return result;
+@@ -188,10 +198,44 @@
+     _field_values.at(i)->print_on(st);
+   }
+ #endif
+ }
+ 
++// StackObjectValue
++
++StackObjectValue::StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length)
++: ObjectValue(id, klass)
++, _location(location)
++, _field_length(field_length)
++{
++}
++
++void StackObjectValue::read_object(DebugInfoReadStream* stream) {
++  ObjectValue::read_object(stream);
++  _location = Location(stream);
++  _field_length = (ConstantIntValue *)read_from(stream);
++}
++
++void StackObjectValue::write_on(DebugInfoWriteStream* stream) {
++  if (_visited) {
++    stream->write_int(OBJECT_ID_CODE);
++    stream->write_int(_id);
++  } else {
++    _visited = true;
++    stream->write_int(STACK_OBJECT_CODE);
++    stream->write_int(_id);
++    _klass->write_on(stream);
++    int length = _field_values.length();
++    stream->write_int(length);
++    for (int i = 0; i < length; i++) {
++      _field_values.at(i)->write_on(stream);
++    }
++    _location.write_on(stream);
++    _field_length->write_on(stream);
++  }
++}
++
+ // ConstantIntValue
+ 
+ ConstantIntValue::ConstantIntValue(DebugInfoReadStream* stream) {
+   _value = stream->read_signed_int();
+ }
+diff a/src/hotspot/share/code/debugInfo.hpp b/src/hotspot/share/code/debugInfo.hpp
+--- a/src/hotspot/share/code/debugInfo.hpp
++++ b/src/hotspot/share/code/debugInfo.hpp
+@@ -143,12 +143,14 @@
+   bool                        is_visited() const        { return _visited; }
+ 
+   void                        set_value(oop value);
+   void                        set_visited(bool visited) { _visited = false; }
+ 
++  virtual bool                is_stack_object()         { return false; }
++
+   // Serialization of debugging information
+-  void read_object(DebugInfoReadStream* stream);
++  virtual void read_object(DebugInfoReadStream* stream);
+   void write_on(DebugInfoWriteStream* stream);
+ 
+   // Printing
+   void print_on(outputStream* st) const;
+   void print_fields_on(outputStream* st) const;
+@@ -183,10 +185,29 @@
+ 
+   // Printing
+   void print_on(outputStream* st) const;
+ };
+ 
++class StackObjectValue: public ObjectValue {
++private:
++  Location    _location;
++  ConstantIntValue *_field_length;
++public:
++  StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length);
++  StackObjectValue(int id) : ObjectValue(id), _location(), _field_length(NULL) { }
++
++  Location get_stack_location() { return _location; }
++  ConstantIntValue* get_field_length() { return _field_length; }
++
++  bool is_stack_object(){ return true; }
++
++    // Serialization of debugging information
++  void read_object(DebugInfoReadStream* stream);
++  void write_on(DebugInfoWriteStream* stream);
++};
++
++
+ class ConstantLongValue: public ScopeValue {
+  private:
+   jlong _value;
+  public:
+   ConstantLongValue(jlong value)       { _value = value; }
+@@ -302,11 +323,11 @@
+     Method* o = (Method*)(code()->metadata_at(read_int()));
+     // is_metadata() is a faster check than is_metaspace_object()
+     assert(o == NULL || o->is_metadata(), "meta data only");
+     return o;
+   }
+-  ScopeValue* read_object_value(bool is_auto_box);
++  ScopeValue* read_object_value(int type);
+   ScopeValue* get_cached_object();
+   // BCI encoding is mostly unsigned, but -1 is a distinguished value
+   int read_bci() { return read_int() + InvocationEntryBci; }
+ };
+ 
+diff a/src/hotspot/share/compiler/compilerDefinitions.cpp b/src/hotspot/share/compiler/compilerDefinitions.cpp
+--- a/src/hotspot/share/compiler/compilerDefinitions.cpp
++++ b/src/hotspot/share/compiler/compilerDefinitions.cpp
+@@ -520,10 +520,19 @@
+   }
+   if (FLAG_IS_DEFAULT(LoopStripMiningIterShortLoop)) {
+     // blind guess
+     LoopStripMiningIterShortLoop = LoopStripMiningIter / 10;
+   }
++  if (UseStackAllocation) {
++    if (!(UseSerialGC || UseParallelGC || UseG1GC)) {
++      vm_exit_during_initialization("UseStackAllocation is not supported with selected GC", GCConfig::hs_err_name());
++      FLAG_SET_DEFAULT(UseStackAllocation, false);
++      FLAG_SET_ERGO(UseStackAllocationRuntime, false);
++    } else {
++      FLAG_SET_ERGO(UseStackAllocationRuntime, true);
++    }
++  }
+ #endif // COMPILER2
+ }
+ 
+ static CompLevel highest_compile_level() {
+   return TieredCompilation ? MIN2((CompLevel) TieredStopAtLevel, CompLevel_highest_tier) : CompLevel_highest_tier;
+diff a/src/hotspot/share/compiler/compilerDirectives.hpp b/src/hotspot/share/compiler/compilerDirectives.hpp
+--- a/src/hotspot/share/compiler/compilerDirectives.hpp
++++ b/src/hotspot/share/compiler/compilerDirectives.hpp
+@@ -67,11 +67,15 @@
+ NOT_PRODUCT(cflags(IGVPrintLevel,       intx, PrintIdealGraphLevel, IGVPrintLevel)) \
+     cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
+     cflags(Vectorize,               bool, false, Vectorize) \
+     cflags(VectorizeDebug,          uintx, 0, VectorizeDebug) \
+     cflags(CloneMapDebug,           bool, false, CloneMapDebug) \
+-    cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit)
++    cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit) \
++NOT_PRODUCT(cflags(PrintEscapeAnalysis,       bool, PrintEscapeAnalysis, PrintEscapeAnalysis)) \
++NOT_PRODUCT(cflags(PrintEliminateAllocations, bool, PrintEliminateAllocations, PrintEliminateAllocations)) \
++    cflags(UseStackAllocation,                bool, UseStackAllocation, UseStackAllocation) \
++NOT_PRODUCT(cflags(PrintStackAllocation,      bool, PrintStackAllocation, PrintStackAllocation))
+ #else
+   #define compilerdirectives_c2_flags(cflags)
+ #endif
+ 
+ class CompilerDirectives;
+diff a/src/hotspot/share/compiler/oopMap.cpp b/src/hotspot/share/compiler/oopMap.cpp
+--- a/src/hotspot/share/compiler/oopMap.cpp
++++ b/src/hotspot/share/compiler/oopMap.cpp
+@@ -28,17 +28,18 @@
+ #include "code/nmethod.hpp"
+ #include "code/scopeDesc.hpp"
+ #include "compiler/oopMap.hpp"
+ #include "gc/shared/collectedHeap.hpp"
+ #include "memory/allocation.inline.hpp"
+-#include "memory/iterator.hpp"
++#include "memory/iterator.inline.hpp"
+ #include "memory/resourceArea.hpp"
+ #include "memory/universe.hpp"
+ #include "oops/compressedOops.hpp"
+ #include "runtime/frame.inline.hpp"
+ #include "runtime/handles.inline.hpp"
+ #include "runtime/signature.hpp"
++#include "runtime/vframe_hp.hpp"
+ #include "utilities/align.hpp"
+ #include "utilities/lockFreeStack.hpp"
+ #ifdef COMPILER1
+ #include "c1/c1_Defs.hpp"
+ #endif
+@@ -269,16 +270,28 @@
+       // equal to CompressedOops::base() when a narrow oop
+       // implicit null check is used in compiled code.
+       // The narrow_oop_base could be NULL or be the address
+       // of the page below heap depending on compressed oops mode.
+       if (base_loc != NULL && *base_loc != NULL && !CompressedOops::is_base(*base_loc)) {
++
++        if (UseStackAllocationRuntime) {
++          intptr_t *stack_base = fr->unextended_sp();
++          intptr_t *stack_top = stack_base + cb->frame_size();
++          intptr_t *oop_ptr = cast_from_oop<intptr_t *>(*base_loc);
++          if ((stack_base <= oop_ptr) && (oop_ptr < stack_top)) {
++            // If the base is a stack oop just continue because stack oops will not move
++            continue;
++          }
++        }
++
+         derived_oop_fn(base_loc, derived_loc);
+       }
+     }
+   }
+ 
+   {
++    GrowableArray<oop> stack_oops;
+     // We want coop and oop oop_types
+     for (OopMapStream oms(map); !oms.is_done(); oms.next()) {
+       OopMapValue omv = oms.current();
+       oop* loc = fr->oopmapreg_to_location(omv.reg(),reg_map);
+       // It should be an error if no location can be found for a
+@@ -294,10 +307,47 @@
+           // implicit null check is used in compiled code.
+           // The narrow_oop_base could be NULL or be the address
+           // of the page below heap depending on compressed oops mode.
+           continue;
+         }
++
++        // TODO can we check if a CodeBlob includes stack allocated objects?
++        // If macro.cpp tags the compilation as including stack allocated objects
++        // then it should be possible to set something on codeblob.
++        if (UseStackAllocationRuntime) {
++          intptr_t *base = fr->unextended_sp();
++          intptr_t *top = base + cb->frame_size();
++          intptr_t *oop_ptr = cast_from_oop<intptr_t *>(val);
++          // If a stack slot points to a stack allocated object handle it
++          if ((base <= oop_ptr) && (oop_ptr < top)) {
++            // If we are verifying the stack, do extra checking that this
++            // stack location is indeed one of the stack allocated objects we
++            // have described in the oop maps.
++            if (VerifyStack) {
++              Thread* current_thread = Thread::current();
++              ResourceMark rm(current_thread);
++              HandleMark hm(current_thread);
++
++              vframe*  vf = vframe::new_vframe(fr, reg_map, reg_map->thread());
++              if (vf->is_compiled_frame()) {
++                compiledVFrame* cvf = compiledVFrame::cast(vf);
++                GrowableArray<ScopeValue*>* objects = cvf->scope()->objects();
++
++                // Match the stack location offset to any described
++                // stack allocated objects.
++                // In case we didn't find this location in our described objects
++                // we just continue, it's not really a stack oop.
++                if (cvf->match_object_to_stack_oop(oop_ptr, base, objects) == NULL) {
++                  continue;
++                }
++              }
++            }
++
++            OopMapSet::stack_oop_do(loc, oop_fn, &stack_oops, base, top);
++            continue;
++          }
++        }
+ #ifdef ASSERT
+         if ((((uintptr_t)loc & (sizeof(*loc)-1)) != 0) ||
+             !Universe::heap()->is_in_or_null(*loc)) {
+           tty->print_cr("# Found non oop pointer.  Dumping state at failure");
+           // try to dump out some helpful debugging information
+@@ -326,10 +376,59 @@
+       }
+     }
+   }
+ }
+ 
++class OopClosureWalker: public BasicOopIterateClosure {
++protected:
++  OopClosure *_closure;
++  GrowableArray<oop> *_stack_oops;
++  intptr_t *_base;
++  intptr_t *_top;
++
++public:
++  OopClosureWalker(OopClosure *closure, GrowableArray<oop> *stack_oops, intptr_t *base, intptr_t *top) :
++    BasicOopIterateClosure(NULL),
++    _closure(closure),
++    _stack_oops(stack_oops),
++    _base(base),
++    _top(top) {}
++
++  void do_oop(oop *o) {
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(*o);
++    if ((_base <= oop_ptr) && (oop_ptr < _top)) {
++      OopMapSet::stack_oop_do(o, _closure, _stack_oops, _base, _top);
++    } else {
++      _closure->do_oop(o);
++    }
++  }
++  void do_oop(narrowOop *o) {
++    oop obj = RawAccess<>::oop_load(o);
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(obj);
++    if ((_base <= oop_ptr) && (oop_ptr < _top)) {
++      // no references to stack allocated oops in UseCompressedOops
++      assert(false, "unreachable");
++    } else {
++      _closure->do_oop(o);
++    }
++  }
++
++  debug_only(virtual bool should_verify_oops() { return false; })
++};
++
++void OopMapSet::stack_oop_do(oop *p, OopClosure* oop_fn, GrowableArray<oop> *stack_oops, intptr_t *stack_base, intptr_t *stack_top) {
++  oop o = RawAccess<IS_NOT_NULL>::oop_load(p);
++  Klass *t = o->klass();
++  assert(t->is_klass(), "Has to be a class");
++  if (!t->is_typeArray_klass()) {
++    if (stack_oops->append_if_missing(o)) {
++      OopClosureWalker walk_elements(oop_fn, stack_oops, stack_base, stack_top);
++      o->oop_iterate(&walk_elements);
++    }
++  }
++}
++
+ 
+ // Update callee-saved register info for the following frame
+ void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
+   ResourceMark rm;
+   CodeBlob* cb = fr->cb();
+diff a/src/hotspot/share/compiler/oopMap.hpp b/src/hotspot/share/compiler/oopMap.hpp
+--- a/src/hotspot/share/compiler/oopMap.hpp
++++ b/src/hotspot/share/compiler/oopMap.hpp
+@@ -197,15 +197,20 @@
+ };
+ 
+ 
+ class OopMapSet : public ResourceObj {
+   friend class VMStructs;
++  friend class OopClosureWalker;
+  private:
+   GrowableArray<OopMap*> _list;
+ 
+   void add(OopMap* value) { _list.append(value); }
+ 
++  static void stack_oop_do(oop *p, OopClosure* oop_fn,
++                      GrowableArray<oop> *stack_oops,
++                      intptr_t *stack_base, intptr_t *stack_top);
++
+  public:
+   OopMapSet();
+ 
+   // returns the number of OopMaps in this OopMapSet
+   int size() const            { return _list.length(); }
+diff a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
+--- a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
++++ b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp
+@@ -410,10 +410,14 @@
+ 
+   IdealKit ideal(kit, true);
+ 
+   Node* tls = __ thread(); // ThreadLocalStorage
+ 
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++
+   Node* no_base = __ top();
+   float likely = PROB_LIKELY_MAG(3);
+   float unlikely = PROB_UNLIKELY_MAG(3);
+   Node* young_card = __ ConI((jint)G1CardTable::g1_young_card_val());
+   Node* dirty_card = __ ConI((jint)G1CardTable::dirty_card_val());
+@@ -457,40 +461,66 @@
+     Node* xor_res =  __ URShiftX ( __ XorX( cast,  __ CastPX(__ ctrl(), val)), __ ConI(HeapRegion::LogOfHRGrainBytes));
+ 
+     // if (xor_res == 0) same region so skip
+     __ if_then(xor_res, BoolTest::ne, zeroX, likely); {
+ 
+-      // No barrier if we are storing a NULL
+-      __ if_then(val, BoolTest::ne, kit->null(), likely); {
++      // if ((unsigned)(card_offset - low_map_offset) >= (high_map_offset - low_map_offset)) stack allocated object, so skip
++      if (kit->C->do_stack_allocation()) {
++        state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++        Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++        Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++        Node* sub_off = __ SubL(cast, low_off);
+ 
+-        // Ok must mark the card if not already dirty
++        __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
+ 
+-        // load the original value of the card
+-        Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++          // No barrier if we are storing a NULL
++          __ if_then(val, BoolTest::ne, kit->null(), likely); {
++
++            // Ok must mark the card if not already dirty
++
++            // load the original value of the card
++            Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+ 
+-        __ if_then(card_val, BoolTest::ne, young_card, unlikely); {
+-          kit->sync_kit(ideal);
+-          kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
+-          __ sync_kit(kit);
++            __ if_then(card_val, BoolTest::ne, young_card, unlikely); {
++              kit->sync_kit(ideal);
++              kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
++              __ sync_kit(kit);
+ 
+-          Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+-          __ if_then(card_val_reload, BoolTest::ne, dirty_card); {
+-            g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++              Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++              __ if_then(card_val_reload, BoolTest::ne, dirty_card); {
++                g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++              } __ end_if();
++            } __ end_if();
+           } __ end_if();
+-        } __ end_if();
+-      } __ end_if();
++      } if (kit->C->do_stack_allocation()) {
++        __ end_if();
++      }
+     } __ end_if();
+   } else {
+     // The Object.clone() intrinsic uses this path if !ReduceInitialCardMarks.
+     // We don't need a barrier here if the destination is a newly allocated object
+     // in Eden. Otherwise, GC verification breaks because we assume that cards in Eden
+     // are set to 'g1_young_gen' (see G1CardTable::verify_g1_young_region()).
+     assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
+-    Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
+-    __ if_then(card_val, BoolTest::ne, young_card); {
+-      g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
+-    } __ end_if();
++
++    // if ((unsigned)(card_offset - low_map_offset) >= (high_map_offset - low_map_offset)) stack allocated object, so skip
++    if (kit->C->do_stack_allocation()) {
++      state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++      Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++      Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++      Node* sub_off = __ SubL(cast, low_off);
++
++      __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
++
++        Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);
++        __ if_then(card_val, BoolTest::ne, young_card); {
++          g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);
++        } __ end_if();
++
++      } if (kit->C->do_stack_allocation()) {
++        __ end_if();
++      }
+   }
+ 
+   // Final sync IdealKit and GraphKit.
+   kit->final_sync(ideal);
+ }
+@@ -659,17 +689,125 @@
+   }
+ 
+   return strcmp(call->_name, "write_ref_field_pre_entry") == 0 || strcmp(call->_name, "write_ref_field_post_entry") == 0;
+ }
+ 
++bool G1BarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN& igvn) const {
++  assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
++
++  // Must have a control node
++  if (node->in(0) == NULL) {
++    return false;
++  }
++
++  // Search for CastP2X->Xor->URShift->Cmp path which
++  // checks if the store done to a different from the value's region.
++  Node* xorx = node->find_out_with(Op_XorX);
++  BoolNode* bool_node = NULL;
++
++  if (xorx != NULL) {
++
++    Node* shift = shift = xorx->unique_out();
++    Node* cmpx = shift->unique_out();
++
++    assert(cmpx->is_Cmp() && cmpx->unique_out()->is_Bool() &&
++            cmpx->unique_out()->as_Bool()->_test._test == BoolTest::ne,
++            "missing region check in G1 post barrier");
++
++    Node* bol = cmpx->unique_out();
++    assert(bol->unique_out()->is_If(), "should find if after the bool node");
++    Node* if_node = bol->unique_out();
++    Node* if_true = if_node->find_out_with(Op_IfTrue);
++    assert(if_true != NULL, "there should be false projection");
++
++    Node* iff_check = if_true->find_out_with(Op_If);
++    // Not a barrier with bound check
++    if (iff_check == NULL) {
++      return false;
++    }
++
++    Node* iff_check_in_1_node = iff_check->in(1);
++    if (!iff_check_in_1_node->is_Bool()) {
++      return false;
++    }
++    bool_node = iff_check_in_1_node->as_Bool();
++
++  } else {
++    // this "could" be the the path followed when !use_ReduceInitialCardMarks() is
++    // used or when the two sides of the barrier are scalar replaced
++    //assert(false, "we managed to get here!!! process_barrier_node");
++    Node *addl_node = node->find_out_with(Op_AddL);
++    if (addl_node == NULL) {
++      return false;
++    }
++
++    Node* cmpx = addl_node->unique_out();
++    assert(cmpx->is_Cmp() && cmpx->unique_out()->is_Bool() &&
++          cmpx->unique_out()->as_Bool()->_test._test == BoolTest::le,
++          "missing region check in G1 post barrier");
++
++    bool_node = cmpx->unique_out()->as_Bool();
++  }
++
++  if (bool_node->_test._test != BoolTest::le) {
++    return false;
++  }
++
++  // the input to the bool is the CMPX
++  Node* bool_node_in_1_node = bool_node->in(1);
++  if (!bool_node_in_1_node->is_Cmp()) {
++    return false;
++  }
++  CmpNode* cmp_node = bool_node_in_1_node->as_Cmp();
++
++  // the input to the CMPX is the card_table_top_offset constant
++  Node* cmp_node_in_2_node = cmp_node->in(2);
++  if (!cmp_node_in_2_node->is_Con()) {
++    return false;
++  }
++
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++  size_t constant = ct->byte_map_top_offset() - ct->byte_map_bottom_offset();
++
++  // Check that the input to this CMP node is the expected constant
++  const TypeX* otype = cmp_node_in_2_node->find_intptr_t_type();
++  if (otype != NULL && otype->is_con() &&
++      size_t(otype->get_con()) != constant) {
++    // Constant offset but not the card table size constant so just return
++    return false;
++  }
++
++  // we can't change the compare or the constant so create a new constant(0) and replace the variable
++  Node* cmp_node_in_1_node = cmp_node->in(1);
++  ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);
++  if (cmp_node_in_1_node->_idx == zeroConstant_node->_idx) {
++    // we can get here via different nodes - but we only want to change the input once
++    return false;
++  }
++
++  igvn.rehash_node_delayed(cmp_node);
++  int numReplaced = cmp_node->replace_edge(cmp_node_in_1_node, zeroConstant_node);
++  assert(numReplaced == 1, "Failed to replace the card_offset with Conx(0)");
++  return true;
++}
++
+ void G1BarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+   assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
+-  assert(node->outcnt() <= 2, "expects 1 or 2 users: Xor and URShift nodes");
++  assert(node->outcnt() <= 3, "expects 1, 2 or 3 users: Xor, URShift and SubL nodes");
+   // It could be only one user, URShift node, in Object.clone() intrinsic
+   // but the new allocation is passed to arraycopy stub and it could not
+   // be scalar replaced. So we don't check the case.
+ 
++  // Certain loop optimisations may introduce a CastP2X node with
++  // ConvL2I in case of an AllocateArray op. Check for that case
++  // here and do not attempt to eliminate it as write barrier.
++  if (macro->C->do_stack_allocation() && !state()->is_a_barrier(static_cast<CastP2XNode*>(node))) {
++    return;
++  }
++
+   // An other case of only one user (Xor) is when the value check for NULL
+   // in G1 post barrier is folded after CCP so the code which used URShift
+   // is removed.
+ 
+   // Take Region node before eliminating post barrier since it also
+@@ -718,11 +856,18 @@
+           }
+         }
+       }
+     }
+   } else {
+-    assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
++    // In a scenario where the two sides of the barrier are scalar replaced
++    // or stack allocated, the XorX node will be visited more than once, because
++    // both edges will be CastP2X nodes from two distinct allocates. In certain
++    // instances, the removal of the CastP2X node will result in removal of the
++    // XorX node, causing the assert below to be hit when eliminate_gc_barrier is
++    // called for the second node.
++    // assert(!use_ReduceInitialCardMarks(), "can only happen with card marking");
++
+     // This is a G1 post barrier emitted by the Object.clone() intrinsic.
+     // Search for the CastP2X->URShiftX->AddP->LoadB->Cmp path which checks if the card
+     // is marked as young_gen and replace the Cmp with 0 (false) to collapse the barrier.
+     Node* shift = node->find_out_with(Op_URShiftX);
+     assert(shift != NULL, "missing G1 post barrier");
+@@ -736,12 +881,16 @@
+     macro->replace_node(cmpx, macro->makecon(TypeInt::CC_EQ));
+     // There is no G1 pre barrier in this case
+   }
+   // Now CastP2X can be removed since it is used only on dead path
+   // which currently still alive until igvn optimize it.
+-  assert(node->outcnt() == 0 || node->unique_out()->Opcode() == Op_URShiftX, "");
++  // TODO: fix this following assert becuase of SUBL
++  // assert(node->outcnt() == 0 || node->unique_out()->Opcode() == Op_URShiftX, "");
+   macro->replace_node(node, macro->top());
++
++  // Remove this node from our state
++  state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
+ }
+ 
+ Node* G1BarrierSetC2::step_over_gc_barrier(Node* c) const {
+   if (!use_ReduceInitialCardMarks() &&
+       c != NULL && c->is_Region() && c->req() == 3) {
+diff a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp
+--- a/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp
++++ b/src/hotspot/share/gc/g1/c2/g1BarrierSetC2.hpp
+@@ -86,10 +86,12 @@
+ 
+  public:
+   virtual bool is_gc_barrier_node(Node* node) const;
+   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+   virtual Node* step_over_gc_barrier(Node* c) const;
++  virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN& igvn) const;
++
+ 
+ #ifdef ASSERT
+   virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const;
+ #endif
+ 
+diff a/src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp b/src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp
+--- a/src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp
++++ b/src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp
+@@ -112,15 +112,15 @@
+     oop obj = CompressedOops::decode_not_null(heap_oop);
+     assert(ParallelScavengeHeap::heap()->is_in(obj), "should be in heap");
+ 
+     oop new_obj = (oop)summary_data().calc_new_pointer(obj, cm);
+     assert(new_obj != NULL,                    // is forwarding ptr?
+-           "should be forwarded");
++          "should be forwarded");
+     // Just always do the update unconditionally?
+     if (new_obj != NULL) {
+       assert(ParallelScavengeHeap::heap()->is_in_reserved(new_obj),
+-             "should be in object space");
++            "should be in object space");
+       RawAccess<IS_NOT_NULL>::oop_store(p, new_obj);
+     }
+   }
+ }
+ 
+diff a/src/hotspot/share/gc/shared/c2/barrierSetC2.hpp b/src/hotspot/share/gc/shared/c2/barrierSetC2.hpp
+--- a/src/hotspot/share/gc/shared/c2/barrierSetC2.hpp
++++ b/src/hotspot/share/gc/shared/c2/barrierSetC2.hpp
+@@ -271,10 +271,11 @@
+   // This could for example comprise macro nodes to be expanded during macro expansion.
+   virtual void* create_barrier_state(Arena* comp_arena) const { return NULL; }
+   // If the BarrierSetC2 state has barrier nodes in its compilation
+   // unit state to be expanded later, then now is the time to do so.
+   virtual bool expand_barriers(Compile* C, PhaseIterGVN& igvn) const { return false; }
++  virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN& igvn) const { return false; }
+   virtual bool optimize_loops(PhaseIdealLoop* phase, LoopOptsMode mode, VectorSet& visited, Node_Stack& nstack, Node_List& worklist) const { return false; }
+   virtual bool strip_mined_loops_expanded(LoopOptsMode mode) const { return false; }
+   virtual bool is_gc_specific_loop_opts_pass(LoopOptsMode mode) const { return false; }
+ 
+   enum CompilePhase {
+diff a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
+--- a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
++++ b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp
+@@ -29,10 +29,11 @@
+ #include "gc/shared/c2/cardTableBarrierSetC2.hpp"
+ #include "opto/arraycopynode.hpp"
+ #include "opto/graphKit.hpp"
+ #include "opto/idealKit.hpp"
+ #include "opto/macro.hpp"
++#include "opto/rootnode.hpp"
+ #include "utilities/macros.hpp"
+ 
+ #define __ ideal.
+ 
+ Node* CardTableBarrierSetC2::byte_map_base_node(GraphKit* kit) const {
+@@ -55,12 +56,10 @@
+                                          Node* adr,
+                                          uint  adr_idx,
+                                          Node* val,
+                                          BasicType bt,
+                                          bool use_precise) const {
+-  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(BarrierSet::barrier_set());
+-  CardTable* ct = ctbs->card_table();
+   // No store check needed if we're storing a NULL or an old object
+   // (latter case is probably a string constant). The concurrent
+   // mark sweep garbage collector, however, needs to have all nonNull
+   // oop updates flagged via card-marks.
+   if (val != NULL && val->is_Con()) {
+@@ -88,10 +87,16 @@
+   // (Else it's an array (or unknown), and we want more precise card marks.)
+   assert(adr != NULL, "");
+ 
+   IdealKit ideal(kit, true);
+ 
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++
++  float likely = PROB_LIKELY_MAG(3);
++
+   // Convert the pointer to an int prior to doing math on it
+   Node* cast = __ CastPX(__ ctrl(), adr);
+ 
+   // Divide by card size
+   Node* card_offset = __ URShiftX( cast, __ ConI(CardTable::card_shift) );
+@@ -101,35 +106,48 @@
+ 
+   // Get the alias_index for raw card-mark memory
+   int adr_type = Compile::AliasIdxRaw;
+   Node*   zero = __ ConI(0); // Dirty card value
+ 
+-  if (UseCondCardMark) {
+-    if (ct->scanned_concurrently()) {
+-      kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
+-      __ sync_kit(kit);
+-    }
+-    // The classic GC reference write barrier is typically implemented
+-    // as a store into the global card mark table.  Unfortunately
+-    // unconditional stores can result in false sharing and excessive
+-    // coherence traffic as well as false transactional aborts.
+-    // UseCondCardMark enables MP "polite" conditional card mark
+-    // stores.  In theory we could relax the load from ctrl() to
+-    // no_ctrl, but that doesn't buy much latitude.
+-    Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);
+-    __ if_then(card_val, BoolTest::ne, zero);
+-  }
+-
+-  // Smash zero into card
+-  if(!ct->scanned_concurrently()) {
+-    __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);
+-  } else {
+-    // Specialized path for CM store barrier
+-    __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);
+-  }
+-
+-  if (UseCondCardMark) {
++  if (kit->C->do_stack_allocation()) {
++    // Stack allocation: cache CastP2XNode for later processing
++    state()->add_enqueue_barrier(static_cast<CastP2XNode*>(cast));
++
++    Node* low_off = kit->longcon(ct->byte_map_bottom_offset());
++    Node* delta_off = kit->longcon(ct->byte_map_top_offset() - ct->byte_map_bottom_offset());
++    Node* sub_off = __ SubL(cast, low_off);
++
++    __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {
++
++      if (UseCondCardMark) {
++        if (ct->scanned_concurrently()) {
++          kit->insert_mem_bar(Op_MemBarVolatile, oop_store);
++          __ sync_kit(kit);
++        }
++        // The classic GC reference write barrier is typically implemented
++        // as a store into the global card mark table.  Unfortunately
++        // unconditional stores can result in false sharing and excessive
++        // coherence traffic as well as false transactional aborts.
++        // UseCondCardMark enables MP "polite" conditional card mark
++        // stores.  In theory we could relax the load from ctrl() to
++        // no_ctrl, but that doesn't buy much latitude.
++        Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);
++        __ if_then(card_val, BoolTest::ne, zero);
++      }
++
++      // Smash zero into card
++      if(!ct->scanned_concurrently()) {
++        __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);
++      } else {
++        // Specialized path for CM store barrier
++        __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);
++      }
++
++      if (UseCondCardMark) {
++        __ end_if();
++      }
++  } if (kit->C->do_stack_allocation()) {
+     __ end_if();
+   }
+ 
+   // Final sync IdealKit and GraphKit.
+   kit->final_sync(ideal);
+@@ -166,13 +184,76 @@
+ 
+ bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {
+   return ModRefBarrierSetC2::is_gc_barrier_node(node) || node->Opcode() == Op_StoreCM;
+ }
+ 
++bool CardTableBarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN& igvn) const {
++  assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
++
++  // Must have a control node
++  if (node->in(0) == NULL) {
++    return false;
++  }
++
++  Node *addx_node = node->find_out_with(Op_AddX);
++  if (addx_node == NULL) {
++    return false;
++  }
++
++  Node *addx_out = addx_node->unique_out();
++  if (addx_out == NULL) {
++    return false;
++  }
++
++  CmpNode* cmp_node = addx_out->as_Cmp();
++  // the input to the CMPX is the card_table_top_offset constant
++  Node* cmp_node_in_2_node = cmp_node->in(2);
++  if (!cmp_node_in_2_node->is_Con()) {
++    return false;
++  }
++
++  BarrierSet* bs = BarrierSet::barrier_set();
++  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
++  CardTable* ct = ctbs->card_table();
++  size_t constant = ct->byte_map_top_offset() - ct->byte_map_bottom_offset();
++
++  // Check that the input to this CMP node is the expected constant
++  const TypeX* otype = cmp_node_in_2_node->find_intptr_t_type();
++  if (otype != NULL && otype->is_con() &&
++      size_t(otype->get_con()) != constant) {
++    // Constant offset but not the card table size constant so just return
++    return false;
++  }
++
++  // we can't change the compare or the constant so create a new constant(0) and replace the variable
++  Node* cmp_node_in_1_node = cmp_node->in(1);
++  ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);
++  if (cmp_node_in_1_node->_idx == zeroConstant_node->_idx) {
++    // we can get here via different nodes - but we only want to change the input once
++    return false;
++  }
++
++  igvn.rehash_node_delayed(cmp_node);
++  int numReplaced = cmp_node->replace_edge(cmp_node_in_1_node, zeroConstant_node);
++  assert(numReplaced == 1, "Failed to replace the card_offset with Conx(0)");
++  igvn.replace_node(addx_node, igvn.C->top());
++
++  return true;
++}
++
+ void CardTableBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+   assert(node->Opcode() == Op_CastP2X, "ConvP2XNode required");
+-  Node *shift = node->unique_out();
++  assert(node->outcnt() <= 2, "node->outcnt() <= 2");
++
++  // Certain loop optimisations may introduce a CastP2X node with
++  // ConvL2I in case of an AllocateArray op. Check for that case
++  // here and do not attempt to eliminate it as write barrier.
++  if (macro->C->do_stack_allocation() && !state()->is_a_barrier(static_cast<CastP2XNode*>(node))) {
++    return;
++  }
++
++  Node *shift = node->find_out_with(Op_URShiftX);
+   Node *addp = shift->unique_out();
+   for (DUIterator_Last jmin, j = addp->last_outs(jmin); j >= jmin; --j) {
+     Node *mem = addp->last_out(j);
+     if (UseCondCardMark && mem->is_Load()) {
+       assert(mem->Opcode() == Op_LoadB, "unexpected code shape");
+@@ -182,11 +263,126 @@
+       continue;
+     }
+     assert(mem->is_Store(), "store required");
+     macro->replace_node(mem, mem->in(MemNode::Memory));
+   }
++
++  if (macro->C->do_stack_allocation()) {
++    Node *addl_node = node->find_out_with(Op_AddL);
++    assert(addl_node != NULL, "stackallocation expects addl");
++
++    Node* cmp_node = addl_node->unique_out();
++    assert(cmp_node != NULL && cmp_node->is_Cmp(), "expected unique cmp node");
++
++    macro->replace_node(cmp_node, macro->makecon(TypeInt::CC_EQ));
++  }
++
++  // Stack allocation: remove this node from our cache so we don't process it later
++  state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
+ }
+ 
+ bool CardTableBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const {
+   bool is_oop = is_reference_type(type);
+   return is_oop && (!tightly_coupled_alloc || !use_ReduceInitialCardMarks());
+ }
++
++bool CardTableBarrierSetC2::expand_barriers(Compile* C, PhaseIterGVN& igvn) const {
++  // We need to process write barriers for extra checks in case we have stack allocation on
++  if (C->do_stack_allocation()) {
++    BarrierSetC2State* set_state = state();
++
++    for (int i = 0; i < set_state->enqueue_barriers_count(); i++) {
++      Node* n = set_state->enqueue_barrier(i);
++      process_barrier_node(n, igvn);
++    }
++
++    if (set_state->enqueue_barriers_count()) {
++      // this kicks in the dead code elimination we need to remove the redundant check
++      igvn.optimize();
++    }
++  }
++
++  return false;
++}
++
++Node* CardTableBarrierSetC2::step_over_gc_barrier(Node* c) const {
++  if (Compile::current()->do_stack_allocation() &&
++      !use_ReduceInitialCardMarks() &&
++      c != NULL && c->is_Region() && c->req() == 3) {
++
++    //                  [Proj] <----------- step over to here and return
++    //                    |
++    //               -----------
++    //              /           \
++    //             /             \
++    //            /             [CastP2X]
++    //            |            /
++    //            |           [AddL]
++    //            |          /
++    //            |         [CmpUL]
++    //            |        /
++    //            \      [Bool]
++    //             \    /
++    //              [If]
++    //            /     \
++    //  [IfFalse]        [IfTrue]
++    //         \        /
++    //          [Region] <---------------- c node
++
++    Node* if_bool = c->in(1);
++    assert(if_bool->is_IfTrue() || if_bool->is_IfFalse(), "Invalid gc graph pattern");
++    Node* if_node = if_bool->in(0);
++    Node* proj_node = if_node->in(0);
++    assert(proj_node->is_Proj(), "Invalid gc graph pattern");
++    return proj_node;
++  }
++  return c;
++}
++
++void CardTableBarrierSetC2::register_potential_barrier_node(Node* node) const {
++  if (node->Opcode() == Op_CastP2X) {
++    state()->add_enqueue_barrier(static_cast<CastP2XNode*>(node));
++  }
++}
++
++void CardTableBarrierSetC2::unregister_potential_barrier_node(Node* node) const {
++  if (node->Opcode() == Op_CastP2X) {
++    state()->remove_enqueue_barrier(static_cast<CastP2XNode*>(node));
++  }
++}
++
++BarrierSetC2State* CardTableBarrierSetC2::state() const {
++  BarrierSetC2State* ret = reinterpret_cast<BarrierSetC2State*>(Compile::current()->barrier_set_state());
++  assert(ret != NULL, "Sanity");
++  return ret;
++}
++
++void* CardTableBarrierSetC2::create_barrier_state(Arena* comp_arena) const {
++  return new(comp_arena) BarrierSetC2State(comp_arena);
++}
++
++BarrierSetC2State::BarrierSetC2State(Arena* comp_arena)
++  : _enqueue_barriers(new (comp_arena) GrowableArray<CastP2XNode*>(comp_arena, 8,  0, NULL)) {
++}
++
++int BarrierSetC2State::enqueue_barriers_count() const {
++  return _enqueue_barriers->length();
++}
++
++CastP2XNode* BarrierSetC2State::enqueue_barrier(int idx) const {
++  return _enqueue_barriers->at(idx);
++}
++
++void BarrierSetC2State::add_enqueue_barrier(CastP2XNode* n) {
++  assert(!_enqueue_barriers->contains(n), "duplicate entry in barrier list");
++  _enqueue_barriers->append(n);
++}
++
++void BarrierSetC2State::remove_enqueue_barrier(CastP2XNode* n) {
++  if (_enqueue_barriers->contains(n)) {
++    _enqueue_barriers->remove(n);
++  }
++}
++
++bool BarrierSetC2State::is_a_barrier(CastP2XNode* n) {
++  return _enqueue_barriers->contains(n);
++}
+diff a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
+--- a/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
++++ b/src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp
+@@ -24,10 +24,28 @@
+ 
+ #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+ #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+ 
+ #include "gc/shared/c2/modRefBarrierSetC2.hpp"
++#include "utilities/growableArray.hpp"
++
++class CastP2XNode;
++
++class BarrierSetC2State : public ResourceObj {
++private:
++  GrowableArray<CastP2XNode*>* _enqueue_barriers;
++
++public:
++  BarrierSetC2State(Arena* comp_arena);
++
++  int enqueue_barriers_count() const;
++  CastP2XNode* enqueue_barrier(int idx) const;
++  void add_enqueue_barrier(CastP2XNode* n);
++  void remove_enqueue_barrier(CastP2XNode* n);
++  bool is_a_barrier(CastP2XNode* n);
++};
++
+ 
+ class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+ protected:
+   virtual void post_barrier(GraphKit* kit,
+                             Node* ctl,
+@@ -44,10 +62,19 @@
+ public:
+   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+   virtual bool is_gc_barrier_node(Node* node) const;
+   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
++  virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN& igvn) const;
++  virtual Node* step_over_gc_barrier(Node* c) const;
+ 
+   bool use_ReduceInitialCardMarks() const;
++
++  BarrierSetC2State* state() const;
++
++  virtual void register_potential_barrier_node(Node* node) const;
++  virtual void unregister_potential_barrier_node(Node* node) const;
++  virtual bool expand_barriers(Compile* C, PhaseIterGVN& igvn) const;
++  virtual void* create_barrier_state(Arena* comp_arena) const;
+ };
+ 
+ #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+diff a/src/hotspot/share/gc/shared/cardTable.hpp b/src/hotspot/share/gc/shared/cardTable.hpp
+--- a/src/hotspot/share/gc/shared/cardTable.hpp
++++ b/src/hotspot/share/gc/shared/cardTable.hpp
+@@ -246,10 +246,12 @@
+   // This would be the 0th element of _byte_map, if the heap started at 0x0.
+   // But since the heap starts at some higher address, this points to somewhere
+   // before the beginning of the actual _byte_map.
+   CardValue* byte_map_base() const { return _byte_map_base; }
+   bool scanned_concurrently() const { return _scanned_concurrently; }
++  size_t byte_map_top_offset() const { return uintptr_t(_whole_heap.end()); }
++  size_t byte_map_bottom_offset() const { return uintptr_t(_whole_heap.start()); }
+ 
+   virtual bool is_in_young(oop obj) const = 0;
+ 
+   // Print a description of the memory for the card table
+   virtual void print_on(outputStream* st) const;
+diff a/src/hotspot/share/memory/iterator.cpp b/src/hotspot/share/memory/iterator.cpp
+--- a/src/hotspot/share/memory/iterator.cpp
++++ b/src/hotspot/share/memory/iterator.cpp
+@@ -24,10 +24,11 @@
+ 
+ #include "precompiled.hpp"
+ #include "code/nmethod.hpp"
+ #include "memory/iterator.inline.hpp"
+ #include "oops/oop.inline.hpp"
++#include "runtime/fieldDescriptor.inline.hpp"
+ #include "utilities/debug.hpp"
+ #include "utilities/globalDefinitions.hpp"
+ 
+ DoNothingClosure do_nothing_cl;
+ 
+diff a/src/hotspot/share/opto/block.cpp b/src/hotspot/share/opto/block.cpp
+--- a/src/hotspot/share/opto/block.cpp
++++ b/src/hotspot/share/opto/block.cpp
+@@ -175,11 +175,11 @@
+   }
+ 
+   // Ideal nodes are allowable in empty blocks: skip them  Only MachNodes
+   // turn directly into code, because only MachNodes have non-trivial
+   // emit() functions.
+-  while ((end_idx > 0) && !get_node(end_idx)->is_Mach()) {
++  while ((end_idx > 0) && !(get_node(end_idx)->is_Mach() || get_node(end_idx)->is_BoxLock())) {
+     end_idx--;
+   }
+ 
+   // No room for any interesting instructions?
+   if (end_idx == 0) {
+diff a/src/hotspot/share/opto/buildOopMap.cpp b/src/hotspot/share/opto/buildOopMap.cpp
+--- a/src/hotspot/share/opto/buildOopMap.cpp
++++ b/src/hotspot/share/opto/buildOopMap.cpp
+@@ -239,11 +239,12 @@
+     Node *def = _defs[reg];     // Get reaching def
+     assert( def, "since live better have reaching def" );
+ 
+     // Classify the reaching def as oop, derived, callee-save, dead, or other
+     const Type *t = def->bottom_type();
+-    if( t->isa_oop_ptr() ) {    // Oop or derived?
++    if( t->isa_oop_ptr() || // Oop or derived?
++       (C->do_stack_allocation() && t->isa_rawptr() && def->is_BoxLock())) {  // consider stack oops too
+       assert( !OptoReg::is_valid(_callees[reg]), "oop can't be callee save" );
+ #ifdef _LP64
+       // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+       // Make sure both are record from the same reaching def, but do not
+       // put both into the oopmap.
+diff a/src/hotspot/share/opto/c2_globals.hpp b/src/hotspot/share/opto/c2_globals.hpp
+--- a/src/hotspot/share/opto/c2_globals.hpp
++++ b/src/hotspot/share/opto/c2_globals.hpp
+@@ -532,10 +532,19 @@
+                                                                             \
+   product(intx, EliminateAllocationArraySizeLimit, 64,                      \
+           "Array size (number of elements) limit for scalar replacement")   \
+           range(0, max_jint)                                                \
+                                                                             \
++  experimental(bool, UseStackAllocation, false,                             \
++          "Leverage stack allocation to reduce heap pressure")              \
++                                                                            \
++  experimental(bool, UseStackAllocationRuntime, false,                      \
++          "Enable the stack allocation runtime code in oopmap")             \
++                                                                            \
++  notproduct(bool, PrintStackAllocation, false,                             \
++          "Print stack allocation debug information")                       \
++                                                                            \
+   product(bool, OptimizePtrCompare, true,                                   \
+           "Use escape analysis to optimize pointers compare")               \
+                                                                             \
+   notproduct(bool, PrintOptimizePtrCompare, false,                          \
+           "Print information about optimized pointers compare")             \
+diff a/src/hotspot/share/opto/callnode.cpp b/src/hotspot/share/opto/callnode.cpp
+--- a/src/hotspot/share/opto/callnode.cpp
++++ b/src/hotspot/share/opto/callnode.cpp
+@@ -483,29 +483,48 @@
+       }
+       st->print("={");
+       uint nf = spobj->n_fields();
+       if (nf > 0) {
+         uint first_ind = spobj->first_index(mcall->jvms());
+-        Node* fld_node = mcall->in(first_ind);
++        Node* fld_node = NULL;
+         ciField* cifield;
+         if (iklass != NULL) {
+           st->print(" [");
+           cifield = iklass->nonstatic_field_at(0);
+           cifield->print_name_on(st);
+-          format_helper(regalloc, st, fld_node, ":", 0, &scobjs);
++          if(spobj->stack_allocated()) {
++            st->print(":*0]");
++          } else {
++            fld_node = mcall->in(first_ind);
++            format_helper(regalloc, st, fld_node, ":", 0, &scobjs);
++          }
+         } else {
+-          format_helper(regalloc, st, fld_node, "[", 0, &scobjs);
++          if(spobj->stack_allocated()) {
++            st->print("[*0]");
++          } else {
++            fld_node = mcall->in(first_ind);
++            format_helper(regalloc, st, fld_node, "[", 0, &scobjs);
++          }
+         }
+         for (uint j = 1; j < nf; j++) {
+-          fld_node = mcall->in(first_ind+j);
+           if (iklass != NULL) {
+             st->print(", [");
+             cifield = iklass->nonstatic_field_at(j);
+             cifield->print_name_on(st);
+-            format_helper(regalloc, st, fld_node, ":", j, &scobjs);
++            if(spobj->stack_allocated()) {
++              st->print(":*%d]", j);
++            } else {
++              fld_node = mcall->in(first_ind+j);
++              format_helper(regalloc, st, fld_node, ":", j, &scobjs);
++            }
+           } else {
+-            format_helper(regalloc, st, fld_node, ", [", j, &scobjs);
++            if(spobj->stack_allocated()) {
++              st->print(", [*%d]", j);
++            } else {
++              fld_node = mcall->in(first_ind+j);
++              format_helper(regalloc, st, fld_node, ", [", j, &scobjs);
++            }
+           }
+         }
+       }
+       st->print(" }");
+     }
+@@ -959,10 +978,17 @@
+     return true;
+   }
+   return false;
+ }
+ 
++bool CallNode::is_call_to_osr_migration_end() const {
++  if (_name != NULL && strstr(_name, "OSR_migration_end") != 0) {
++    return true;
++  }
++  return false;
++}
++
+ //=============================================================================
+ uint CallJavaNode::size_of() const { return sizeof(*this); }
+ bool CallJavaNode::cmp( const Node &n ) const {
+   CallJavaNode &call = (CallJavaNode&)n;
+   return CallNode::cmp(call) && _method == call._method &&
+@@ -1300,11 +1326,12 @@
+ #endif
+                                                      uint first_index,
+                                                      uint n_fields) :
+   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+   _first_index(first_index),
+-  _n_fields(n_fields)
++  _n_fields(n_fields),
++  _is_stack_allocated(false)
+ #ifdef ASSERT
+   , _alloc(alloc)
+ #endif
+ {
+   init_class_id(Class_SafePointScalarObject);
+@@ -1362,10 +1389,12 @@
+ {
+   init_class_id(Class_Allocate);
+   init_flags(Flag_is_macro);
+   _is_scalar_replaceable = false;
+   _is_non_escaping = false;
++  _is_stack_allocateable = false;
++  _is_referenced_stack_allocation = false;
+   _is_allocation_MemBar_redundant = false;
+   Node *topnode = C->top();
+ 
+   init_req( TypeFunc::Control  , ctrl );
+   init_req( TypeFunc::I_O      , abio );
+diff a/src/hotspot/share/opto/callnode.hpp b/src/hotspot/share/opto/callnode.hpp
+--- a/src/hotspot/share/opto/callnode.hpp
++++ b/src/hotspot/share/opto/callnode.hpp
+@@ -492,10 +492,11 @@
+ class SafePointScalarObjectNode: public TypeNode {
+   uint _first_index; // First input edge relative index of a SafePoint node where
+                      // states of the scalarized object fields are collected.
+                      // It is relative to the last (youngest) jvms->_scloff.
+   uint _n_fields;    // Number of non-static fields of the scalarized object.
++  bool _is_stack_allocated;
+   DEBUG_ONLY(AllocateNode* _alloc;)
+ 
+   virtual uint hash() const ; // { return NO_HASH; }
+   virtual bool cmp( const Node &n ) const;
+ 
+@@ -517,10 +518,13 @@
+     assert(jvms != NULL, "missed JVMS");
+     return jvms->scloff() + _first_index;
+   }
+   uint n_fields()    const { return _n_fields; }
+ 
++  void set_stack_allocated(bool v) { _is_stack_allocated = true; }
++  bool stack_allocated() { return _is_stack_allocated; }
++
+ #ifdef ASSERT
+   AllocateNode* alloc() const { return _alloc; }
+ #endif
+ 
+   virtual uint size_of() const { return sizeof(*this); }
+@@ -637,10 +641,11 @@
+   void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+ 
+   virtual uint match_edge(uint idx) const;
+ 
+   bool is_call_to_arraycopystub() const;
++  bool is_call_to_osr_migration_end() const;
+ 
+ #ifndef PRODUCT
+   virtual void        dump_req(outputStream *st = tty) const;
+   virtual void        dump_spec(outputStream *st) const;
+ #endif
+@@ -839,10 +844,13 @@
+     InitialTest,                      // slow-path test (may be constant)
+     ALength,                          // array length (or TOP if none)
+     ParmLimit
+   };
+ 
++  // Maximum object size considered for stack allocation
++  static const int StackAllocSizeLimit = 0x100;
++
+   static const TypeFunc* alloc_type(const Type* t) {
+     const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+     fields[AllocSize]   = TypeInt::POS;
+     fields[KlassNode]   = TypeInstPtr::NOTNULL;
+     fields[InitialTest] = TypeInt::BOOL;
+@@ -860,10 +868,12 @@
+   }
+ 
+   // Result of Escape Analysis
+   bool _is_scalar_replaceable;
+   bool _is_non_escaping;
++  bool _is_stack_allocateable;
++  bool _is_referenced_stack_allocation;
+   // True when MemBar for new is redundant with MemBar at initialzer exit
+   bool _is_allocation_MemBar_redundant;
+ 
+   virtual uint size_of() const; // Size is bigger
+   AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+diff a/src/hotspot/share/opto/compile.cpp b/src/hotspot/share/opto/compile.cpp
+--- a/src/hotspot/share/opto/compile.cpp
++++ b/src/hotspot/share/opto/compile.cpp
+@@ -902,10 +902,12 @@
+   env()->set_oop_recorder(new OopRecorder(env()->arena()));
+   env()->set_debug_info(new DebugInformationRecorder(env()->oop_recorder()));
+   env()->set_dependencies(new Dependencies(env()));
+ 
+   _fixed_slots = 0;
++  _stack_allocated_slots = 0;
++  set_fail_stack_allocation_with_references(false);
+   set_has_split_ifs(false);
+   set_has_loops(has_method() && method()->has_loops()); // first approximation
+   set_has_stringbuilder(false);
+   set_has_boxed_value(false);
+   _trap_can_recompile = false;  // no traps emitted yet
+diff a/src/hotspot/share/opto/compile.hpp b/src/hotspot/share/opto/compile.hpp
+--- a/src/hotspot/share/opto/compile.hpp
++++ b/src/hotspot/share/opto/compile.hpp
+@@ -257,11 +257,11 @@
+ 
+   // Control of this compilation.
+   int                   _max_inline_size;       // Max inline size for this compilation
+   int                   _freq_inline_size;      // Max hot method inline size for this compilation
+   int                   _fixed_slots;           // count of frame slots not allocated by the register
+-                                                // allocator i.e. locks, original deopt pc, etc.
++                                                // allocator i.e. locks, original deopt pc, stack allocated objects, etc.
+   uintx                 _max_node_limit;        // Max unique node count during a single compilation.
+ 
+   int                   _major_progress;        // Count of something big happening
+   bool                  _inlining_progress;     // progress doing incremental inlining?
+   bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
+@@ -298,10 +298,14 @@
+   // JSR 292
+   bool                  _has_method_handle_invokes; // True if this method has MethodHandle invokes.
+   RTMState              _rtm_state;             // State of Restricted Transactional Memory usage
+   int                   _loop_opts_cnt;         // loop opts round
+   bool                  _clinit_barrier_on_entry; // True if clinit barrier is needed on nmethod entry
++  int                   _stack_allocated_slots; // count of frame slots potentially taken by stack allocated objects.
++                                                // Going over the limit disables stack allocation of objects pointing
++                                                // to other stack allocated objects.
++  bool                  _fail_stack_allocation_with_references;
+ 
+   // Compilation environment.
+   Arena                 _comp_arena;            // Arena with lifetime equivalent to Compile
+   void*                 _barrier_set_state;     // Potential GC barrier state for Compile
+   ciEnv*                _env;                   // CI interface
+@@ -504,11 +508,12 @@
+   /** Do boxing elimination. */
+   bool              eliminate_boxing() const    { return _eliminate_boxing; }
+   /** Do aggressive boxing elimination. */
+   bool              aggressive_unboxing() const { return _eliminate_boxing && AggressiveUnboxing; }
+   bool              save_argument_registers() const { return _save_argument_registers; }
+-
++  /** Do stack allocation */
++  bool              do_stack_allocation() const { return UseStackAllocation || _directive->UseStackAllocationOption; }
+ 
+   // Other fixed compilation parameters.
+   ciMethod*         method() const              { return _method; }
+   int               entry_bci() const           { return _entry_bci; }
+   bool              is_osr_compilation() const  { return _entry_bci != InvocationEntryBci; }
+@@ -590,10 +595,14 @@
+   bool          profile_rtm() const              { return _rtm_state == ProfileRTM; }
+   uint              max_node_limit() const       { return (uint)_max_node_limit; }
+   void          set_max_node_limit(uint n)       { _max_node_limit = n; }
+   bool              clinit_barrier_on_entry()       { return _clinit_barrier_on_entry; }
+   void          set_clinit_barrier_on_entry(bool z) { _clinit_barrier_on_entry = z; }
++  int               stack_allocated_slots() const { assert(_stack_allocated_slots >= 0, ""); return _stack_allocated_slots; }
++  void          set_stack_allocated_slots(int n)  { _stack_allocated_slots = n; }
++  bool               fail_stack_allocation_with_references() const { return _fail_stack_allocation_with_references; }
++  void          set_fail_stack_allocation_with_references(bool b)  { _fail_stack_allocation_with_references = b; }
+ 
+   // check the CompilerOracle for special behaviours for this compile
+   bool          method_has_option(const char * option) {
+     return method() != NULL && method()->has_option(option);
+   }
+diff a/src/hotspot/share/opto/escape.cpp b/src/hotspot/share/opto/escape.cpp
+--- a/src/hotspot/share/opto/escape.cpp
++++ b/src/hotspot/share/opto/escape.cpp
+@@ -45,10 +45,11 @@
+   _nodes(C->comp_arena(), C->unique(), C->unique(), NULL),
+   _in_worklist(C->comp_arena()),
+   _next_pidx(0),
+   _collecting(true),
+   _verify(false),
++  _has_locks(false),
+   _compile(C),
+   _igvn(igvn),
+   _node_map(C->comp_arena()) {
+   // Add unknown java object.
+   add_java_object(C->top(), PointsToNode::GlobalEscape);
+@@ -181,10 +182,15 @@
+ #endif
+     } else if (n->is_ArrayCopy()) {
+       // Keep a list of ArrayCopy nodes so if one of its input is non
+       // escaping, we can record a unique type
+       arraycopy_worklist.append(n->as_ArrayCopy());
++    } else if (n->is_Lock()) {
++      Node* obj = n->as_Lock()->obj_node()->uncast();
++      if (!(obj->is_Parm() || obj->is_Con())) {
++        _has_locks = true;
++      }
+     }
+     for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
+       Node* m = n->fast_out(i);   // Get user
+       ideal_nodes.push(m);
+     }
+@@ -248,13 +254,56 @@
+     if (noescape && ptn->scalar_replaceable()) {
+       adjust_scalar_replaceable_state(ptn);
+       if (ptn->scalar_replaceable()) {
+         alloc_worklist.append(ptn->ideal_node());
+       }
++    } else {
++      // Set scalar replaceable to false to for stack allocation analysis below
++      ptn->set_scalar_replaceable(false);
+     }
+   }
+ 
++  // 4. Perform stack allocation analysis
++  if (C->do_stack_allocation() && (!_has_locks || (EliminateLocks && EliminateNestedLocks))) {
++    if (non_escaped_length > 0) {
++      for (int next = 0; next < non_escaped_length; next++) {
++        JavaObjectNode* ptn = non_escaped_worklist.at(next);
++        PointsToNode::EscapeState es = ptn->escape_state();
++        assert(es < PointsToNode::GlobalEscape, "list can not contain GlobalEscape objects");
++        if (es == PointsToNode::ArgEscape) {
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++            tty->print_cr("---- Alloc node %d can not be stack allocated as it escapes as an argument", ptn->ideal_node()->_idx);
++          }
++#endif
++          continue;
++        }
++
++        Node* n = ptn->ideal_node();
++        if (!n->is_Allocate()) {
++          continue;
++        }
++
++        n->as_Allocate()->_is_stack_allocateable = eligible_for_stack_allocation(ptn);
++      }
++    }
++
++    // 4.1 Verify that object chains don't contain heap objects pointing
++    //     to stack allocated objects. Loop until there are changes in the
++    //     state of which objects are allowed to be stack allocated.
++    bool more_work = non_escaped_length > 0;
++    while (more_work) {
++      more_work = verify_stack_allocated_object_chains(non_escaped_worklist, non_escaped_length);
++    }
++
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      print_stack_allocated_candidates(non_escaped_worklist, non_escaped_length);
++    }
++#endif
++  }
++
+ #ifdef ASSERT
+   if (VerifyConnectionGraph) {
+     // Verify that graph is complete - no new edges could be added or needed.
+     verify_connection_graph(ptnodes_worklist, non_escaped_worklist,
+                             java_objects_worklist, addp_worklist);
+@@ -268,18 +317,18 @@
+ 
+   _collecting = false;
+ 
+   } // TracePhase t3("connectionGraph")
+ 
+-  // 4. Optimize ideal graph based on EA information.
++  // 5. Optimize ideal graph based on EA information.
+   bool has_non_escaping_obj = (non_escaped_worklist.length() > 0);
+   if (has_non_escaping_obj) {
+     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
+   }
+ 
+ #ifndef PRODUCT
+-  if (PrintEscapeAnalysis) {
++  if (print_escape_analysis()) {
+     dump(ptnodes_worklist); // Dump ConnectionGraph
+   }
+ #endif
+ 
+   bool has_scalar_replaceable_candidates = (alloc_worklist.length() > 0);
+@@ -292,21 +341,21 @@
+       assert(ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable(), "sanity");
+     }
+   }
+ #endif
+ 
+-  // 5. Separate memory graph for scalar replaceable allcations.
++  // 6. Separate memory graph for scalar replaceable allcations.
+   if (has_scalar_replaceable_candidates &&
+       C->AliasLevel() >= 3 && EliminateAllocations) {
+     // Now use the escape information to create unique types for
+     // scalar replaceable objects.
+     split_unique_types(alloc_worklist, arraycopy_worklist);
+     if (C->failing())  return false;
+     C->print_method(PHASE_AFTER_EA, 2);
+ 
+ #ifdef ASSERT
+-  } else if (Verbose && (PrintEscapeAnalysis || PrintEliminateAllocations)) {
++  } else if (Verbose && (print_escape_analysis() || print_eliminate_allocations())) {
+     tty->print("=== No allocations eliminated for ");
+     C->method()->print_short_name();
+     if(!EliminateAllocations) {
+       tty->print(" since EliminateAllocations is off ===");
+     } else if(!has_scalar_replaceable_candidates) {
+@@ -318,10 +367,274 @@
+ #endif
+   }
+   return has_non_escaping_obj;
+ }
+ 
++// If an allocation is dominated by a loop, check to see if the lifetime of two instances
++// may overlap. If they do this allocate is not eligible for stack allocation
++bool ConnectionGraph::allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi) {
++  Node *child0 = phi->in(0);
++  if (!child0->is_Loop()) {
++    return false;
++  }
++  // This is very pessimistic... but correct. It could be optimized
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++
++  for (uint i = 1; i < phi->outcnt(); i++) {
++    node_worklist.push(phi->raw_out(i));
++  }
++
++  while(node_worklist.length() != 0) {
++    Node* node = node_worklist.pop();
++    if (visited.test_set(node->_idx)) {
++      continue;  // already processed
++    }
++
++    if (node->is_Phi()) {
++      if (phi == node) {
++        return true;
++      }
++    }
++    for (DUIterator_Fast imax, i = node->fast_outs(imax); i < imax; i++) {
++      node_worklist.push(node->fast_out(i));
++    }
++  }
++  return false;
++}
++
++// Find if an allocate result may reach an EncodeP
++bool ConnectionGraph::oop_may_be_compressed(Node* alloc_result) {
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++
++  node_worklist.push(alloc_result);
++  visited.set(alloc_result->_idx);
++
++  while(node_worklist.length() != 0) {
++    Node* node = node_worklist.pop();
++
++    for (DUIterator_Fast imax, i = node->fast_outs(imax); i < imax; i++) {
++      Node *use = node->fast_out(i);
++      if (use->is_Phi()) {
++        if (!visited.test_set(use->_idx)) {
++          node_worklist.push(use);
++        }
++      } else if (use->is_EncodeP()) {
++        return true;
++      }
++    }
++  }
++
++  return false;
++}
++
++// Various checks to determine if an alloc is a candidate for stack allocation
++bool ConnectionGraph::eligible_for_stack_allocation(PointsToNode* ptn) {
++  assert(ptn->ideal_node()->is_Allocate(), "Must be called on allocate or allocate array node");
++
++  AllocateNode *alloc = ptn->ideal_node()->as_Allocate();
++  Node* res = alloc->result_cast();
++  if (res == NULL) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to NULL result_cast", alloc->_idx);
++    }
++#endif
++    return false;
++  } else if (!res->is_CheckCastPP()) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to an invalid result_cast", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  Node* size_in_bytes = alloc->in(AllocateNode::AllocSize);
++  intptr_t size_of_object = _igvn->find_intptr_t_con(size_in_bytes, -1);
++  if ((size_of_object == -1) || (size_of_object > AllocateNode::StackAllocSizeLimit)) {
++    // Object has unknown size or is too big so it can not be stack allocated.
++    // No need to find reaching objects since it does not have any fields
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to an invalid size", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  if (alloc->is_AllocateArray()) {
++    int length = alloc->in(AllocateNode::ALength)->find_int_con(-1);
++    if (length < 0 || length > EliminateAllocationArraySizeLimit) {
++      // Array does not have a constant length so it can not be stack allocated
++#ifndef PRODUCT
++      if (print_escape_analysis() || print_stack_allocation()) {
++        tty->print_cr("---- Alloc node %d can not be stack allocated as it is an array with an invalid length", alloc->_idx);
++      }
++#endif
++      return false;
++    }
++  }
++
++  if (UseCompressedOops && oop_may_be_compressed(res)) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to compress operation on the stack oop", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  return all_uses_eligible_for_stack_allocation(ptn);
++}
++
++// Check if the alloc has uses that make it ineligible for stack allocation
++bool ConnectionGraph::all_uses_eligible_for_stack_allocation(PointsToNode *ptn) {
++  assert(ptn->ideal_node()->is_Allocate(), "Must be called on allocate or allocate array node");
++
++  AllocateNode *alloc = ptn->ideal_node()->as_Allocate();
++  Node* res = alloc->result_cast();
++
++  assert(res != NULL, "Result cast must not be NULL at this point");
++
++  for (int uses = 0; uses < ptn->use_count(); uses ++) {
++    PointsToNode *use = ptn->use(uses);
++    if (use->is_LocalVar()) {
++      LocalVarNode *local = use->as_LocalVar();
++      Node *node = local->ideal_node();
++      if (node->is_Phi()) {
++        if (allocation_lifetime_overlap(alloc, node->as_Phi())) {
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++            tty->print_cr("---- Alloc node %d can not be stack allocated as it may overlap with older versions of itself", alloc->_idx);
++          }
++#endif
++          return false;
++        }
++      } else if (node->is_Load() && node->Opcode() == Op_LoadP) {
++        Node *in1 = node->in(1);
++        if ((in1 != NULL) && in1->is_Phi()) {
++          if (allocation_lifetime_overlap(alloc, in1->as_Phi())) {
++#ifndef PRODUCT
++            if (print_escape_analysis() || print_stack_allocation()) {
++              tty->print_cr("---- Alloc node %d can not be stack allocated as it may overlap with older versions of itself", alloc->_idx);
++            }
++#endif
++            return false;
++          }
++        }
++      }
++    } else if (use->is_Field()) {
++      if (UseCompressedOops) {
++#ifndef PRODUCT
++        if (print_escape_analysis() || print_stack_allocation()) {
++          tty->print_cr("---- Alloc node %d can not be stack allocated as it referenced by another object", alloc->_idx);
++        }
++#endif
++        return false;
++      }
++    } else if (use->is_Arraycopy()) {
++      if (ptn->arraycopy_dst() && alloc->is_AllocateArray()) {
++        Node* klass = alloc->in(AllocateNode::KlassNode);
++        ciKlass* k = _igvn->type(klass)->is_klassptr()->klass();
++        if (k->is_obj_array_klass()) {
++        // The System.arraycopy helper has a post store barrier which does not handle stack allocated objects
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++          tty->print_cr("---- Alloc node %d can not be stack allocated as it is referenced from an arraycopy", alloc->_idx);
++          }
++#endif
++          return false;
++        }
++      }
++    }
++  }
++
++  return true;
++}
++
++bool ConnectionGraph::verify_stack_allocated_object_chains(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length) {
++  for (int next = 0; next < non_escaped_length; next++) {
++    JavaObjectNode* ptn = non_escaped_worklist.at(next);
++    if (ptn->escape_state() != PointsToNode::NoEscape) {
++      continue;
++    }
++    Node* n = ptn->ideal_node();
++    if (!n->is_Allocate()) {
++      continue;
++    }
++    AllocateNode *alloc = n->as_Allocate();
++    if (!alloc->_is_stack_allocateable) {
++      continue;
++    }
++    for (int uses = 0; uses < ptn->use_count(); uses ++) {
++      PointsToNode *use = ptn->use(uses);
++      if(use->is_Field()) {
++        for (BaseIterator i(use->as_Field()); i.has_next(); i.next()) {
++          PointsToNode* base = i.get();
++          if (base->is_JavaObject()) {
++            JavaObjectNode *new_obj = base->as_JavaObject();
++            if (new_obj == ptn) {
++              continue;
++            }
++            if (!new_obj->ideal_node()->is_Allocate()) {
++              if (new_obj->ideal_node()->Opcode() == Op_ConP) {
++                TypeNode *tn = new_obj->ideal_node()->as_Type();
++                if (tn->type() == TypePtr::NULL_PTR) {
++                  // Allow NULL ptr ConP
++                  continue;
++                }
++              }
++              alloc->_is_stack_allocateable = false;
++              alloc->_is_referenced_stack_allocation = false;
++#ifndef PRODUCT
++              if (print_escape_analysis() || print_stack_allocation()) {
++                tty->print_cr("---- Alloc node %d can not be stack allocated, it is referenced by a non allocate object", alloc->_idx);
++              }
++#endif
++              return true;
++            }
++            AllocateNode *new_alloc = new_obj->ideal_node()->as_Allocate();
++            if (!new_alloc->_is_stack_allocateable && !new_obj->scalar_replaceable()) {
++              alloc->_is_stack_allocateable = false;
++              alloc->_is_referenced_stack_allocation = false;
++#ifndef PRODUCT
++              if (print_escape_analysis() || print_stack_allocation()) {
++                tty->print_cr("---- Alloc node %d can not be stack allocated, it is referenced by another non SCR/SA object %d", alloc->_idx, new_alloc->_idx);
++              }
++#endif
++              return true;
++            } else {
++              assert(alloc->_is_stack_allocateable, "has to be stack allocateable");
++              alloc->_is_referenced_stack_allocation = true;
++            }
++          }
++        }
++      }
++    }
++  }
++
++  return false;
++}
++
++#ifndef PRODUCT
++void ConnectionGraph::print_stack_allocated_candidates(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length) {
++  for (int next = 0; next < non_escaped_length; next++) {
++    JavaObjectNode* ptn = non_escaped_worklist.at(next);
++    Node* n = ptn->ideal_node();
++    if (!n->is_Allocate()) {
++      continue;
++    }
++    AllocateNode *alloc = n->as_Allocate();
++    if (alloc->_is_stack_allocateable) {
++      tty->print_cr("++++ Alloc node %d is marked as stack allocateable is_scalar_replaceable (%d)", n->_idx, ptn->scalar_replaceable());
++    }
++  }
++}
++#endif
++
+ // Utility function for nodes that load an object
+ void ConnectionGraph::add_objload_to_connection_graph(Node *n, Unique_Node_List *delayed_worklist) {
+   // Using isa_ptr() instead of isa_oopptr() for LoadP and Phi because
+   // ThreadLocal has RawPtr type.
+   const Type* t = _igvn->type(n);
+@@ -1235,11 +1548,11 @@
+     // Possible infinite build_connection_graph loop,
+     // bailout (no changes to ideal graph were made).
+     return false;
+   }
+ #ifdef ASSERT
+-  if (Verbose && PrintEscapeAnalysis) {
++  if (Verbose && print_escape_analysis()) {
+     tty->print_cr("EA: %d iterations to build connection graph with %d nodes and worklist size %d",
+                   iterations, nodes_size(), ptnodes_worklist.length());
+   }
+ #endif
+ 
+@@ -2780,11 +3093,14 @@
+         result = un;
+       } else {
+         break;
+       }
+     } else if (result->is_ClearArray()) {
+-      if (!ClearArrayNode::step_through(&result, (uint)toop->instance_id(), igvn)) {
++      intptr_t offset;
++      AllocateNode* alloc = AllocateNode::Ideal_allocation(result->in(3), igvn, offset);
++
++      if ((alloc == NULL) || !ClearArrayNode::step_through(&result, (uint)toop->instance_id(), igvn)) {
+         // Can not bypass initialization of the instance
+         // we are looking for.
+         break;
+       }
+       // Otherwise skip it (the call updated 'result' value).
+diff a/src/hotspot/share/opto/escape.hpp b/src/hotspot/share/opto/escape.hpp
+--- a/src/hotspot/share/opto/escape.hpp
++++ b/src/hotspot/share/opto/escape.hpp
+@@ -331,10 +331,12 @@
+                                // is still being collected. If false,
+                                // no new nodes will be processed.
+ 
+   bool               _verify;  // verify graph
+ 
++  bool             _has_locks; // Used by stack allocation
++
+   JavaObjectNode*    null_obj;
+   Node*             _pcmp_neq; // ConI(#CC_GT)
+   Node*              _pcmp_eq; // ConI(#CC_EQ)
+ 
+   Compile*           _compile; // Compile object for current compilation
+@@ -598,12 +600,42 @@
+   }
+ 
+   void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+   bool add_final_edges_unsafe_access(Node* n, uint opcode);
+ 
++  // Helpers for stack allocation
++
++  // If an allocation is dominated by a loop, check to see if the lifetime of two instances
++  // may overlap. If they do this allocate is not eligible for stack allocation
++  bool allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi);
++  // Stack allocation has limited support for compressed references at the moment.
++  // This helper checks if an oop may be compressed at some point in the graph.
++  bool oop_may_be_compressed(Node* alloc_result);
++  // Check if the alloc node is eligible for stack allocation
++  bool eligible_for_stack_allocation(PointsToNode* ptn);
++  // Check if the alloc has uses that make it ineligible for stack allocation
++  bool all_uses_eligible_for_stack_allocation(PointsToNode *ptn);
++  // Verify object chains for stack allocated objects. Heap objects cannot point to stack allocated objects.
++  bool verify_stack_allocated_object_chains(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length);
++#ifndef PRODUCT
++  void print_stack_allocated_candidates(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length);
++#endif
++
+ #ifndef PRODUCT
+   void dump(GrowableArray<PointsToNode*>& ptnodes_worklist);
++
++  bool print_escape_analysis() {
++    return PrintEscapeAnalysis || _compile->directive()->PrintEscapeAnalysisOption;
++  }
++
++  bool print_eliminate_allocations() {
++    return PrintEliminateAllocations || _compile->directive()->PrintEliminateAllocationsOption;
++  }
++
++  bool print_stack_allocation() {
++    return PrintStackAllocation || _compile->directive()->PrintStackAllocationOption;
++  }
+ #endif
+ };
+ 
+ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+   _edges(CG->_compile->comp_arena(), 2, 0, NULL),
+diff a/src/hotspot/share/opto/idealKit.cpp b/src/hotspot/share/opto/idealKit.cpp
+--- a/src/hotspot/share/opto/idealKit.cpp
++++ b/src/hotspot/share/opto/idealKit.cpp
+@@ -62,10 +62,34 @@
+   set_all_memory(gkit->merged_memory());
+   set_i_o(gkit->i_o());
+   set_ctrl(gkit->control());
+ }
+ 
++//-------------------------------uif_then-------------------------------------
++// Create: unsigned if(left relop right)
++//          /  \
++//   iffalse    iftrue
++// Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
++void IdealKit::uif_then(Node* left, BoolTest::mask relop,
++                       Node* right, float prob, float cnt, bool push_new_state) {
++  assert((state() & (BlockS|LoopS|IfThenS|ElseS)), "bad state for new If");
++  Node* bol;
++  if (left->bottom_type()->isa_ptr() == NULL) {
++    if (left->bottom_type()->isa_int() != NULL) {
++      bol = Bool(CmpU(left, right), relop);
++    } else {
++      assert(left->bottom_type()->isa_long() != NULL, "what else?");
++      bol = Bool(CmpUL(left, right), relop);
++    }
++
++  } else {
++    bol = Bool(CmpP(left, right), relop);
++  }
++
++  if_then_common(bol, prob, cnt, push_new_state);
++}
++
+ //-------------------------------if_then-------------------------------------
+ // Create:  if(left relop right)
+ //          /  \
+ //   iffalse    iftrue
+ // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+@@ -82,10 +106,17 @@
+     }
+ 
+   } else {
+     bol = Bool(CmpP(left, right), relop);
+   }
++
++  if_then_common(bol, prob, cnt, push_new_state);
++}
++
++// Common helper to create the If nodes for if_then and uif_then
++void IdealKit::if_then_common(Node* bol, float prob, float cnt,
++                              bool push_new_state) {
+   // Delay gvn.tranform on if-nodes until construction is finished
+   // to prevent a constant bool input from discarding a control output.
+   IfNode* iff = delay_transform(new IfNode(ctrl(), bol, prob, cnt))->as_If();
+   Node* then  = IfTrue(iff);
+   Node* elsen = IfFalse(iff);
+diff a/src/hotspot/share/opto/idealKit.hpp b/src/hotspot/share/opto/idealKit.hpp
+--- a/src/hotspot/share/opto/idealKit.hpp
++++ b/src/hotspot/share/opto/idealKit.hpp
+@@ -125,10 +125,14 @@
+   Node* promote_to_phi(Node* n, Node* reg);// Promote "n" to a phi on region "reg"
+   bool was_promoted_to_phi(Node* n, Node* reg) {
+     return (n->is_Phi() && n->in(0) == reg);
+   }
+   void declare(IdealVariable* v) { v->set_id(_var_ct++); }
++
++  void if_then_common(Node* bol, float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
++                      bool push_new_state = true);
++
+   // This declares the position where vars are kept in the cvstate
+   // For some degree of consistency we use the TypeFunc enum to
+   // soak up spots in the inputs even though we only use early Control
+   // and Memory slots. (So far.)
+   static const uint first_var; // = TypeFunc::Parms + 1;
+@@ -161,10 +165,13 @@
+   Node* value(IdealVariable& v)         { return _cvstate->in(first_var + v.id()); }
+   void dead(IdealVariable& v)           { set(v, (Node*)NULL); }
+   void if_then(Node* left, BoolTest::mask relop, Node* right,
+                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+                bool push_new_state = true);
++  void uif_then(Node* left, BoolTest::mask relop, Node* right,
++               float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
++               bool push_new_state = true);
+   void else_();
+   void end_if();
+   void loop(GraphKit* gkit, int nargs, IdealVariable& iv, Node* init, BoolTest::mask cmp, Node* limit,
+             float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+   void end_loop();
+@@ -180,20 +187,23 @@
+   Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+   Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+ 
+   Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+   Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
++  Node* SubL(Node* l, Node* r) { return transform(new SubLNode(l, r)); }
+   Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+   Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+   Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+   Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+   Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
++  Node* CmpU(Node* l, Node* r) { return transform(new CmpUNode(l, r)); }
+   Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+   void  increment(IdealVariable& v, Node* j)  { set(v, AddI(value(v), j)); }
+   void  decrement(IdealVariable& v, Node* j)  { set(v, SubI(value(v), j)); }
+ 
+   Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
++  Node* CmpUL(Node* l, Node* r) { return transform(new CmpULNode(l, r)); }
+ 
+   // TLS
+   Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+ 
+   // Pointers
+diff a/src/hotspot/share/opto/loopnode.cpp b/src/hotspot/share/opto/loopnode.cpp
+--- a/src/hotspot/share/opto/loopnode.cpp
++++ b/src/hotspot/share/opto/loopnode.cpp
+@@ -3889,11 +3889,11 @@
+               (n->in(0)->Opcode() == Op_IfFalse &&
+                (1.0 - iff->as_If()->_prob) >= 0.01) ||
+               (iff->as_If()->_prob >= 0.01) )
+             innermost->_has_call = 1;
+         }
+-      } else if( n->is_Allocate() && n->as_Allocate()->_is_scalar_replaceable ) {
++      } else if( n->is_Allocate() && (n->as_Allocate()->_is_scalar_replaceable || n->as_Allocate()->_is_stack_allocateable) ) {
+         // Disable loop optimizations if the loop has a scalar replaceable
+         // allocation. This disabling may cause a potential performance lost
+         // if the allocation is not eliminated for some reason.
+         innermost->_allow_optimizations = false;
+         innermost->_has_call = 1; // = true
+diff a/src/hotspot/share/opto/machnode.hpp b/src/hotspot/share/opto/machnode.hpp
+--- a/src/hotspot/share/opto/machnode.hpp
++++ b/src/hotspot/share/opto/machnode.hpp
+@@ -844,11 +844,15 @@
+     return in(_jvmadj + jvms->locoff() + idx);
+   }
+   Node *stack(const JVMState* jvms, uint idx) const {
+     assert(verify_jvms(jvms), "jvms must match");
+     return in(_jvmadj + jvms->stkoff() + idx);
+- }
++  }
++  Node *scalar(const JVMState* jvms, uint idx) const {
++    assert(verify_jvms(jvms), "jvms must match");
++    return in(_jvmadj + jvms->scloff() + idx);
++  }
+   Node *monitor_obj(const JVMState* jvms, uint idx) const {
+     assert(verify_jvms(jvms), "jvms must match");
+     return in(_jvmadj + jvms->monitor_obj_offset(idx));
+   }
+   Node *monitor_box(const JVMState* jvms, uint idx) const {
+diff a/src/hotspot/share/opto/macro.cpp b/src/hotspot/share/opto/macro.cpp
+--- a/src/hotspot/share/opto/macro.cpp
++++ b/src/hotspot/share/opto/macro.cpp
+@@ -301,10 +301,17 @@
+       } else {
+         assert(adr_idx == Compile::AliasIdxRaw, "address must match or be raw");
+       }
+       mem = mem->in(MemNode::Memory);
+     } else if (mem->is_ClearArray()) {
++      intptr_t offset;
++      AllocateNode* alloc = AllocateNode::Ideal_allocation(mem->in(3), phase, offset);
++
++      if (alloc == NULL) {
++        return start_mem;
++      }
++
+       if (!ClearArrayNode::step_through(&mem, alloc->_idx, phase)) {
+         // Can not bypass initialization of the instance
+         // we are looking.
+         debug_only(intptr_t offset;)
+         assert(alloc == AllocateNode::Ideal_allocation(mem->in(3), phase, offset), "sanity");
+@@ -725,11 +732,11 @@
+       }
+     }
+   }
+ 
+ #ifndef PRODUCT
+-  if (PrintEliminateAllocations) {
++  if (print_eliminate_allocations()) {
+     if (can_eliminate) {
+       tty->print("Scalar ");
+       if (res == NULL)
+         alloc->dump();
+       else
+@@ -750,10 +757,22 @@
+   }
+ #endif
+   return can_eliminate;
+ }
+ 
++void PhaseMacroExpand::adjust_safepoint_jvms(SafePointNode* sfpt, Node* res, SafePointScalarObjectNode* sobj) {
++  JVMState *jvms = sfpt->jvms();
++  jvms->set_endoff(sfpt->req());
++
++  // Now make a pass over the debug information replacing any references
++  // to the allocated object with "sobj"
++  int start = jvms->debug_start();
++  int end   = jvms->debug_end();
++  sfpt->replace_edges_in_range(res, sobj, start, end);
++  _igvn._worklist.push(sfpt);
++}
++
+ // Do scalar replacement.
+ bool PhaseMacroExpand::scalar_replacement(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints) {
+   GrowableArray <SafePointNode *> safepoints_done;
+ 
+   ciKlass* klass = NULL;
+@@ -882,11 +901,11 @@
+             }
+           }
+           _igvn._worklist.push(sfpt_done);
+         }
+ #ifndef PRODUCT
+-        if (PrintEliminateAllocations) {
++        if (print_eliminate_allocations()) {
+           if (field != NULL) {
+             tty->print("=== At SafePoint node %d can't find value of Field: ",
+                        sfpt->_idx);
+             field->print();
+             int field_idx = C->get_alias_index(field_addr_type);
+@@ -913,18 +932,11 @@
+           field_val = transform_later(new DecodeNNode(field_val, field_val->get_ptr_type()));
+         }
+       }
+       sfpt->add_req(field_val);
+     }
+-    JVMState *jvms = sfpt->jvms();
+-    jvms->set_endoff(sfpt->req());
+-    // Now make a pass over the debug information replacing any references
+-    // to the allocated object with "sobj"
+-    int start = jvms->debug_start();
+-    int end   = jvms->debug_end();
+-    sfpt->replace_edges_in_range(res, sobj, start, end);
+-    _igvn._worklist.push(sfpt);
++    adjust_safepoint_jvms(sfpt, res, sobj);
+     safepoints_done.append_if_missing(sfpt); // keep it for rollback
+   }
+   return true;
+ }
+ 
+@@ -1016,10 +1028,14 @@
+     }
+     assert(res->outcnt() == 0, "all uses of allocated objects must be deleted");
+     _igvn.remove_dead_node(res);
+   }
+ 
++  eliminate_unused_allocation_edges(alloc);
++}
++
++void PhaseMacroExpand::eliminate_unused_allocation_edges(CallNode* alloc) {
+   //
+   // Process other users of allocation's projections
+   //
+   if (_resproj != NULL && _resproj->outcnt() != 0) {
+     // First disconnect stores captured by Initialize node.
+@@ -1084,10 +1100,492 @@
+   if (_catchallcatchproj != NULL) {
+     _igvn.replace_node(_catchallcatchproj, C->top());
+   }
+ }
+ 
++#define STACK_REG_BUFFER 4
++
++bool PhaseMacroExpand::stack_allocation_location_representable(int slot_location) {
++  // TODO This is likely not enough as there are values on the stack above the fixed slots
++  // Revist to see if there is a better check
++  OptoReg::Name stack_reg = OptoReg::stack2reg(slot_location + STACK_REG_BUFFER);
++  if (RegMask::can_represent(stack_reg)) {
++    return true;
++  } else {
++    return false;
++  }
++}
++
++#undef STACK_REG_BUFFER
++
++int PhaseMacroExpand::next_stack_allocated_object(int num_slots) {
++  int current = C->fixed_slots();
++  int next    = current + num_slots;
++  if (!stack_allocation_location_representable(next)) {
++    return -1;
++  }
++  // Keep the toplevel high water mark current:
++  if (C->fixed_slots() < next) C->set_fixed_slots(next);
++  return current;
++}
++
++bool PhaseMacroExpand::process_write_barriers_on_stack_allocated_objects(AllocateNode* alloc) {
++  GrowableArray<Node*> barriers;
++  Node *res = alloc->result_cast();
++  assert(res != NULL, "result node must not be null");
++
++  // Find direct barriers on the stack allocated objects.
++  // Those we can simply eliminate.
++  for (DUIterator_Fast imax, i = res->fast_outs(imax); i < imax; i++) {
++    Node *use = res->fast_out(i);
++    if (use->Opcode() == Op_CastP2X) {
++      barriers.append_if_missing(use);
++    } else if (use->is_AddP()) {
++      for (DUIterator_Fast jmax, j = use->fast_outs(jmax); j < jmax; j++) {
++        Node *addp_out = use->fast_out(j);
++        if (addp_out->Opcode() == Op_CastP2X) {
++          barriers.append_if_missing(addp_out);
++        }
++      }
++    }
++  }
++
++  while (barriers.length() != 0) {
++    eliminate_gc_barrier(barriers.pop());
++  }
++
++  // After removing the direct barriers result may no longer be used
++  if (alloc->result_cast() == NULL) {
++    return true;
++  }
++
++  // Next walk all uses of the allocate to discover the barriers that
++  // might be reachable from our allocate. If the barrier is reachable
++  // from stack allocated object, we unregister it, so that the check
++  // elimination code doesn't run on it.
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++
++  BarrierSetC2 *bs = BarrierSet::barrier_set()->barrier_set_c2();
++
++  node_worklist.push(res);
++
++  while(node_worklist.length() != 0) {
++    Node* n = node_worklist.pop();
++
++    if (visited.test_set(n->_idx)) {
++      continue;  // already processed
++    }
++
++    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
++      Node *use = n->fast_out(i);
++      if (use->Opcode() == Op_CastP2X) {
++        bs->unregister_potential_barrier_node(use);
++      } else if (use->is_Phi() ||
++                 use->is_CheckCastPP() ||
++                 use->is_EncodeP() ||
++                 use->is_DecodeN() ||
++                 use->is_SafePoint() ||
++                 use->is_Proj() ||
++                 (use->is_ConstraintCast() && use->Opcode() == Op_CastPP)) {
++        // Find barriers beyond our current result
++        node_worklist.push(use);
++      } else if (use->is_Store() && use->Opcode() == Op_StoreP) {
++        if (n != use->in(MemNode::ValueIn)) {
++          continue;
++        }
++        // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.
++        // Common up this code into a helper
++        Node *memory = use->in(MemNode::Address);
++        if (memory->is_AddP()) {
++          Node *base = memory->in(AddPNode::Base);
++          if (base->uncast()->is_top()) { // The AddP case #3 and #6 and #9.
++            base = memory->in(AddPNode::Address);
++            while (base->is_AddP()) {
++              // Case #6 (unsafe access) may have several chained AddP nodes.
++              assert(base->in(AddPNode::Base)->uncast()->is_top(), "expected unsafe access address only");
++              base = base->in(AddPNode::Address);
++            }
++            if (base->Opcode() == Op_CheckCastPP &&
++                base->bottom_type()->isa_rawptr() &&
++                _igvn.type(base->in(1))->isa_oopptr()) {
++              base = base->in(1); // Case #9
++            }
++          }
++          node_worklist.push(base);
++        }
++      } else if (use->is_AddP() ||
++           (use->is_Load() && use->Opcode() == Op_LoadP)) {
++        // Find barriers for loads
++        node_worklist.push(use);
++      }
++    }
++  }
++  return false;
++}
++
++bool PhaseMacroExpand::register_stack_allocated_object_with_safepoints(AllocateNode* alloc, Node* stack_oop) {
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++  GrowableArray<SafePointNode*> temp;
++  Dict* safepoint_map = new Dict(cmpkey, hashkey);
++  bool found_non_direct_safepoint = false;
++  Node *res = alloc->result_cast();
++
++  assert(res != NULL, "result node must not be null");
++
++  node_worklist.push(res);
++
++  while(node_worklist.length() != 0) {
++    Node* n = node_worklist.pop();
++
++    if (visited.test_set(n->_idx)) {
++      continue;  // already processed
++    }
++
++    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
++      Node *use = n->fast_out(i);
++      if (use->is_SafePoint()) {
++        SafePointNode* sfpt = use->as_SafePoint();
++        if (sfpt->jvms() != NULL) {
++          temp.push(sfpt);
++        }
++      } else if (use->is_Phi() ||
++          use->is_CheckCastPP() ||
++          use->is_EncodeP() ||
++          use->is_DecodeN() ||
++          use->is_Proj() ||
++          (use->Opcode() == Op_CastP2X) ||
++          use->is_MergeMem() ||
++          use->is_MemBar() ||
++          (use->is_ConstraintCast() && use->Opcode() == Op_CastPP)) {
++        // Find safepoints beyond our current result
++        node_worklist.push(use);
++      } else if (use->is_Store() && use->Opcode() == Op_StoreP) {
++        node_worklist.push(use);
++        if (n != use->in(MemNode::ValueIn)) {
++          continue;
++        }
++        // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.
++        // Common up this code into a helper
++        Node *memory = use->in(MemNode::Address);
++        if (memory->is_AddP()) {
++          Node *base = memory->in(AddPNode::Base);
++          if (base->uncast()->is_top()) { // The AddP case #3 and #6 and #9.
++            base = memory->in(AddPNode::Address);
++            while (base->is_AddP()) {
++              // Case #6 (unsafe access) may have several chained AddP nodes.
++              assert(base->in(AddPNode::Base)->uncast()->is_top(), "expected unsafe access address only");
++              base = base->in(AddPNode::Address);
++            }
++            if (base->Opcode() == Op_CheckCastPP &&
++                base->bottom_type()->isa_rawptr() &&
++                _igvn.type(base->in(1))->isa_oopptr()) {
++              base = base->in(1); // Case #9
++            }
++          }
++          node_worklist.push(base);
++        }
++      } else if (use->is_AddP() ||
++        (use->is_Load() && use->Opcode() == Op_LoadP)) {
++        // Find safepoints for arrays
++        node_worklist.push(use);
++      }
++    }
++
++    while (temp.length() != 0) {
++      SafePointNode* sfpt = temp.pop();
++      if (res != n) {
++        found_non_direct_safepoint = true;
++      }
++      handle_safepoint_for_stack_allocation(safepoint_map, alloc, stack_oop, n, sfpt);
++    }
++  }
++
++  return found_non_direct_safepoint;
++}
++
++void PhaseMacroExpand::handle_safepoint_for_stack_allocation(Dict* safepoint_map, AllocateNode* alloc, Node* oop_node, Node* parent, SafePointNode* sfpt) {
++  Node* res = alloc->result_cast();
++  assert(res->is_CheckCastPP(), "unexpected AllocateNode result");
++  const TypeOopPtr* res_type = _igvn.type(res)->isa_oopptr();
++  ciKlass* klass = res_type->klass();
++  int nfields = 0;
++  if (res_type->isa_instptr()) {
++    // find the fields of the class which will be needed for safepoint debug information
++    assert(klass->is_instance_klass(), "must be an instance klass.");
++    ciInstanceKlass* iklass = klass->as_instance_klass();
++    nfields = iklass->nof_nonstatic_fields();
++  } else {
++    // find the array's elements which will be needed for safepoint debug information
++    nfields = alloc->in(AllocateNode::ALength)->find_int_con(-1);
++  }
++
++  assert(nfields >= 0, "Sanity");
++
++  SafePointScalarObjectNode* sobj = NULL;
++  Node *result = (Node *)(*safepoint_map)[sfpt];
++  if (result != NULL) {
++    assert(result->is_SafePointScalarObject(), "Has to be a safepointscalarobject");
++    sobj = result->as_SafePointScalarObject();
++  } else {
++    //
++    // Process the safepoint uses
++    //
++    Node* mem = sfpt->memory();
++    Node* ctl = sfpt->control();
++    assert(sfpt->jvms() != NULL, "missed JVMS");
++    // Fields of scalar objs are referenced only at the end
++    // of regular debuginfo at the last (youngest) JVMS.
++    // Record relative start index.
++    uint first_ind = (sfpt->req() - sfpt->jvms()->scloff());
++    sobj = new SafePointScalarObjectNode(res_type,
++#ifdef ASSERT
++                                                alloc,
++#endif
++                                                first_ind, nfields);
++    sobj->init_req(0, C->root());
++    sobj->add_req(oop_node);
++    transform_later(sobj);
++    sobj->set_stack_allocated(true);
++
++    JVMState *jvms = sfpt->jvms();
++    sfpt->add_req(sobj);
++    jvms->set_endoff(sfpt->req());
++    _igvn._worklist.push(sfpt);
++    safepoint_map->Insert(sfpt, sobj);
++  }
++
++  if (parent == res) {
++    adjust_safepoint_jvms(sfpt, parent, sobj);
++  }
++}
++
++bool PhaseMacroExpand::can_stack_allocate(AllocateNode* alloc, Node* res, intptr_t size_of_object) {
++  return ((res != NULL) && alloc->_is_stack_allocateable && (size_of_object != -1) && should_stack_allocate());
++}
++
++void PhaseMacroExpand::estimate_stack_allocation_size(AllocateNode* alloc) {
++  Node* res                  = alloc->result_cast();
++  Node* size_in_bytes        = alloc->in(AllocateNode::AllocSize);
++  intptr_t size_of_object    = _igvn.find_intptr_t_con(size_in_bytes, -1);
++
++  if (alloc->_is_scalar_replaceable && !alloc->_is_stack_allocateable) {
++    C->set_fail_stack_allocation_with_references(true);
++    return;
++  }
++
++  bool can_sa = can_stack_allocate(alloc, res, size_of_object);
++  if (alloc->_is_stack_allocateable && !can_sa) {
++    // If we marked the object as SA in EA and now we can not fail
++    C->set_fail_stack_allocation_with_references(true);
++    return;
++  }
++
++  if (!alloc->_is_stack_allocateable) {
++    // If we can not SA because EA said no then no need to count the size
++    return;
++  }
++
++  int current = C->stack_allocated_slots();
++  C->set_stack_allocated_slots(current + (size_of_object >> LogBytesPerInt));
++}
++
++// Do stack allocation
++bool PhaseMacroExpand::stack_allocation(AllocateNode* alloc) {
++  Node* klass                = alloc->in(AllocateNode::KlassNode);
++  const TypeKlassPtr* tklass = _igvn.type(klass)->is_klassptr();
++  Node *length               = (alloc->is_AllocateArray()) ? alloc->in(AllocateNode::ALength) : NULL;
++  Node* size_in_bytes        = alloc->in(AllocateNode::AllocSize);
++  Node* res                  = alloc->result_cast();
++  Node* ctrl                 = alloc->in(TypeFunc::Control);
++  Node* mem                  = alloc->in(TypeFunc::Memory);
++
++  intptr_t size_of_object = _igvn.find_intptr_t_con(size_in_bytes, -1);
++
++  if (!can_stack_allocate(alloc, res, size_of_object)) {
++    return false;
++  }
++
++  if (C->fail_stack_allocation_with_references()) {
++    if (alloc->_is_referenced_stack_allocation) {
++#ifndef PRODUCT
++      if (print_stack_allocation()) {
++        tty->print_cr("---- Avoiding stack allocation on node %d because it is referenced by another alloc and SCR/SA failed in method %s", alloc->_idx, _igvn.C->method()->get_Method()->name_and_sig_as_C_string());
++      }
++#endif
++    return false;
++    }
++  }
++
++  int next_stack_allocation_slot = next_stack_allocated_object(size_of_object >> LogBytesPerInt);
++  if (next_stack_allocation_slot < 0) {
++#ifndef PRODUCT
++    if (print_stack_allocation()) {
++      tty->print_cr("---- Avoiding stack allocation on node %d with size %ld for method %s because of insufficient stack space", alloc->_idx, size_of_object, _igvn.C->method()->get_Method()->name_and_sig_as_C_string());
++    }
++#endif
++    return false;
++  }
++
++  if (mem->is_MergeMem()) {
++    mem = mem->as_MergeMem()->memory_at(Compile::AliasIdxRaw);
++  }
++
++  extract_call_projections(alloc);
++
++  // Process barriers as this may result in result_cast() becoming NULL
++  if (process_write_barriers_on_stack_allocated_objects(alloc)) {
++#ifndef PRODUCT
++    if (print_stack_allocation()) {
++      tty->print_cr("---- Allocation %d result_cast is no longer used so yank the alloc instead", alloc->_idx);
++    }
++#endif
++    InitializeNode* init = alloc->initialization();
++    if (init != NULL) {
++      init->remove(&_igvn);
++    }
++    yank_alloc_node(alloc);
++    return true;
++  }
++
++  assert(res == alloc->result_cast(), "values much match");
++
++  Node* stack_oop = transform_later(new BoxLockNode(next_stack_allocation_slot));
++  Node* new_raw_mem = initialize_object(alloc, ctrl, mem, stack_oop, klass, length, size_in_bytes);
++
++  bool non_direct_safepoints = register_stack_allocated_object_with_safepoints(alloc, stack_oop);
++  if (non_direct_safepoints) {
++    if (length != NULL) {
++      stack_allocation_init_array_length_on_entry(alloc, length, stack_oop);
++    }
++#ifndef PRODUCT
++    stack_allocation_clear_object_data(alloc, stack_oop);
++#endif
++  }
++
++  _igvn.replace_node(_resproj, stack_oop);
++
++  for (DUIterator_Fast imax, i = _memproj_fallthrough->fast_outs(imax); i < imax; i++) {
++    Node *use = _memproj_fallthrough->fast_out(i);
++    _igvn.rehash_node_delayed(use);
++    imax -= replace_input(use, _memproj_fallthrough, new_raw_mem);
++    // back up iterator
++    --i;
++  }
++
++  eliminate_unused_allocation_edges(alloc);
++
++  assert(_resproj->outcnt() == 0, "all uses of the original allocate result projection must be deleted");
++  _igvn.remove_dead_node(_resproj);
++
++#ifndef PRODUCT
++  if (print_stack_allocation()) {
++    tty->print_cr("++++ Performing stack allocation on node %d with size %ld for method %s", alloc->_idx, size_of_object, _igvn.C->method()->get_Method()->name_and_sig_as_C_string());
++  }
++#endif
++
++  return true;
++}
++
++/*
++  Initialize stack allocated array length on entry to the method.
++  This is required for de-opt so it can verify array lengths and so
++  that GCs that happen after deopt will not crash for uninitialized
++  arrays.
++*/
++void PhaseMacroExpand::stack_allocation_init_array_length_on_entry(AllocateNode *alloc, Node *length, Node *stack_oop) {
++  Node* start_mem = C->start()->proj_out_or_null(TypeFunc::Memory);
++  assert(length != NULL, "Length can not be NULL");
++
++  if (C->is_osr_compilation()) {
++    for (DUIterator_Fast imax, i = start_mem->fast_outs(imax); i < imax; i++) {
++      Node *child = start_mem->fast_out(i);
++      if (child->is_CallLeaf() && child->as_CallLeaf()->is_call_to_osr_migration_end()) {
++        CallLeafNode* call_leaf = child->as_CallLeaf();
++        start_mem = call_leaf->proj_out_or_null(TypeFunc::Memory);
++        break;
++      }
++    }
++  }
++  assert(start_mem != NULL, "Must find start mem");
++  Node* init_mem = start_mem;
++
++  // need to set the length field for arrays for deopt
++  init_mem = make_store(C->start()->proj_out_or_null(TypeFunc::Control),
++                        init_mem, stack_oop, arrayOopDesc::length_offset_in_bytes(),
++                        length, T_INT);
++
++
++  if (init_mem != start_mem) {
++    for (DUIterator_Fast imax, i = start_mem->fast_outs(imax); i < imax; i++) {
++      Node *use = start_mem->fast_out(i);
++      // Compressed refs can make a new store which adjusts the start
++      // offet and it's sourced by start_mem. Make sure we don't make cycle.
++      if (use == init_mem || (init_mem->find_edge(use) >= 0)) {
++        continue;
++      }
++      _igvn.rehash_node_delayed(use);
++      imax -= replace_input(use, start_mem, init_mem);
++      // back up iterator
++      --i;
++    }
++  }
++}
++
++#ifndef PRODUCT
++/*
++  Initialize SA object on entry to the method to ensure it is initialized
++  before safepoints which may only be reachable through phis and the object
++  may not actually have been initialized.
++*/
++void PhaseMacroExpand::stack_allocation_clear_object_data(AllocateNode *alloc, Node *stack_oop) {
++  Node* klass                = alloc->in(AllocateNode::KlassNode);
++  Node *length               = (alloc->is_AllocateArray()) ? alloc->in(AllocateNode::ALength) : NULL;
++  Node* size_in_bytes        = alloc->in(AllocateNode::AllocSize);
++  Node* start_mem            = C->start()->proj_out_or_null(TypeFunc::Memory);
++  if (C->is_osr_compilation()) {
++    for (DUIterator_Fast imax, i = start_mem->fast_outs(imax); i < imax; i++) {
++      Node *child = start_mem->fast_out(i);
++      if (child->is_CallLeaf() && child->as_CallLeaf()->is_call_to_osr_migration_end()) {
++        CallLeafNode* call_leaf = child->as_CallLeaf();
++        start_mem = call_leaf->proj_out_or_null(TypeFunc::Memory);
++        break;
++      }
++    }
++  }
++  assert(start_mem != NULL, "Must find start mem");
++  int header_size = alloc->minimum_header_size();
++  Node* init_mem = start_mem;
++  if (length != NULL) {
++    // conservatively small header size:
++    header_size = arrayOopDesc::base_offset_in_bytes(T_BYTE);
++    ciKlass* k = _igvn.type(klass)->is_klassptr()->klass();
++    if (k->is_array_klass()) {   // we know the exact header size in most cases:
++      header_size = Klass::layout_helper_header_size(k->layout_helper());
++    }
++  }
++  init_mem = ClearArrayNode::clear_memory(C->start()->proj_out_or_null(TypeFunc::Control),
++                                          init_mem, stack_oop, header_size, size_in_bytes,
++                                          &_igvn);
++  if (init_mem != start_mem) {
++    for (DUIterator_Fast imax, i = start_mem->fast_outs(imax); i < imax; i++) {
++      Node *use = start_mem->fast_out(i);
++      // Compressed refs can make a new store which adjusts the start
++      // offet and it's sourced by start_mem. Make sure we don't make cycle.
++      if (use == init_mem || (init_mem->find_edge(use) >= 0)) {
++        continue;
++      }
++      _igvn.rehash_node_delayed(use);
++      imax -= replace_input(use, start_mem, init_mem);
++      // back up iterator
++      --i;
++    }
++  }
++}
++#endif
++
+ bool PhaseMacroExpand::eliminate_allocate_node(AllocateNode *alloc) {
+   // Don't do scalar replacement if the frame can be popped by JVMTI:
+   // if reallocation fails during deoptimization we'll pop all
+   // interpreter frames for this compiled frame and that won't play
+   // nice with JVMTI popframe.
+@@ -1140,11 +1638,11 @@
+   }
+ 
+   process_users_of_allocation(alloc);
+ 
+ #ifndef PRODUCT
+-  if (PrintEliminateAllocations) {
++  if (print_eliminate_allocations()) {
+     if (alloc->is_AllocateArray())
+       tty->print_cr("++++ Eliminated: %d AllocateArray", alloc->_idx);
+     else
+       tty->print_cr("++++ Eliminated: %d Allocate", alloc->_idx);
+   }
+@@ -1181,11 +1679,11 @@
+   }
+ 
+   process_users_of_allocation(boxing);
+ 
+ #ifndef PRODUCT
+-  if (PrintEliminateAllocations) {
++  if (print_eliminate_allocations()) {
+     tty->print("++++ Eliminated: %d ", boxing->_idx);
+     boxing->method()->print_short_name(tty);
+     tty->cr();
+   }
+ #endif
+@@ -2777,10 +3275,30 @@
+     _igvn.optimize();
+     if (C->failing())  return true;
+     _igvn.set_delay_transform(true);
+   }
+ 
++  for (int i = C->macro_count(); i > 0; i --) {
++    Node * n = C->macro_node(i-1);
++    assert(n->is_macro(), "only macro nodes expected here");
++
++    switch (n->class_id()) {
++    case Node::Class_Allocate:
++    case Node::Class_AllocateArray:
++      estimate_stack_allocation_size(n->as_Allocate());
++      break;
++    default:
++      assert(false, "unknown node type in macro list");
++    }
++  }
++
++  // Check to see if stack allocation size is too large before macro expansion
++  // so we can reject required stack allocations
++  if (!stack_allocation_location_representable(C->fixed_slots() + C->stack_allocated_slots())) {
++    C->set_fail_stack_allocation_with_references(true);
++  }
++
+   // All nodes except Allocate nodes are expanded now. There could be
+   // new optimization opportunities (such as folding newly created
+   // load from a just allocated object). Run IGVN.
+ 
+   // expand "macro" nodes
+@@ -2800,14 +3318,18 @@
+     if (C->check_node_count(300, "out of nodes before macro expansion")) {
+       return true;
+     }
+     switch (n->class_id()) {
+     case Node::Class_Allocate:
+-      expand_allocate(n->as_Allocate());
++      if (!stack_allocation(n->as_Allocate())) {
++        expand_allocate(n->as_Allocate());
++      }
+       break;
+     case Node::Class_AllocateArray:
+-      expand_allocate_array(n->as_AllocateArray());
++      if (!stack_allocation(n->as_AllocateArray())) {
++        expand_allocate_array(n->as_AllocateArray());
++      }
+       break;
+     default:
+       assert(false, "unknown node type in macro list");
+     }
+     assert(C->macro_count() < macro_count, "must have deleted a node from macro list");
+diff a/src/hotspot/share/opto/macro.hpp b/src/hotspot/share/opto/macro.hpp
+--- a/src/hotspot/share/opto/macro.hpp
++++ b/src/hotspot/share/opto/macro.hpp
+@@ -102,16 +102,33 @@
+                               address slow_call_address);
+   void yank_initalize_node(InitializeNode* node);
+   void yank_alloc_node(AllocateNode* alloc);
+   Node *value_from_mem(Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
+   Node *value_from_mem_phi(Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
++  const Type* field_type_from_element(ciField* field, ciType* elem_type, BasicType& basic_elem_type);
++  void adjust_safepoint_jvms(SafePointNode* sfpt, Node* res, SafePointScalarObjectNode* sobj);
++  void retrieve_type_and_size_info(AllocateNode *alloc, Node *res, const TypeOopPtr** res_type, ciKlass** klass, ciInstanceKlass** iklass, int* nfields);
++  void retrieve_array_type_and_size_info(ciKlass* klass, ciType** elem_type, BasicType* basic_elem_type, int* element_size, int* array_base);
+ 
+   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
+   bool eliminate_allocate_node(AllocateNode *alloc);
+   bool can_eliminate_allocation(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints);
+   bool scalar_replacement(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints_done);
+   void process_users_of_allocation(CallNode *alloc);
++  bool stack_allocation(AllocateNode *alloc);
++  void eliminate_unused_allocation_edges(CallNode* alloc);
++  void handle_safepoint_for_stack_allocation(Dict* safepoint_map, AllocateNode* alloc, Node* oop_node, Node* parent, SafePointNode* sfpt);
++  bool process_write_barriers_on_stack_allocated_objects(AllocateNode* alloc);
++  bool register_stack_allocated_object_with_safepoints(AllocateNode* alloc, Node* stack_oop);
++  void stack_allocation_init_array_length_on_entry(AllocateNode *alloc, Node *length, Node *stack_oop);
++#ifndef PRODUCT
++  void stack_allocation_clear_object_data(AllocateNode *alloc, Node *stack_oop);
++#endif
++  void estimate_stack_allocation_size(AllocateNode* alloc);
++  bool can_stack_allocate(AllocateNode* alloc, Node *res, intptr_t size_of_object);
++  bool stack_allocation_location_representable(int n);
++  int next_stack_allocated_object(int num_slots);
+ 
+   void eliminate_gc_barrier(Node *p2x);
+   void mark_eliminated_box(Node* box, Node* obj);
+   void mark_eliminated_locking_nodes(AbstractLockNode *alock);
+   bool eliminate_locking_node(AbstractLockNode *alock);
+@@ -201,10 +218,23 @@
+                           Node* klass_node, Node* length,
+                           Node* size_in_bytes);
+ 
+   Node* make_arraycopy_load(ArrayCopyNode* ac, intptr_t offset, Node* ctl, Node* mem, BasicType ft, const Type *ftype, AllocateNode *alloc);
+ 
++  bool should_stack_allocate() {
++    return C->do_stack_allocation();
++  }
++
++#ifndef PRODUCT
++  bool print_eliminate_allocations() {
++    return PrintEliminateAllocations || C->directive()->PrintEliminateAllocationsOption;
++  }
++  bool print_stack_allocation() {
++    return PrintStackAllocation || C->directive()->PrintStackAllocationOption;
++  }
++#endif
++
+ public:
+   PhaseMacroExpand(PhaseIterGVN &igvn) : Phase(Macro_Expand), _igvn(igvn), _has_locks(false) {
+     _igvn.set_delay_transform(true);
+   }
+   void eliminate_macro_nodes();
+diff a/src/hotspot/share/opto/memnode.cpp b/src/hotspot/share/opto/memnode.cpp
+--- a/src/hotspot/share/opto/memnode.cpp
++++ b/src/hotspot/share/opto/memnode.cpp
+@@ -186,11 +186,14 @@
+         result = proj_in->in(TypeFunc::Memory);
+       } else {
+         assert(false, "unexpected projection");
+       }
+     } else if (result->is_ClearArray()) {
+-      if (!is_instance || !ClearArrayNode::step_through(&result, instance_id, phase)) {
++      intptr_t offset;
++      AllocateNode* alloc = AllocateNode::Ideal_allocation(result->in(3), phase, offset);
++
++      if (!is_instance || (alloc == NULL) || !ClearArrayNode::step_through(&result, instance_id, phase)) {
+         // Can not bypass initialization of the instance
+         // we are looking for.
+         break;
+       }
+       // Otherwise skip it (the call updated 'result' value).
+@@ -706,11 +709,14 @@
+           break;
+         }
+         mem = mem->in(0)->in(TypeFunc::Memory);
+         continue;           // (a) advance through independent MemBar memory
+       } else if (mem->is_ClearArray()) {
+-        if (ClearArrayNode::step_through(&mem, (uint)addr_t->instance_id(), phase)) {
++        intptr_t offset;
++        AllocateNode* alloc = AllocateNode::Ideal_allocation(mem->in(3), phase, offset);
++
++        if ((alloc != NULL) && ClearArrayNode::step_through(&mem, (uint)addr_t->instance_id(), phase)) {
+           // (the call updated 'mem' value)
+           continue;         // (a) advance through independent allocation memory
+         } else {
+           // Can not bypass initialization of the instance
+           // we are looking for.
+diff a/src/hotspot/share/opto/output.cpp b/src/hotspot/share/opto/output.cpp
+--- a/src/hotspot/share/opto/output.cpp
++++ b/src/hotspot/share/opto/output.cpp
+@@ -757,18 +757,28 @@
+     ObjectValue* sv = sv_for_node_id(objs, spobj->_idx);
+     if (sv == NULL) {
+       ciKlass* cik = t->is_oopptr()->klass();
+       assert(cik->is_instance_klass() ||
+              cik->is_array_klass(), "Not supported allocation.");
+-      sv = new ObjectValue(spobj->_idx,
++      if (spobj->stack_allocated()) {
++        Node *box_lock = spobj->in(1);
++        assert(box_lock != NULL, "Need to have a box lock");
++        sv = new StackObjectValue(spobj->_idx,
++                            new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()),
++                            Location::new_stk_loc(Location::oop, C->regalloc()->reg2offset(BoxLockNode::reg(box_lock))),
++                            new ConstantIntValue(spobj->n_fields()));
++        set_sv_for_object_node(objs, sv);
++      } else {
++        sv = new ObjectValue(spobj->_idx,
+                            new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()));
+-      set_sv_for_object_node(objs, sv);
++        set_sv_for_object_node(objs, sv);
+ 
+-      uint first_ind = spobj->first_index(sfpt->jvms());
+-      for (uint i = 0; i < spobj->n_fields(); i++) {
+-        Node* fld_node = sfpt->in(first_ind+i);
+-        (void)FillLocArray(sv->field_values()->length(), sfpt, fld_node, sv->field_values(), objs);
++        uint first_ind = spobj->first_index(sfpt->jvms());
++        for (uint i = 0; i < spobj->n_fields(); i++) {
++          Node* fld_node = sfpt->in(first_ind+i);
++          (void)FillLocArray(sv->field_values()->length(), sfpt, fld_node, sv->field_values(), objs);
++        }
+       }
+     }
+     array->append(sv);
+     return;
+   }
+@@ -1008,10 +1018,11 @@
+     // Loop over monitors and insert into array
+     for (idx = 0; idx < num_mon; idx++) {
+       // Grab the node that defines this monitor
+       Node* box_node = sfn->monitor_box(jvms, idx);
+       Node* obj_node = sfn->monitor_obj(jvms, idx);
++      bool eliminated = (box_node->is_BoxLock() && box_node->as_BoxLock()->is_eliminated());
+ 
+       // Create ScopeValue for object
+       ScopeValue *scval = NULL;
+ 
+       if (obj_node->is_SafePointScalarObject()) {
+@@ -1020,18 +1031,30 @@
+         if (scval == NULL) {
+           const Type *t = spobj->bottom_type();
+           ciKlass* cik = t->is_oopptr()->klass();
+           assert(cik->is_instance_klass() ||
+                  cik->is_array_klass(), "Not supported allocation.");
+-          ObjectValue* sv = new ObjectValue(spobj->_idx,
+-                                            new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()));
+-          PhaseOutput::set_sv_for_object_node(objs, sv);
+-
+-          uint first_ind = spobj->first_index(youngest_jvms);
+-          for (uint i = 0; i < spobj->n_fields(); i++) {
+-            Node* fld_node = sfn->in(first_ind+i);
+-            (void)FillLocArray(sv->field_values()->length(), sfn, fld_node, sv->field_values(), objs);
++          ObjectValue* sv = NULL;
++          if (spobj->stack_allocated()) {
++            Node *box_lock = spobj->in(1);
++            assert(box_lock != NULL, "Need to have a box lock");
++            assert(eliminated, "monitor has to be eliminated for stack allocation");
++            sv = new StackObjectValue(spobj->_idx,
++                                new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()),
++                                Location::new_stk_loc(Location::oop, C->regalloc()->reg2offset(BoxLockNode::reg(box_lock))),
++                                new ConstantIntValue(spobj->n_fields()));
++            set_sv_for_object_node(objs, sv);
++          } else {
++            sv = new ObjectValue(spobj->_idx,
++                              new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()));
++            set_sv_for_object_node(objs, sv);
++
++            uint first_ind = spobj->first_index(youngest_jvms);
++            for (uint i = 0; i < spobj->n_fields(); i++) {
++              Node* fld_node = sfn->in(first_ind+i);
++              (void)FillLocArray(sv->field_values()->length(), sfn, fld_node, sv->field_values(), objs);
++            }
+           }
+           scval = sv;
+         }
+       } else if (!obj_node->is_Con()) {
+         OptoReg::Name obj_reg = C->regalloc()->get_reg_first(obj_node);
+@@ -1045,14 +1068,34 @@
+         scval = new ConstantOopWriteValue(tp->is_oopptr()->const_oop()->constant_encoding());
+       }
+ 
+       OptoReg::Name box_reg = BoxLockNode::reg(box_node);
+       Location basic_lock = Location::new_stk_loc(Location::normal,C->regalloc()->reg2offset(box_reg));
+-      bool eliminated = (box_node->is_BoxLock() && box_node->as_BoxLock()->is_eliminated());
+       monarray->append(new MonitorValue(scval, basic_lock, eliminated));
+     }
+ 
++    for (idx = 0; idx < jvms->scl_size(); idx++ ) {
++      Node* obj_node = sfn->scalar(jvms, idx);
++
++      if (obj_node->is_SafePointScalarObject()) {
++        SafePointScalarObjectNode* spobj = obj_node->as_SafePointScalarObject();
++        if (sv_for_node_id(objs, spobj->_idx) == NULL) {
++          const Type *t = spobj->bottom_type();
++          ciKlass* cik = t->is_oopptr()->klass();
++          assert(cik->is_instance_klass() ||
++                  cik->is_array_klass(), "Not supported allocation.");
++          assert(spobj->stack_allocated(), "has to be stack allocated");
++          Node *box_lock = spobj->in(1);
++          assert(box_lock != NULL, "Need to have a box lock");
++          StackObjectValue* sv = new StackObjectValue(spobj->_idx,
++                                            new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()),
++                                            Location::new_stk_loc(Location::oop, C->regalloc()->reg2offset(BoxLockNode::reg(box_lock))),
++                                            new ConstantIntValue(spobj->n_fields()));
++          set_sv_for_object_node(objs, sv);
++        }
++      }
++    }
+     // We dump the object pool first, since deoptimization reads it in first.
+     C->debug_info()->dump_object_pool(objs);
+ 
+     // Build first class objects to pass to scope
+     DebugToken *locvals = C->debug_info()->create_scope_values(locarray);
+@@ -1272,10 +1315,17 @@
+ 
+   // fill in the nop array for bundling computations
+   MachNode *_nop_list[Bundle::_nop_count];
+   Bundle::initialize_nops(_nop_list);
+ 
++  // if we are using stack allocation enable the runtime part
++  // stack allocation can be enabled selectively via compiler directive
++  // so we need to enable the runtime part
++  if (!UseStackAllocationRuntime && C->do_stack_allocation()) {
++    FLAG_SET_ERGO(UseStackAllocationRuntime, true);
++  }
++
+   return cb;
+ }
+ 
+ //------------------------------fill_buffer------------------------------------
+ void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
+diff a/src/hotspot/share/runtime/deoptimization.cpp b/src/hotspot/share/runtime/deoptimization.cpp
+--- a/src/hotspot/share/runtime/deoptimization.cpp
++++ b/src/hotspot/share/runtime/deoptimization.cpp
+@@ -301,11 +301,11 @@
+   bool jvmci_enabled = false;
+ #endif
+ 
+   // Reallocate the non-escaping objects and restore their fields. Then
+   // relock objects if synchronization on them was eliminated.
+-  if (jvmci_enabled COMPILER2_PRESENT( || (DoEscapeAnalysis && EliminateAllocations) )) {
++  if (jvmci_enabled COMPILER2_PRESENT( || (DoEscapeAnalysis && EliminateAllocations || (DoEscapeAnalysis && UseStackAllocationRuntime)) )) {
+     realloc_failures = eliminate_allocations(thread, exec_mode, cm, deoptee, map, chunk);
+   }
+ #endif // COMPILER2_OR_JVMCI
+ 
+   // Revoke biases, done with in java state.
+@@ -1004,16 +1004,27 @@
+       if (obj == NULL) {
+         obj = ik->allocate_instance(THREAD);
+       }
+     } else if (k->is_typeArray_klass()) {
+       TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+-      assert(sv->field_size() % type2size[ak->element_type()] == 0, "non-integral array length");
+-      int len = sv->field_size() / type2size[ak->element_type()];
++      int len;
++      if (sv->is_stack_object()) {
++        len = ((StackObjectValue *)sv)->get_field_length()->value();
++      } else {
++        assert(sv->field_size() % type2size[ak->element_type()] == 0, "non-integral array length");
++        len = sv->field_size() / type2size[ak->element_type()];
++      }
+       obj = ak->allocate(len, THREAD);
+     } else if (k->is_objArray_klass()) {
+       ObjArrayKlass* ak = ObjArrayKlass::cast(k);
+-      obj = ak->allocate(sv->field_size(), THREAD);
++      int len;
++      if (sv->is_stack_object()) {
++        len = ((StackObjectValue *)sv)->get_field_length()->value();
++      } else {
++        len = sv->field_size();
++      }
++      obj = ak->allocate(len, THREAD);
+     }
+ 
+     if (obj == NULL) {
+       failures = true;
+     }
+@@ -1031,10 +1042,22 @@
+   }
+ 
+   return failures;
+ }
+ 
++void Deoptimization::reassign_scalar_replaced_fields(frame *fr, RegisterMap *reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k, bool skip_internal) {
++  if (k->is_instance_klass()) {
++      InstanceKlass* ik = InstanceKlass::cast(k);
++      reassign_scalar_replaced_fields_by_klass(ik, fr, reg_map, objects, sv, 0, obj(), skip_internal);
++    } else if (k->is_typeArray_klass()) {
++      TypeArrayKlass* ak = TypeArrayKlass::cast(k);
++      reassign_scalar_replaced_type_array_elements(fr, reg_map, sv, (typeArrayOop) obj(), ak->element_type());
++    } else if (k->is_objArray_klass()) {
++      reassign_scalar_replaced_object_array_elements(fr, reg_map, objects, sv, (objArrayOop) obj());
++    }
++}
++
+ #if INCLUDE_JVMCI
+ /**
+  * For primitive types whose kind gets "erased" at runtime (shorts become stack ints),
+  * we need to somehow be able to recover the actual kind to be able to write the correct
+  * amount of bytes.
+@@ -1092,11 +1115,11 @@
+ }
+ #endif // INCLUDE_JVMCI
+ 
+ 
+ // restore elements of an eliminated type array
+-void Deoptimization::reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type) {
++void Deoptimization::reassign_scalar_replaced_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type) {
+   int index = 0;
+   intptr_t val;
+ 
+   for (int i = 0; i < sv->field_size(); i++) {
+     StackValue* value = StackValue::create_stack_value(fr, reg_map, sv->field_at(i));
+@@ -1191,14 +1214,15 @@
+     index++;
+   }
+ }
+ 
+ // restore fields of an eliminated object array
+-void Deoptimization::reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj) {
++void Deoptimization::reassign_scalar_replaced_object_array_elements(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, objArrayOop obj) {
+   for (int i = 0; i < sv->field_size(); i++) {
+-    StackValue* value = StackValue::create_stack_value(fr, reg_map, sv->field_at(i));
++    StackValue* value = StackValue::create_stack_value(fr, reg_map, get_scope_value(fr, reg_map, sv->field_at(i), objects));
+     assert(value->type() == T_OBJECT, "object element expected");
++    assert(oopDesc::is_oop_or_null(value->get_obj()()), "must be oop");
+     obj->obj_at_put(i, value->get_obj()());
+   }
+ }
+ 
+ class ReassignedField {
+@@ -1214,13 +1238,78 @@
+ 
+ int compare(ReassignedField* left, ReassignedField* right) {
+   return left->_offset - right->_offset;
+ }
+ 
++ScopeValue *Deoptimization::match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray<ScopeValue*>* objects) {
++  for (int j = 0; j < objects->length(); j++) {
++    ScopeValue* o_sv = objects->at(j);
++    if (o_sv->is_object()) {
++      if (o_sv->as_ObjectValue()->is_stack_object()) {
++        StackObjectValue *sov = (StackObjectValue *)o_sv;
++        Location o_loc = sov->get_stack_location();
++        int o_offset = o_loc.stack_offset();
++        int l_offset = (address)oop_ptr - (address)sp_base;
++        if (o_offset == l_offset) {
++          return o_sv;
++        }
++      }
++    }
++  }
++  return NULL;
++}
++
++ScopeValue *Deoptimization::get_scope_value(frame* fr, RegisterMap* reg_map, ScopeValue* sv, GrowableArray<ScopeValue*>* objects) {
++  if (sv->is_location()) {
++    if ((objects != NULL) && (objects->length() > 0)) {
++      LocationValue* lv = (LocationValue *)sv;
++      Location loc = lv->location();
++      intptr_t *oop_ptr;
++      intptr_t *sp_base = fr->unextended_sp();
++      intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++      if (loc.is_stack() && (loc.type() == Location::oop)) {
++        address value_addr = ((address)sp_base) + loc.stack_offset();
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else if (loc.is_register() && (loc.type() == Location::oop)) {
++        address value_addr = reg_map->location(VMRegImpl::as_VMReg(loc.register_number()));
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else {
++        assert(loc.type() != Location::oop, "Can not be an oop");
++        return sv;
++      }
++      if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++        ScopeValue* o_sv = Deoptimization::match_object_to_stack_oop(oop_ptr, sp_base, objects);
++        if (o_sv != NULL) {
++          sv = o_sv;
++        } else {
++          assert(false, "pointer to stack but did not find object to replace");
++        }
++      }
++    }
++  } else if (sv->is_object()) {
++    oop o = sv->as_ObjectValue()->value()();
++    intptr_t *sp_base = fr->unextended_sp();
++    intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++    if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++      ScopeValue* o_sv = Deoptimization::match_object_to_stack_oop(oop_ptr, sp_base, objects);
++      if (o_sv != NULL) {
++        sv = o_sv;
++        assert(sv = o_sv, "objects have to match?");
++      } else {
++        assert(false, "pointer to stack but did not find object to replace");
++      }
++    }
++  }
++  return sv;
++}
++
+ // Restore fields of an eliminated instance object using the same field order
+ // returned by HotSpotResolvedObjectTypeImpl.getInstanceFields(true)
+-static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, ObjectValue* sv, int svIndex, oop obj, bool skip_internal) {
++void Deoptimization::reassign_scalar_replaced_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, int svIndex, oop obj, bool skip_internal) {
+   GrowableArray<ReassignedField>* fields = new GrowableArray<ReassignedField>();
+   InstanceKlass* ik = klass;
+   while (ik != NULL) {
+     for (AllFieldStream fs(ik); !fs.done(); fs.next()) {
+       if (!fs.access_flags().is_static() && (!skip_internal || !fs.access_flags().is_internal())) {
+@@ -1233,17 +1322,18 @@
+     ik = ik->superklass();
+   }
+   fields->sort(compare);
+   for (int i = 0; i < fields->length(); i++) {
+     intptr_t val;
+-    ScopeValue* scope_field = sv->field_at(svIndex);
++    ScopeValue* scope_field = get_scope_value(fr, reg_map, sv->field_at(svIndex), objects);
+     StackValue* value = StackValue::create_stack_value(fr, reg_map, scope_field);
+     int offset = fields->at(i)._offset;
+     BasicType type = fields->at(i)._type;
+     switch (type) {
+       case T_OBJECT: case T_ARRAY:
+         assert(value->type() == T_OBJECT, "Agreement.");
++        assert(oopDesc::is_oop_or_null(value->get_obj()()), "must be oop");
+         obj->obj_field_put(offset, value->get_obj()());
+         break;
+ 
+       // Have to cast to INT (32 bits) pointer to avoid little/big-endian problem.
+       case T_INT: case T_FLOAT: { // 4 bytes.
+@@ -1315,11 +1405,170 @@
+       default:
+         ShouldNotReachHere();
+     }
+     svIndex++;
+   }
+-  return svIndex;
++}
++
++void Deoptimization::reassign_stack_allocated_type_array_elements(oop orig, oop newly_allocated, Klass *k) {
++  typeArrayOop orig_obj = (typeArrayOop) orig;
++  typeArrayOop new_obj = (typeArrayOop) newly_allocated;
++  assert(orig_obj->length() == new_obj->length(), "lengths have to be the same");
++  TypeArrayKlass* ak = TypeArrayKlass::cast(k);
++  BasicType type = ak->element_type();
++  for (int i = 0; i < orig_obj->length(); i++) {
++    switch (type) {
++      case T_BOOLEAN:
++        new_obj->bool_at_put(i, orig_obj->bool_at(i));
++        break;
++      case T_CHAR:
++        new_obj->char_at_put(i, orig_obj->char_at(i));
++        break;
++      case T_FLOAT:
++        new_obj->float_at_put(i, orig_obj->float_at(i));
++        break;
++      case T_DOUBLE:
++        new_obj->double_at_put(i, orig_obj->double_at(i));
++        break;
++      case T_BYTE:
++        new_obj->byte_at_put(i, orig_obj->byte_at(i));
++        break;
++      case T_SHORT:
++        new_obj->short_at_put(i, orig_obj->short_at(i));
++        break;
++      case T_INT:
++        new_obj->int_at_put(i, orig_obj->int_at(i));
++        break;
++      case T_LONG:
++        new_obj->long_at_put(i, orig_obj->long_at(i));
++        break;
++      default:
++        assert(false, "unreachable");
++    }
++  }
++}
++
++void Deoptimization::reassign_stack_allocated_object_array_elements(oop orig, oop newly_allocated, intptr_t *sp_base, intptr_t *sp_top, GrowableArray<ScopeValue*>* objects) {
++  objArrayOop orig_obj = (objArrayOop) orig;
++  objArrayOop new_obj = (objArrayOop) newly_allocated;
++  assert(orig_obj->length() == new_obj->length(), "lengths have to be the same");
++  for (int i = 0; i < orig_obj->length(); i++) {
++    oop o = orig_obj->obj_at(i);
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++    if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++      int field_offset = (address)oop_ptr - (address)sp_base;
++      bool found = false;
++      for (int j = 0; j < objects->length(); j++) {
++        ScopeValue* o_sv = objects->at(j);
++        if (o_sv->is_object() && o_sv->as_ObjectValue()->is_stack_object()) {
++          StackObjectValue *sov = (StackObjectValue *)o_sv;
++          Location o_loc = sov->get_stack_location();
++          int o_offset = o_loc.stack_offset();
++          if (o_offset == field_offset) {
++            o = sov->value()();
++            found = true;
++            break;
++          }
++        }
++      }
++      assert(found, "pointer to stack but did not find object to replace");
++    }
++    assert(oopDesc::is_oop_or_null(o), "must be oop");
++    new_obj->obj_at_put(i, o);
++  }
++}
++
++class ReassignStackObjectFields: public FieldClosure {
++ private:
++  oop _orig;
++  oop _new;
++  intptr_t *_sp_base;
++  intptr_t *_sp_top;
++  GrowableArray<ScopeValue*>* _objects;
++
++ public:
++  ReassignStackObjectFields(oop orig, oop n, intptr_t *sp_base, intptr_t *sp_top, GrowableArray<ScopeValue*>* objects) :
++    _orig(orig), _new(n), _sp_base(sp_base), _sp_top(sp_top), _objects(objects) {}
++
++  void do_field(fieldDescriptor* fd) {
++    BasicType ft = fd->field_type();
++    switch (ft) {
++      case T_BYTE:
++        _new->byte_field_put(fd->offset(), _orig->byte_field(fd->offset()));
++        break;
++      case T_CHAR:
++        _new->char_field_put(fd->offset(), _orig->char_field(fd->offset()));
++        break;
++      case T_DOUBLE:
++        _new->double_field_put(fd->offset(), _orig->double_field(fd->offset()));
++        break;
++      case T_FLOAT:
++        _new->float_field_put(fd->offset(), _orig->float_field(fd->offset()));
++        break;
++      case T_INT:
++        _new->int_field_put(fd->offset(), _orig->int_field(fd->offset()));
++        break;
++      case T_LONG:
++        _new->long_field_put(fd->offset(), _orig->long_field(fd->offset()));
++        break;
++      case T_SHORT:
++        _new->short_field_put(fd->offset(), _orig->short_field(fd->offset()));
++        break;
++      case T_BOOLEAN:
++        _new->bool_field_put(fd->offset(), _orig->bool_field(fd->offset()));
++        break;
++      case T_ARRAY:
++      case T_OBJECT: {
++        oop o = _orig->obj_field(fd->offset());
++        intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++        if (_sp_base <= oop_ptr && oop_ptr < _sp_top) {
++          int field_offset = (address)oop_ptr - (address)_sp_base;
++          bool found = false;
++          for (int j = 0; j < _objects->length(); j++) {
++            ScopeValue* o_sv = _objects->at(j);
++            if (o_sv->is_object() && o_sv->as_ObjectValue()->is_stack_object()) {
++              StackObjectValue *sov = (StackObjectValue *)o_sv;
++              Location o_loc = sov->get_stack_location();
++              int o_offset = o_loc.stack_offset();
++              if (o_offset == field_offset) {
++                o = sov->value()();
++                found = true;
++                break;
++              }
++            }
++          }
++          assert(found, "Pointer to stack but did not find object to replace");
++        }
++        assert(oopDesc::is_oop_or_null(o), "must be oop");
++        _new->obj_field_put(fd->offset(), o);
++        break;
++      }
++      default:
++        ShouldNotReachHere();
++        break;
++     }
++  }
++};
++
++void Deoptimization::reassign_stack_allocated_fields(frame *fr, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k) {
++  StackObjectValue *sov = (StackObjectValue *)sv;
++  Location loc = sov->get_stack_location();
++  address value_addr = ((address)fr->unextended_sp()) + loc.stack_offset();
++  oop orig = cast_to_oop<address>(value_addr);
++  oop newly_allocated = obj();
++  intptr_t *sp_base = fr->unextended_sp();
++  intptr_t *sp_top = sp_base + fr->cb()->frame_size();
++
++  if (k->is_instance_klass()) {
++    InstanceKlass* ik = InstanceKlass::cast(k);
++    ReassignStackObjectFields reassign(orig, newly_allocated, sp_base, sp_top, objects);
++    ik->do_nonstatic_fields(&reassign);
++  } else if (k->is_typeArray_klass()) {
++    reassign_stack_allocated_type_array_elements(orig, newly_allocated, k);
++  } else if (k->is_objArray_klass()) {
++    reassign_stack_allocated_object_array_elements(orig, newly_allocated, sp_base, sp_top, objects);
++  }
+ }
+ 
+ // restore fields of all eliminated objects and arrays
+ void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, bool realloc_failures, bool skip_internal) {
+   for (int i = 0; i < objects->length(); i++) {
+@@ -1337,18 +1586,15 @@
+     // Don't reassign fields of boxes that came from a cache. Caches may be in CDS.
+     if (sv->is_auto_box() && ((AutoBoxObjectValue*) sv)->is_cached()) {
+       continue;
+     }
+ #endif // INCLUDE_JVMCI || INCLUDE_AOT
+-    if (k->is_instance_klass()) {
+-      InstanceKlass* ik = InstanceKlass::cast(k);
+-      reassign_fields_by_klass(ik, fr, reg_map, sv, 0, obj(), skip_internal);
+-    } else if (k->is_typeArray_klass()) {
+-      TypeArrayKlass* ak = TypeArrayKlass::cast(k);
+-      reassign_type_array_elements(fr, reg_map, sv, (typeArrayOop) obj(), ak->element_type());
+-    } else if (k->is_objArray_klass()) {
+-      reassign_object_array_elements(fr, reg_map, sv, (objArrayOop) obj());
++
++    if (sv->is_stack_object()) {
++      reassign_stack_allocated_fields(fr, objects, sv, obj, k);
++    } else {
++      reassign_scalar_replaced_fields(fr, reg_map, objects, sv, obj, k, skip_internal);
+     }
+   }
+ }
+ 
+ 
+diff a/src/hotspot/share/runtime/deoptimization.hpp b/src/hotspot/share/runtime/deoptimization.hpp
+--- a/src/hotspot/share/runtime/deoptimization.hpp
++++ b/src/hotspot/share/runtime/deoptimization.hpp
+@@ -168,12 +168,19 @@
+ #if COMPILER2_OR_JVMCI
+  public:
+ 
+   // Support for restoring non-escaping objects
+   static bool realloc_objects(JavaThread* thread, frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, TRAPS);
+-  static void reassign_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);
+-  static void reassign_object_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, objArrayOop obj);
++  static void reassign_stack_allocated_fields(frame *fr, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k);
++  static void reassign_stack_allocated_type_array_elements(oop orig, oop newly_allocated, Klass *k);
++  static void reassign_stack_allocated_object_array_elements(oop orig, oop newly_allocated, intptr_t *sp_base, intptr_t *sp_top, GrowableArray<ScopeValue*>* objects);
++  static void reassign_scalar_replaced_fields(frame *fr, RegisterMap *reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue *sv, Handle obj, Klass* k, bool skip_internal);
++  static void reassign_scalar_replaced_type_array_elements(frame* fr, RegisterMap* reg_map, ObjectValue* sv, typeArrayOop obj, BasicType type);
++  static void reassign_scalar_replaced_object_array_elements(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, objArrayOop obj);
++  static ScopeValue *get_scope_value(frame* fr, RegisterMap* reg_map, ScopeValue* sv, GrowableArray<ScopeValue*>* objects);
++  static ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray<ScopeValue*>* objects);
++  static void reassign_scalar_replaced_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, ObjectValue* sv, int svIndex, oop obj, bool skip_internal);
+   static void reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, bool realloc_failures, bool skip_internal);
+   static void relock_objects(GrowableArray<MonitorInfo*>* monitors, JavaThread* thread, bool realloc_failures);
+   static void pop_frames_failed_reallocs(JavaThread* thread, vframeArray* array);
+   NOT_PRODUCT(static void print_objects(GrowableArray<ScopeValue*>* objects, bool realloc_failures);)
+ #endif // COMPILER2_OR_JVMCI
+diff a/src/hotspot/share/runtime/vframe_hp.cpp b/src/hotspot/share/runtime/vframe_hp.cpp
+--- a/src/hotspot/share/runtime/vframe_hp.cpp
++++ b/src/hotspot/share/runtime/vframe_hp.cpp
+@@ -56,12 +56,13 @@
+ 
+   // scv_list is the list of ScopeValues describing the JVM stack state.
+   // There is one scv_list entry for every JVM stack state in use.
+   int length = scv_list->length();
+   StackValueCollection* result = new StackValueCollection(length);
++  GrowableArray<ScopeValue*>* objects = scope()->objects();
+   for (int i = 0; i < length; i++) {
+-    result->add(create_stack_value(scv_list->at(i)));
++    result->add(create_stack_value(get_scope_value(scv_list, i, objects)));
+   }
+ 
+   // Replace the original values with any stores that have been
+   // performed through compiledVFrame::update_locals.
+   GrowableArray<jvmtiDeferredLocalVariableSet*>* list = thread()->deferred_locals();
+@@ -136,12 +137,13 @@
+ 
+   // scv_list is the list of ScopeValues describing the JVM stack state.
+   // There is one scv_list entry for every JVM stack state in use.
+   int length = scv_list->length();
+   StackValueCollection* result = new StackValueCollection(length);
++  GrowableArray<ScopeValue*>* objects = scope()->objects();
+   for (int i = 0; i < length; i++) {
+-    result->add(create_stack_value(scv_list->at(i)));
++    result->add(create_stack_value(get_scope_value(scv_list, i, objects)));
+   }
+ 
+   // Replace the original values with any stores that have been
+   // performed through compiledVFrame::update_stack.
+   GrowableArray<jvmtiDeferredLocalVariableSet*>* list = thread()->deferred_locals();
+@@ -169,10 +171,83 @@
+ 
+ BasicLock* compiledVFrame::resolve_monitor_lock(Location location) const {
+   return StackValue::resolve_monitor_lock(&_fr, location);
+ }
+ 
++ScopeValue *compiledVFrame::match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray<ScopeValue*>* objects) const {
++  if (objects == NULL) {
++    return NULL;
++  }
++  for (int j = 0; j < objects->length(); j++) {
++    ScopeValue* o_sv = objects->at(j);
++    if (o_sv->is_object()) {
++      if (o_sv->as_ObjectValue()->is_stack_object()) {
++        StackObjectValue *sov = (StackObjectValue *)o_sv;
++        Location o_loc = sov->get_stack_location();
++        int o_offset = o_loc.stack_offset();
++        int l_offset = (address)oop_ptr - (address)sp_base;
++        if (o_offset == l_offset) {
++          return o_sv;
++        }
++      }
++    }
++  }
++
++  return NULL;
++}
++
++ScopeValue *compiledVFrame::get_scope_value(GrowableArray<ScopeValue*>* scv_list, int index, GrowableArray<ScopeValue*>* objects) const {
++  ScopeValue* sv = scv_list->at(index);
++  if (sv->is_location()) {
++    if ((objects != NULL) && (objects->length() > 0)) {
++      //printf("Attempting to swap svs\n");
++      LocationValue* lv = (LocationValue *)sv;
++      Location loc = lv->location();
++      intptr_t *oop_ptr;
++      intptr_t *sp_base = _fr.unextended_sp();
++      intptr_t *sp_top = sp_base + _fr.cb()->frame_size();
++      if (loc.is_stack() && (loc.type() == Location::oop)) {
++        address value_addr = ((address)sp_base) + loc.stack_offset();
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else if (loc.is_register() && (loc.type() == Location::oop)) {
++        address value_addr = register_map()->location(VMRegImpl::as_VMReg(loc.register_number()));
++        oop val = *(oop *)value_addr;
++        oop_ptr = cast_from_oop<intptr_t *>(val);
++      } else {
++        assert(loc.type() != Location::oop, "Can not be an oop");
++        return sv;
++      }
++      if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++        ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);
++        if (o_sv != NULL) {
++          scv_list->at_put(index, o_sv);
++          sv = o_sv;
++        } else {
++          assert(false, "did not find stack oop for object on stack");
++        }
++      }
++    }
++  } else if (sv->is_object()) {
++    oop o = sv->as_ObjectValue()->value()();
++    intptr_t *sp_base = _fr.unextended_sp();
++    intptr_t *sp_top = sp_base + _fr.cb()->frame_size();
++    intptr_t *oop_ptr = cast_from_oop<intptr_t *>(o);
++    if (sp_base <= oop_ptr && oop_ptr < sp_top) {
++      ScopeValue* o_sv = match_object_to_stack_oop(oop_ptr, sp_base, objects);
++      if (o_sv != NULL) {
++        assert(sv == o_sv, "Objects need to match");
++        sv = o_sv;
++      } else {
++        assert(false, "did not find stack oop for object on stack");
++      }
++    }
++    assert(oopDesc::is_oop_or_null(sv->as_ObjectValue()->value()()), "needs to be an oop");
++  }
++  return sv;
++}
++
+ 
+ GrowableArray<MonitorInfo*>* compiledVFrame::monitors() const {
+   // Natives has no scope
+   if (scope() == NULL) {
+     CompiledMethod* nm = code();
+diff a/src/hotspot/share/runtime/vframe_hp.hpp b/src/hotspot/share/runtime/vframe_hp.hpp
+--- a/src/hotspot/share/runtime/vframe_hp.hpp
++++ b/src/hotspot/share/runtime/vframe_hp.hpp
+@@ -76,17 +76,21 @@
+   compiledVFrame* at_scope(int decode_offset, int vframe_id);
+ 
+   // Returns SynchronizationEntryBCI or bci() (used for synchronization)
+   int raw_bci() const;
+ 
++  // Used by stack allocation to match a stack oop to a described stack allocated object
++  ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray<ScopeValue*>* objects) const;
++
+  protected:
+   ScopeDesc* _scope;
+   int _vframe_id;
+ 
+   //StackValue resolve(ScopeValue* sv) const;
+   BasicLock* resolve_monitor_lock(Location location) const;
+   StackValue *create_stack_value(ScopeValue *sv) const;
++  ScopeValue *get_scope_value(GrowableArray<ScopeValue*>*  scv_list, int index, GrowableArray<ScopeValue*>* objects) const;
+ 
+  private:
+   compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, ScopeDesc* scope, int vframe_id);
+ 
+ #ifndef PRODUCT
+diff a/src/java.base/share/classes/java/util/ArrayList.java b/src/java.base/share/classes/java/util/ArrayList.java
+--- a/src/java.base/share/classes/java/util/ArrayList.java
++++ b/src/java.base/share/classes/java/util/ArrayList.java
+@@ -233,12 +233,15 @@
+             int newCapacity = ArraysSupport.newLength(oldCapacity,
+                     minCapacity - oldCapacity, /* minimum growth */
+                     oldCapacity >> 1           /* preferred growth */);
+             return elementData = Arrays.copyOf(elementData, newCapacity);
+         } else {
+-            return elementData = new Object[Math.max(DEFAULT_CAPACITY, minCapacity)];
+-        }
++            if (DEFAULT_CAPACITY > minCapacity) {
++                return elementData = new Object[DEFAULT_CAPACITY];
++            }
++            return elementData = new Object[minCapacity];
++         }
+     }
+ 
+     private Object[] grow() {
+         return grow(size + 1);
+     }
+diff a/src/java.base/share/classes/java/util/regex/Matcher.java b/src/java.base/share/classes/java/util/regex/Matcher.java
+--- a/src/java.base/share/classes/java/util/regex/Matcher.java
++++ b/src/java.base/share/classes/java/util/regex/Matcher.java
+@@ -242,12 +242,15 @@
+     Matcher(Pattern parent, CharSequence text) {
+         this.parentPattern = parent;
+         this.text = text;
+ 
+         // Allocate state storage
+-        int parentGroupCount = Math.max(parent.capturingGroupCount, 10);
+-        groups = new int[parentGroupCount * 2];
++        if (parent.capturingGroupCount > 10) {
++            groups = new int[parent.capturingGroupCount * 2];
++        } else {
++            groups = new int[20];
++        }
+         locals = new int[parent.localCount];
+         localsPos = new IntHashSet[parent.localTCNCount];
+ 
+         // Put fields into initial states
+         reset();

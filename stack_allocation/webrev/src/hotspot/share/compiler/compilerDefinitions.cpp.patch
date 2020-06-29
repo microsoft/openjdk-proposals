@@ -1,0 +1,23 @@
+diff a/src/hotspot/share/compiler/compilerDefinitions.cpp b/src/hotspot/share/compiler/compilerDefinitions.cpp
+--- a/src/hotspot/share/compiler/compilerDefinitions.cpp
++++ b/src/hotspot/share/compiler/compilerDefinitions.cpp
+@@ -520,10 +520,19 @@
+   }
+   if (FLAG_IS_DEFAULT(LoopStripMiningIterShortLoop)) {
+     // blind guess
+     LoopStripMiningIterShortLoop = LoopStripMiningIter / 10;
+   }
++  if (UseStackAllocation) {
++    if (!(UseSerialGC || UseParallelGC || UseG1GC)) {
++      vm_exit_during_initialization("UseStackAllocation is not supported with selected GC", GCConfig::hs_err_name());
++      FLAG_SET_DEFAULT(UseStackAllocation, false);
++      FLAG_SET_ERGO(UseStackAllocationRuntime, false);
++    } else {
++      FLAG_SET_ERGO(UseStackAllocationRuntime, true);
++    }
++  }
+ #endif // COMPILER2
+ }
+ 
+ static CompLevel highest_compile_level() {
+   return TieredCompilation ? MIN2((CompLevel) TieredStopAtLevel, CompLevel_highest_tier) : CompLevel_highest_tier;

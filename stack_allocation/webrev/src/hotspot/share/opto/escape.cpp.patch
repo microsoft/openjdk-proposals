@@ -1,0 +1,437 @@
+diff a/src/hotspot/share/opto/escape.cpp b/src/hotspot/share/opto/escape.cpp
+--- a/src/hotspot/share/opto/escape.cpp
++++ b/src/hotspot/share/opto/escape.cpp
+@@ -45,10 +45,11 @@
+   _nodes(C->comp_arena(), C->unique(), C->unique(), NULL),
+   _in_worklist(C->comp_arena()),
+   _next_pidx(0),
+   _collecting(true),
+   _verify(false),
++  _has_locks(false),
+   _compile(C),
+   _igvn(igvn),
+   _node_map(C->comp_arena()) {
+   // Add unknown java object.
+   add_java_object(C->top(), PointsToNode::GlobalEscape);
+@@ -181,10 +182,15 @@
+ #endif
+     } else if (n->is_ArrayCopy()) {
+       // Keep a list of ArrayCopy nodes so if one of its input is non
+       // escaping, we can record a unique type
+       arraycopy_worklist.append(n->as_ArrayCopy());
++    } else if (n->is_Lock()) {
++      Node* obj = n->as_Lock()->obj_node()->uncast();
++      if (!(obj->is_Parm() || obj->is_Con())) {
++        _has_locks = true;
++      }
+     }
+     for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
+       Node* m = n->fast_out(i);   // Get user
+       ideal_nodes.push(m);
+     }
+@@ -248,13 +254,56 @@
+     if (noescape && ptn->scalar_replaceable()) {
+       adjust_scalar_replaceable_state(ptn);
+       if (ptn->scalar_replaceable()) {
+         alloc_worklist.append(ptn->ideal_node());
+       }
++    } else {
++      // Set scalar replaceable to false to for stack allocation analysis below
++      ptn->set_scalar_replaceable(false);
+     }
+   }
+ 
++  // 4. Perform stack allocation analysis
++  if (C->do_stack_allocation() && (!_has_locks || (EliminateLocks && EliminateNestedLocks))) {
++    if (non_escaped_length > 0) {
++      for (int next = 0; next < non_escaped_length; next++) {
++        JavaObjectNode* ptn = non_escaped_worklist.at(next);
++        PointsToNode::EscapeState es = ptn->escape_state();
++        assert(es < PointsToNode::GlobalEscape, "list can not contain GlobalEscape objects");
++        if (es == PointsToNode::ArgEscape) {
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++            tty->print_cr("---- Alloc node %d can not be stack allocated as it escapes as an argument", ptn->ideal_node()->_idx);
++          }
++#endif
++          continue;
++        }
++
++        Node* n = ptn->ideal_node();
++        if (!n->is_Allocate()) {
++          continue;
++        }
++
++        n->as_Allocate()->_is_stack_allocateable = eligible_for_stack_allocation(ptn);
++      }
++    }
++
++    // 4.1 Verify that object chains don't contain heap objects pointing
++    //     to stack allocated objects. Loop until there are changes in the
++    //     state of which objects are allowed to be stack allocated.
++    bool more_work = non_escaped_length > 0;
++    while (more_work) {
++      more_work = verify_stack_allocated_object_chains(non_escaped_worklist, non_escaped_length);
++    }
++
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      print_stack_allocated_candidates(non_escaped_worklist, non_escaped_length);
++    }
++#endif
++  }
++
+ #ifdef ASSERT
+   if (VerifyConnectionGraph) {
+     // Verify that graph is complete - no new edges could be added or needed.
+     verify_connection_graph(ptnodes_worklist, non_escaped_worklist,
+                             java_objects_worklist, addp_worklist);
+@@ -268,18 +317,18 @@
+ 
+   _collecting = false;
+ 
+   } // TracePhase t3("connectionGraph")
+ 
+-  // 4. Optimize ideal graph based on EA information.
++  // 5. Optimize ideal graph based on EA information.
+   bool has_non_escaping_obj = (non_escaped_worklist.length() > 0);
+   if (has_non_escaping_obj) {
+     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
+   }
+ 
+ #ifndef PRODUCT
+-  if (PrintEscapeAnalysis) {
++  if (print_escape_analysis()) {
+     dump(ptnodes_worklist); // Dump ConnectionGraph
+   }
+ #endif
+ 
+   bool has_scalar_replaceable_candidates = (alloc_worklist.length() > 0);
+@@ -292,21 +341,21 @@
+       assert(ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable(), "sanity");
+     }
+   }
+ #endif
+ 
+-  // 5. Separate memory graph for scalar replaceable allcations.
++  // 6. Separate memory graph for scalar replaceable allcations.
+   if (has_scalar_replaceable_candidates &&
+       C->AliasLevel() >= 3 && EliminateAllocations) {
+     // Now use the escape information to create unique types for
+     // scalar replaceable objects.
+     split_unique_types(alloc_worklist, arraycopy_worklist);
+     if (C->failing())  return false;
+     C->print_method(PHASE_AFTER_EA, 2);
+ 
+ #ifdef ASSERT
+-  } else if (Verbose && (PrintEscapeAnalysis || PrintEliminateAllocations)) {
++  } else if (Verbose && (print_escape_analysis() || print_eliminate_allocations())) {
+     tty->print("=== No allocations eliminated for ");
+     C->method()->print_short_name();
+     if(!EliminateAllocations) {
+       tty->print(" since EliminateAllocations is off ===");
+     } else if(!has_scalar_replaceable_candidates) {
+@@ -318,10 +367,274 @@
+ #endif
+   }
+   return has_non_escaping_obj;
+ }
+ 
++// If an allocation is dominated by a loop, check to see if the lifetime of two instances
++// may overlap. If they do this allocate is not eligible for stack allocation
++bool ConnectionGraph::allocation_lifetime_overlap(AllocateNode *alloc, PhiNode *phi) {
++  Node *child0 = phi->in(0);
++  if (!child0->is_Loop()) {
++    return false;
++  }
++  // This is very pessimistic... but correct. It could be optimized
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++
++  for (uint i = 1; i < phi->outcnt(); i++) {
++    node_worklist.push(phi->raw_out(i));
++  }
++
++  while(node_worklist.length() != 0) {
++    Node* node = node_worklist.pop();
++    if (visited.test_set(node->_idx)) {
++      continue;  // already processed
++    }
++
++    if (node->is_Phi()) {
++      if (phi == node) {
++        return true;
++      }
++    }
++    for (DUIterator_Fast imax, i = node->fast_outs(imax); i < imax; i++) {
++      node_worklist.push(node->fast_out(i));
++    }
++  }
++  return false;
++}
++
++// Find if an allocate result may reach an EncodeP
++bool ConnectionGraph::oop_may_be_compressed(Node* alloc_result) {
++  VectorSet visited(Thread::current()->resource_area());
++  GrowableArray<Node*> node_worklist;
++
++  node_worklist.push(alloc_result);
++  visited.set(alloc_result->_idx);
++
++  while(node_worklist.length() != 0) {
++    Node* node = node_worklist.pop();
++
++    for (DUIterator_Fast imax, i = node->fast_outs(imax); i < imax; i++) {
++      Node *use = node->fast_out(i);
++      if (use->is_Phi()) {
++        if (!visited.test_set(use->_idx)) {
++          node_worklist.push(use);
++        }
++      } else if (use->is_EncodeP()) {
++        return true;
++      }
++    }
++  }
++
++  return false;
++}
++
++// Various checks to determine if an alloc is a candidate for stack allocation
++bool ConnectionGraph::eligible_for_stack_allocation(PointsToNode* ptn) {
++  assert(ptn->ideal_node()->is_Allocate(), "Must be called on allocate or allocate array node");
++
++  AllocateNode *alloc = ptn->ideal_node()->as_Allocate();
++  Node* res = alloc->result_cast();
++  if (res == NULL) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to NULL result_cast", alloc->_idx);
++    }
++#endif
++    return false;
++  } else if (!res->is_CheckCastPP()) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to an invalid result_cast", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  Node* size_in_bytes = alloc->in(AllocateNode::AllocSize);
++  intptr_t size_of_object = _igvn->find_intptr_t_con(size_in_bytes, -1);
++  if ((size_of_object == -1) || (size_of_object > AllocateNode::StackAllocSizeLimit)) {
++    // Object has unknown size or is too big so it can not be stack allocated.
++    // No need to find reaching objects since it does not have any fields
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to an invalid size", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  if (alloc->is_AllocateArray()) {
++    int length = alloc->in(AllocateNode::ALength)->find_int_con(-1);
++    if (length < 0 || length > EliminateAllocationArraySizeLimit) {
++      // Array does not have a constant length so it can not be stack allocated
++#ifndef PRODUCT
++      if (print_escape_analysis() || print_stack_allocation()) {
++        tty->print_cr("---- Alloc node %d can not be stack allocated as it is an array with an invalid length", alloc->_idx);
++      }
++#endif
++      return false;
++    }
++  }
++
++  if (UseCompressedOops && oop_may_be_compressed(res)) {
++#ifndef PRODUCT
++    if (print_escape_analysis() || print_stack_allocation()) {
++      tty->print_cr("---- Alloc node %d can not be stack allocated due to compress operation on the stack oop", alloc->_idx);
++    }
++#endif
++    return false;
++  }
++
++  return all_uses_eligible_for_stack_allocation(ptn);
++}
++
++// Check if the alloc has uses that make it ineligible for stack allocation
++bool ConnectionGraph::all_uses_eligible_for_stack_allocation(PointsToNode *ptn) {
++  assert(ptn->ideal_node()->is_Allocate(), "Must be called on allocate or allocate array node");
++
++  AllocateNode *alloc = ptn->ideal_node()->as_Allocate();
++  Node* res = alloc->result_cast();
++
++  assert(res != NULL, "Result cast must not be NULL at this point");
++
++  for (int uses = 0; uses < ptn->use_count(); uses ++) {
++    PointsToNode *use = ptn->use(uses);
++    if (use->is_LocalVar()) {
++      LocalVarNode *local = use->as_LocalVar();
++      Node *node = local->ideal_node();
++      if (node->is_Phi()) {
++        if (allocation_lifetime_overlap(alloc, node->as_Phi())) {
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++            tty->print_cr("---- Alloc node %d can not be stack allocated as it may overlap with older versions of itself", alloc->_idx);
++          }
++#endif
++          return false;
++        }
++      } else if (node->is_Load() && node->Opcode() == Op_LoadP) {
++        Node *in1 = node->in(1);
++        if ((in1 != NULL) && in1->is_Phi()) {
++          if (allocation_lifetime_overlap(alloc, in1->as_Phi())) {
++#ifndef PRODUCT
++            if (print_escape_analysis() || print_stack_allocation()) {
++              tty->print_cr("---- Alloc node %d can not be stack allocated as it may overlap with older versions of itself", alloc->_idx);
++            }
++#endif
++            return false;
++          }
++        }
++      }
++    } else if (use->is_Field()) {
++      if (UseCompressedOops) {
++#ifndef PRODUCT
++        if (print_escape_analysis() || print_stack_allocation()) {
++          tty->print_cr("---- Alloc node %d can not be stack allocated as it referenced by another object", alloc->_idx);
++        }
++#endif
++        return false;
++      }
++    } else if (use->is_Arraycopy()) {
++      if (ptn->arraycopy_dst() && alloc->is_AllocateArray()) {
++        Node* klass = alloc->in(AllocateNode::KlassNode);
++        ciKlass* k = _igvn->type(klass)->is_klassptr()->klass();
++        if (k->is_obj_array_klass()) {
++        // The System.arraycopy helper has a post store barrier which does not handle stack allocated objects
++#ifndef PRODUCT
++          if (print_escape_analysis() || print_stack_allocation()) {
++          tty->print_cr("---- Alloc node %d can not be stack allocated as it is referenced from an arraycopy", alloc->_idx);
++          }
++#endif
++          return false;
++        }
++      }
++    }
++  }
++
++  return true;
++}
++
++bool ConnectionGraph::verify_stack_allocated_object_chains(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length) {
++  for (int next = 0; next < non_escaped_length; next++) {
++    JavaObjectNode* ptn = non_escaped_worklist.at(next);
++    if (ptn->escape_state() != PointsToNode::NoEscape) {
++      continue;
++    }
++    Node* n = ptn->ideal_node();
++    if (!n->is_Allocate()) {
++      continue;
++    }
++    AllocateNode *alloc = n->as_Allocate();
++    if (!alloc->_is_stack_allocateable) {
++      continue;
++    }
++    for (int uses = 0; uses < ptn->use_count(); uses ++) {
++      PointsToNode *use = ptn->use(uses);
++      if(use->is_Field()) {
++        for (BaseIterator i(use->as_Field()); i.has_next(); i.next()) {
++          PointsToNode* base = i.get();
++          if (base->is_JavaObject()) {
++            JavaObjectNode *new_obj = base->as_JavaObject();
++            if (new_obj == ptn) {
++              continue;
++            }
++            if (!new_obj->ideal_node()->is_Allocate()) {
++              if (new_obj->ideal_node()->Opcode() == Op_ConP) {
++                TypeNode *tn = new_obj->ideal_node()->as_Type();
++                if (tn->type() == TypePtr::NULL_PTR) {
++                  // Allow NULL ptr ConP
++                  continue;
++                }
++              }
++              alloc->_is_stack_allocateable = false;
++              alloc->_is_referenced_stack_allocation = false;
++#ifndef PRODUCT
++              if (print_escape_analysis() || print_stack_allocation()) {
++                tty->print_cr("---- Alloc node %d can not be stack allocated, it is referenced by a non allocate object", alloc->_idx);
++              }
++#endif
++              return true;
++            }
++            AllocateNode *new_alloc = new_obj->ideal_node()->as_Allocate();
++            if (!new_alloc->_is_stack_allocateable && !new_obj->scalar_replaceable()) {
++              alloc->_is_stack_allocateable = false;
++              alloc->_is_referenced_stack_allocation = false;
++#ifndef PRODUCT
++              if (print_escape_analysis() || print_stack_allocation()) {
++                tty->print_cr("---- Alloc node %d can not be stack allocated, it is referenced by another non SCR/SA object %d", alloc->_idx, new_alloc->_idx);
++              }
++#endif
++              return true;
++            } else {
++              assert(alloc->_is_stack_allocateable, "has to be stack allocateable");
++              alloc->_is_referenced_stack_allocation = true;
++            }
++          }
++        }
++      }
++    }
++  }
++
++  return false;
++}
++
++#ifndef PRODUCT
++void ConnectionGraph::print_stack_allocated_candidates(GrowableArray<JavaObjectNode*> &non_escaped_worklist, int non_escaped_length) {
++  for (int next = 0; next < non_escaped_length; next++) {
++    JavaObjectNode* ptn = non_escaped_worklist.at(next);
++    Node* n = ptn->ideal_node();
++    if (!n->is_Allocate()) {
++      continue;
++    }
++    AllocateNode *alloc = n->as_Allocate();
++    if (alloc->_is_stack_allocateable) {
++      tty->print_cr("++++ Alloc node %d is marked as stack allocateable is_scalar_replaceable (%d)", n->_idx, ptn->scalar_replaceable());
++    }
++  }
++}
++#endif
++
+ // Utility function for nodes that load an object
+ void ConnectionGraph::add_objload_to_connection_graph(Node *n, Unique_Node_List *delayed_worklist) {
+   // Using isa_ptr() instead of isa_oopptr() for LoadP and Phi because
+   // ThreadLocal has RawPtr type.
+   const Type* t = _igvn->type(n);
+@@ -1235,11 +1548,11 @@
+     // Possible infinite build_connection_graph loop,
+     // bailout (no changes to ideal graph were made).
+     return false;
+   }
+ #ifdef ASSERT
+-  if (Verbose && PrintEscapeAnalysis) {
++  if (Verbose && print_escape_analysis()) {
+     tty->print_cr("EA: %d iterations to build connection graph with %d nodes and worklist size %d",
+                   iterations, nodes_size(), ptnodes_worklist.length());
+   }
+ #endif
+ 
+@@ -2780,11 +3093,14 @@
+         result = un;
+       } else {
+         break;
+       }
+     } else if (result->is_ClearArray()) {
+-      if (!ClearArrayNode::step_through(&result, (uint)toop->instance_id(), igvn)) {
++      intptr_t offset;
++      AllocateNode* alloc = AllocateNode::Ideal_allocation(result->in(3), igvn, offset);
++
++      if ((alloc == NULL) || !ClearArrayNode::step_through(&result, (uint)toop->instance_id(), igvn)) {
+         // Can not bypass initialization of the instance
+         // we are looking for.
+         break;
+       }
+       // Otherwise skip it (the call updated 'result' value).

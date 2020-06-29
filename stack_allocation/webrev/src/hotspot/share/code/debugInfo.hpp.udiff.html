@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/code/debugInfo.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="debugInfo.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../compiler/compilerDefinitions.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/code/debugInfo.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -143,12 +143,14 @@</span>
+    bool                        is_visited() const        { return _visited; }
+  
+    void                        set_value(oop value);
+    void                        set_visited(bool visited) { _visited = false; }
+  
+<span class="udiff-line-added">+   virtual bool                is_stack_object()         { return false; }</span>
+<span class="udiff-line-added">+ </span>
+    // Serialization of debugging information
+<span class="udiff-line-modified-removed">-   void read_object(DebugInfoReadStream* stream);</span>
+<span class="udiff-line-modified-added">+   virtual void read_object(DebugInfoReadStream* stream);</span>
+    void write_on(DebugInfoWriteStream* stream);
+  
+    // Printing
+    void print_on(outputStream* st) const;
+    void print_fields_on(outputStream* st) const;
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -183,10 +185,29 @@</span>
+  
+    // Printing
+    void print_on(outputStream* st) const;
+  };
+  
+<span class="udiff-line-added">+ class StackObjectValue: public ObjectValue {</span>
+<span class="udiff-line-added">+ private:</span>
+<span class="udiff-line-added">+   Location    _location;</span>
+<span class="udiff-line-added">+   ConstantIntValue *_field_length;</span>
+<span class="udiff-line-added">+ public:</span>
+<span class="udiff-line-added">+   StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length);</span>
+<span class="udiff-line-added">+   StackObjectValue(int id) : ObjectValue(id), _location(), _field_length(NULL) { }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   Location get_stack_location() { return _location; }</span>
+<span class="udiff-line-added">+   ConstantIntValue* get_field_length() { return _field_length; }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool is_stack_object(){ return true; }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     // Serialization of debugging information</span>
+<span class="udiff-line-added">+   void read_object(DebugInfoReadStream* stream);</span>
+<span class="udiff-line-added">+   void write_on(DebugInfoWriteStream* stream);</span>
+<span class="udiff-line-added">+ };</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ </span>
+  class ConstantLongValue: public ScopeValue {
+   private:
+    jlong _value;
+   public:
+    ConstantLongValue(jlong value)       { _value = value; }
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -302,11 +323,11 @@</span>
+      Method* o = (Method*)(code()-&gt;metadata_at(read_int()));
+      // is_metadata() is a faster check than is_metaspace_object()
+      assert(o == NULL || o-&gt;is_metadata(), &quot;meta data only&quot;);
+      return o;
+    }
+<span class="udiff-line-modified-removed">-   ScopeValue* read_object_value(bool is_auto_box);</span>
+<span class="udiff-line-modified-added">+   ScopeValue* read_object_value(int type);</span>
+    ScopeValue* get_cached_object();
+    // BCI encoding is mostly unsigned, but -1 is a distinguished value
+    int read_bci() { return read_int() + InvocationEntryBci; }
+  };
+  
+</pre>
+<center><a href="debugInfo.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../compiler/compilerDefinitions.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

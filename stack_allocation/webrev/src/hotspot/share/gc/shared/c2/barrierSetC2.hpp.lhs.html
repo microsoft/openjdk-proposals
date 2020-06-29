@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/gc/shared/c2/barrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+    <script type="text/javascript" src="../../../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_GC_SHARED_C2_BARRIERSETC2_HPP
+ 26 #define SHARE_GC_SHARED_C2_BARRIERSETC2_HPP
+ 27 
+ 28 #include &quot;memory/allocation.hpp&quot;
+ 29 #include &quot;oops/accessDecorators.hpp&quot;
+ 30 #include &quot;opto/loopnode.hpp&quot;
+ 31 #include &quot;opto/matcher.hpp&quot;
+ 32 #include &quot;opto/memnode.hpp&quot;
+ 33 #include &quot;utilities/globalDefinitions.hpp&quot;
+ 34 
+ 35 // This means the access is mismatched. This means the value of an access
+ 36 // is not equivalent to the value pointed to by the address.
+ 37 const DecoratorSet C2_MISMATCHED             = DECORATOR_LAST &lt;&lt; 1;
+ 38 // The access may not be aligned to its natural size.
+ 39 const DecoratorSet C2_UNALIGNED              = DECORATOR_LAST &lt;&lt; 2;
+ 40 // The atomic cmpxchg is weak, meaning that spurious false negatives are allowed,
+ 41 // but never false positives.
+ 42 const DecoratorSet C2_WEAK_CMPXCHG           = DECORATOR_LAST &lt;&lt; 3;
+ 43 // This denotes that a load has control dependency.
+ 44 const DecoratorSet C2_CONTROL_DEPENDENT_LOAD = DECORATOR_LAST &lt;&lt; 4;
+ 45 // This denotes that a load that must be pinned, but may float above safepoints.
+ 46 const DecoratorSet C2_UNKNOWN_CONTROL_LOAD   = DECORATOR_LAST &lt;&lt; 5;
+ 47 // This denotes that the access is produced from the sun.misc.Unsafe intrinsics.
+ 48 const DecoratorSet C2_UNSAFE_ACCESS          = DECORATOR_LAST &lt;&lt; 6;
+ 49 // This denotes that the access mutates state.
+ 50 const DecoratorSet C2_WRITE_ACCESS           = DECORATOR_LAST &lt;&lt; 7;
+ 51 // This denotes that the access reads state.
+ 52 const DecoratorSet C2_READ_ACCESS            = DECORATOR_LAST &lt;&lt; 8;
+ 53 // A nearby allocation?
+ 54 const DecoratorSet C2_TIGHTLY_COUPLED_ALLOC  = DECORATOR_LAST &lt;&lt; 9;
+ 55 // Loads and stores from an arraycopy being optimized
+ 56 const DecoratorSet C2_ARRAY_COPY             = DECORATOR_LAST &lt;&lt; 10;
+ 57 
+ 58 class Compile;
+ 59 class ConnectionGraph;
+ 60 class GraphKit;
+ 61 class IdealKit;
+ 62 class Node;
+ 63 class PhaseGVN;
+ 64 class PhaseIdealLoop;
+ 65 class PhaseMacroExpand;
+ 66 class Type;
+ 67 class TypePtr;
+ 68 class Unique_Node_List;
+ 69 
+ 70 // This class wraps a node and a type.
+ 71 class C2AccessValue: public StackObj {
+ 72 protected:
+ 73   Node* _node;
+ 74   const Type* _type;
+ 75 
+ 76 public:
+ 77   C2AccessValue(Node* node, const Type* type) :
+ 78     _node(node),
+ 79     _type(type) {}
+ 80 
+ 81   Node* node() const        { return _node; }
+ 82   const Type* type() const  { return _type; }
+ 83 
+ 84   void set_node(Node* node) { _node = node; }
+ 85 };
+ 86 
+ 87 // This class wraps a node and a pointer type.
+ 88 class C2AccessValuePtr: public C2AccessValue {
+ 89 
+ 90 public:
+ 91   C2AccessValuePtr(Node* node, const TypePtr* type) :
+ 92     C2AccessValue(node, reinterpret_cast&lt;const Type*&gt;(type)) {}
+ 93 
+ 94   const TypePtr* type() const { return reinterpret_cast&lt;const TypePtr*&gt;(_type); }
+ 95 };
+ 96 
+ 97 // This class wraps a bunch of context parameters thare are passed around in the
+ 98 // BarrierSetC2 backend hierarchy, for loads and stores, to reduce boiler plate.
+ 99 class C2Access: public StackObj {
+100 protected:
+101   DecoratorSet      _decorators;
+102   BasicType         _type;
+103   Node*             _base;
+104   C2AccessValuePtr&amp; _addr;
+105   Node*             _raw_access;
+106   uint8_t           _barrier_data;
+107 
+108   void fixup_decorators();
+109 
+110 public:
+111   C2Access(DecoratorSet decorators,
+112            BasicType type, Node* base, C2AccessValuePtr&amp; addr) :
+113     _decorators(decorators),
+114     _type(type),
+115     _base(base),
+116     _addr(addr),
+117     _raw_access(NULL),
+118     _barrier_data(0)
+119   {}
+120 
+121   DecoratorSet decorators() const { return _decorators; }
+122   Node* base() const              { return _base; }
+123   C2AccessValuePtr&amp; addr() const  { return _addr; }
+124   BasicType type() const          { return _type; }
+125   bool is_oop() const             { return is_reference_type(_type); }
+126   bool is_raw() const             { return (_decorators &amp; AS_RAW) != 0; }
+127   Node* raw_access() const        { return _raw_access; }
+128 
+129   uint8_t barrier_data() const        { return _barrier_data; }
+130   void set_barrier_data(uint8_t data) { _barrier_data = data; }
+131 
+132   void set_raw_access(Node* raw_access) { _raw_access = raw_access; }
+133   virtual void set_memory() {} // no-op for normal accesses, but not for atomic accesses.
+134 
+135   MemNode::MemOrd mem_node_mo() const;
+136   bool needs_cpu_membar() const;
+137 
+138   virtual PhaseGVN&amp; gvn() const = 0;
+139   virtual bool is_parse_access() const { return false; }
+140   virtual bool is_opt_access() const { return false; }
+141 };
+142 
+143 // C2Access for parse time calls to the BarrierSetC2 backend.
+144 class C2ParseAccess: public C2Access {
+145 protected:
+146   GraphKit*         _kit;
+147 
+148   void* barrier_set_state() const;
+149 
+150 public:
+151   C2ParseAccess(GraphKit* kit, DecoratorSet decorators,
+152                 BasicType type, Node* base, C2AccessValuePtr&amp; addr) :
+153     C2Access(decorators, type, base, addr),
+154     _kit(kit) {
+155     fixup_decorators();
+156   }
+157 
+158   GraphKit* kit() const           { return _kit; }
+159 
+160   virtual PhaseGVN&amp; gvn() const;
+161   virtual bool is_parse_access() const { return true; }
+162 };
+163 
+164 // This class wraps a bunch of context parameters thare are passed around in the
+165 // BarrierSetC2 backend hierarchy, for atomic accesses, to reduce boiler plate.
+166 class C2AtomicParseAccess: public C2ParseAccess {
+167   Node* _memory;
+168   uint  _alias_idx;
+169   bool  _needs_pinning;
+170 
+171 public:
+172   C2AtomicParseAccess(GraphKit* kit, DecoratorSet decorators, BasicType type,
+173                  Node* base, C2AccessValuePtr&amp; addr, uint alias_idx) :
+174     C2ParseAccess(kit, decorators, type, base, addr),
+175     _memory(NULL),
+176     _alias_idx(alias_idx),
+177     _needs_pinning(true) {}
+178 
+179   // Set the memory node based on the current memory slice.
+180   virtual void set_memory();
+181 
+182   Node* memory() const       { return _memory; }
+183   uint alias_idx() const     { return _alias_idx; }
+184   bool needs_pinning() const { return _needs_pinning; }
+185 };
+186 
+187 // C2Access for optimization time calls to the BarrierSetC2 backend.
+188 class C2OptAccess: public C2Access {
+189   PhaseGVN&amp; _gvn;
+190   MergeMemNode* _mem;
+191   Node* _ctl;
+192 
+193 public:
+194   C2OptAccess(PhaseGVN&amp; gvn, Node* ctl, MergeMemNode* mem, DecoratorSet decorators,
+195               BasicType type, Node* base, C2AccessValuePtr&amp; addr) :
+196     C2Access(decorators, type, base, addr),
+197     _gvn(gvn), _mem(mem), _ctl(ctl) {
+198     fixup_decorators();
+199   }
+200 
+201   MergeMemNode* mem() const { return _mem; }
+202   Node* ctl() const { return _ctl; }
+203 
+204   virtual PhaseGVN&amp; gvn() const { return _gvn; }
+205   virtual bool is_opt_access() const { return true; }
+206 };
+207 
+208 
+209 // This is the top-level class for the backend of the Access API in C2.
+210 // The top-level class is responsible for performing raw accesses. The
+211 // various GC barrier sets inherit from the BarrierSetC2 class to sprinkle
+212 // barriers into the accesses.
+213 class BarrierSetC2: public CHeapObj&lt;mtGC&gt; {
+214 protected:
+215   virtual void resolve_address(C2Access&amp; access) const;
+216   virtual Node* store_at_resolved(C2Access&amp; access, C2AccessValue&amp; val) const;
+217   virtual Node* load_at_resolved(C2Access&amp; access, const Type* val_type) const;
+218 
+219   virtual Node* atomic_cmpxchg_val_at_resolved(C2AtomicParseAccess&amp; access, Node* expected_val,
+220                                                Node* new_val, const Type* val_type) const;
+221   virtual Node* atomic_cmpxchg_bool_at_resolved(C2AtomicParseAccess&amp; access, Node* expected_val,
+222                                                 Node* new_val, const Type* value_type) const;
+223   virtual Node* atomic_xchg_at_resolved(C2AtomicParseAccess&amp; access, Node* new_val, const Type* val_type) const;
+224   virtual Node* atomic_add_at_resolved(C2AtomicParseAccess&amp; access, Node* new_val, const Type* val_type) const;
+225   void pin_atomic_op(C2AtomicParseAccess&amp; access) const;
+226 
+227 public:
+228   // This is the entry-point for the backend to perform accesses through the Access API.
+229   virtual Node* store_at(C2Access&amp; access, C2AccessValue&amp; val) const;
+230   virtual Node* load_at(C2Access&amp; access, const Type* val_type) const;
+231 
+232   virtual Node* atomic_cmpxchg_val_at(C2AtomicParseAccess&amp; access, Node* expected_val,
+233                                       Node* new_val, const Type* val_type) const;
+234   virtual Node* atomic_cmpxchg_bool_at(C2AtomicParseAccess&amp; access, Node* expected_val,
+235                                        Node* new_val, const Type* val_type) const;
+236   virtual Node* atomic_xchg_at(C2AtomicParseAccess&amp; access, Node* new_val, const Type* value_type) const;
+237   virtual Node* atomic_add_at(C2AtomicParseAccess&amp; access, Node* new_val, const Type* value_type) const;
+238 
+239   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+240 
+241   virtual Node* obj_allocate(PhaseMacroExpand* macro, Node* ctrl, Node* mem, Node* toobig_false, Node* size_in_bytes,
+242                              Node*&amp; i_o, Node*&amp; needgc_ctrl,
+243                              Node*&amp; fast_oop_ctrl, Node*&amp; fast_oop_rawmem,
+244                              intx prefetch_lines) const;
+245 
+246   virtual Node* ideal_node(PhaseGVN* phase, Node* n, bool can_reshape) const { return NULL; }
+247 
+248   // These are general helper methods used by C2
+249   enum ArrayCopyPhase {
+250     Parsing,
+251     Optimization,
+252     Expansion
+253   };
+254 
+255   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const { return false; }
+256   virtual void clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* ac) const;
+257 
+258   // Support for GC barriers emitted during parsing
+259   virtual bool has_load_barrier_nodes() const { return false; }
+260   virtual bool is_gc_barrier_node(Node* node) const { return false; }
+261   virtual Node* step_over_gc_barrier(Node* c) const { return c; }
+262 
+263   // Support for macro expanded GC barriers
+264   virtual void register_potential_barrier_node(Node* node) const { }
+265   virtual void unregister_potential_barrier_node(Node* node) const { }
+266   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const { }
+267   virtual void enqueue_useful_gc_barrier(PhaseIterGVN* igvn, Node* node) const {}
+268   virtual void eliminate_useless_gc_barriers(Unique_Node_List &amp;useful, Compile* C) const {}
+269 
+270   // Allow barrier sets to have shared state that is preserved across a compilation unit.
+271   // This could for example comprise macro nodes to be expanded during macro expansion.
+272   virtual void* create_barrier_state(Arena* comp_arena) const { return NULL; }
+273   // If the BarrierSetC2 state has barrier nodes in its compilation
+274   // unit state to be expanded later, then now is the time to do so.
+275   virtual bool expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const { return false; }
+<a name="1" id="anc1"></a>
+276   virtual bool optimize_loops(PhaseIdealLoop* phase, LoopOptsMode mode, VectorSet&amp; visited, Node_Stack&amp; nstack, Node_List&amp; worklist) const { return false; }
+277   virtual bool strip_mined_loops_expanded(LoopOptsMode mode) const { return false; }
+278   virtual bool is_gc_specific_loop_opts_pass(LoopOptsMode mode) const { return false; }
+279 
+280   enum CompilePhase {
+281     BeforeOptimize,
+282     BeforeMacroExpand,
+283     BeforeCodeGen
+284   };
+285 
+286 #ifdef ASSERT
+287   virtual void verify_gc_barriers(Compile* compile, CompilePhase phase) const {}
+288 #endif
+289 
+290   virtual bool final_graph_reshaping(Compile* compile, Node* n, uint opcode) const { return false; }
+291 
+292   virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const { return false; }
+293   virtual bool escape_add_final_edges(ConnectionGraph* conn_graph, PhaseGVN* gvn, Node* n, uint opcode) const { return false; }
+294   virtual bool escape_has_out_with_unsafe_object(Node* n) const { return false; }
+295 
+296   virtual bool matcher_find_shared_post_visit(Matcher* matcher, Node* n, uint opcode) const { return false; };
+297   virtual bool matcher_is_store_load_barrier(Node* x, uint xop) const { return false; }
+298 
+299   virtual void late_barrier_analysis() const { }
+300   virtual int estimate_stub_size() const { return 0; }
+301   virtual void emit_stubs(CodeBuffer&amp; cb) const { }
+302 
+303   static int arraycopy_payload_base_offset(bool is_array);
+304 };
+305 
+306 #endif // SHARE_GC_SHARED_C2_BARRIERSETC2_HPP
+<a name="2" id="anc2"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="2" type="hidden" />
+</body>
+</html>

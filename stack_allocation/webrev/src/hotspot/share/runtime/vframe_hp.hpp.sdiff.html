@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/runtime/vframe_hp.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="vframe_hp.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../../../java.base/share/classes/java/util/ArrayList.java.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/runtime/vframe_hp.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 61   void update_local(BasicType type, int index, jvalue value);
+ 62 
+ 63   // Update an expression stack value in a compiled frame. Update happens when deopt occurs
+ 64   void update_stack(BasicType type, int index, jvalue value);
+ 65 
+ 66   // Update a lock value in a compiled frame. Update happens when deopt occurs
+ 67   void update_monitor(int index, MonitorInfo* value);
+ 68 
+ 69   // Returns the active nmethod
+ 70   CompiledMethod*  code() const;
+ 71 
+ 72   // Returns the scopeDesc
+ 73   ScopeDesc* scope() const { return _scope; }
+ 74 
+ 75   // Return the compiledVFrame for the desired scope
+ 76   compiledVFrame* at_scope(int decode_offset, int vframe_id);
+ 77 
+ 78   // Returns SynchronizationEntryBCI or bci() (used for synchronization)
+ 79   int raw_bci() const;
+ 80 
+
+
+
+ 81  protected:
+ 82   ScopeDesc* _scope;
+ 83   int _vframe_id;
+ 84 
+ 85   //StackValue resolve(ScopeValue* sv) const;
+ 86   BasicLock* resolve_monitor_lock(Location location) const;
+ 87   StackValue *create_stack_value(ScopeValue *sv) const;
+
+ 88 
+ 89  private:
+ 90   compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, ScopeDesc* scope, int vframe_id);
+ 91 
+ 92 #ifndef PRODUCT
+ 93  public:
+ 94   void verify() const;
+ 95 #endif
+ 96 };
+ 97 
+ 98 // In order to implement set_locals for compiled vframes we must
+ 99 // store updated locals in a data structure that contains enough
+100 // information to recognize equality with a vframe and to store
+101 // any updated locals.
+102 
+103 class jvmtiDeferredLocalVariable;
+104 class jvmtiDeferredLocalVariableSet : public CHeapObj&lt;mtCompiler&gt; {
+105   friend class compiledVFrame;
+106 
+107 private:
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 61   void update_local(BasicType type, int index, jvalue value);
+ 62 
+ 63   // Update an expression stack value in a compiled frame. Update happens when deopt occurs
+ 64   void update_stack(BasicType type, int index, jvalue value);
+ 65 
+ 66   // Update a lock value in a compiled frame. Update happens when deopt occurs
+ 67   void update_monitor(int index, MonitorInfo* value);
+ 68 
+ 69   // Returns the active nmethod
+ 70   CompiledMethod*  code() const;
+ 71 
+ 72   // Returns the scopeDesc
+ 73   ScopeDesc* scope() const { return _scope; }
+ 74 
+ 75   // Return the compiledVFrame for the desired scope
+ 76   compiledVFrame* at_scope(int decode_offset, int vframe_id);
+ 77 
+ 78   // Returns SynchronizationEntryBCI or bci() (used for synchronization)
+ 79   int raw_bci() const;
+ 80 
+<span class="line-added"> 81   // Used by stack allocation to match a stack oop to a described stack allocated object</span>
+<span class="line-added"> 82   ScopeValue *match_object_to_stack_oop(intptr_t *oop_ptr, intptr_t *sp_base, GrowableArray&lt;ScopeValue*&gt;* objects) const;</span>
+<span class="line-added"> 83 </span>
+ 84  protected:
+ 85   ScopeDesc* _scope;
+ 86   int _vframe_id;
+ 87 
+ 88   //StackValue resolve(ScopeValue* sv) const;
+ 89   BasicLock* resolve_monitor_lock(Location location) const;
+ 90   StackValue *create_stack_value(ScopeValue *sv) const;
+<span class="line-added"> 91   ScopeValue *get_scope_value(GrowableArray&lt;ScopeValue*&gt;*  scv_list, int index, GrowableArray&lt;ScopeValue*&gt;* objects) const;</span>
+ 92 
+ 93  private:
+ 94   compiledVFrame(const frame* fr, const RegisterMap* reg_map, JavaThread* thread, ScopeDesc* scope, int vframe_id);
+ 95 
+ 96 #ifndef PRODUCT
+ 97  public:
+ 98   void verify() const;
+ 99 #endif
+100 };
+101 
+102 // In order to implement set_locals for compiled vframes we must
+103 // store updated locals in a data structure that contains enough
+104 // information to recognize equality with a vframe and to store
+105 // any updated locals.
+106 
+107 class jvmtiDeferredLocalVariable;
+108 class jvmtiDeferredLocalVariableSet : public CHeapObj&lt;mtCompiler&gt; {
+109   friend class compiledVFrame;
+110 
+111 private:
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="vframe_hp.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../../../java.base/share/classes/java/util/ArrayList.java.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

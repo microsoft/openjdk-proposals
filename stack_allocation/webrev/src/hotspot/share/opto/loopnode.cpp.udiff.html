@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/loopnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="idealKit.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="machnode.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/loopnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -3889,11 +3889,11 @@</span>
+                (n-&gt;in(0)-&gt;Opcode() == Op_IfFalse &amp;&amp;
+                 (1.0 - iff-&gt;as_If()-&gt;_prob) &gt;= 0.01) ||
+                (iff-&gt;as_If()-&gt;_prob &gt;= 0.01) )
+              innermost-&gt;_has_call = 1;
+          }
+<span class="udiff-line-modified-removed">-       } else if( n-&gt;is_Allocate() &amp;&amp; n-&gt;as_Allocate()-&gt;_is_scalar_replaceable ) {</span>
+<span class="udiff-line-modified-added">+       } else if( n-&gt;is_Allocate() &amp;&amp; (n-&gt;as_Allocate()-&gt;_is_scalar_replaceable || n-&gt;as_Allocate()-&gt;_is_stack_allocateable) ) {</span>
+          // Disable loop optimizations if the loop has a scalar replaceable
+          // allocation. This disabling may cause a potential performance lost
+          // if the allocation is not eliminated for some reason.
+          innermost-&gt;_allow_optimizations = false;
+          innermost-&gt;_has_call = 1; // = true
+</pre>
+<center><a href="idealKit.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="machnode.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

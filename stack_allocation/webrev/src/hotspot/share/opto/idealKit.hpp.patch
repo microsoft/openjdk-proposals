@@ -1,0 +1,56 @@
+diff a/src/hotspot/share/opto/idealKit.hpp b/src/hotspot/share/opto/idealKit.hpp
+--- a/src/hotspot/share/opto/idealKit.hpp
++++ b/src/hotspot/share/opto/idealKit.hpp
+@@ -125,10 +125,14 @@
+   Node* promote_to_phi(Node* n, Node* reg);// Promote "n" to a phi on region "reg"
+   bool was_promoted_to_phi(Node* n, Node* reg) {
+     return (n->is_Phi() && n->in(0) == reg);
+   }
+   void declare(IdealVariable* v) { v->set_id(_var_ct++); }
++
++  void if_then_common(Node* bol, float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
++                      bool push_new_state = true);
++
+   // This declares the position where vars are kept in the cvstate
+   // For some degree of consistency we use the TypeFunc enum to
+   // soak up spots in the inputs even though we only use early Control
+   // and Memory slots. (So far.)
+   static const uint first_var; // = TypeFunc::Parms + 1;
+@@ -161,10 +165,13 @@
+   Node* value(IdealVariable& v)         { return _cvstate->in(first_var + v.id()); }
+   void dead(IdealVariable& v)           { set(v, (Node*)NULL); }
+   void if_then(Node* left, BoolTest::mask relop, Node* right,
+                float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
+                bool push_new_state = true);
++  void uif_then(Node* left, BoolTest::mask relop, Node* right,
++               float prob = PROB_FAIR, float cnt = COUNT_UNKNOWN,
++               bool push_new_state = true);
+   void else_();
+   void end_if();
+   void loop(GraphKit* gkit, int nargs, IdealVariable& iv, Node* init, BoolTest::mask cmp, Node* limit,
+             float prob = PROB_LIKELY(0.9), float cnt = COUNT_UNKNOWN);
+   void end_loop();
+@@ -180,20 +187,23 @@
+   Node* ConI(jint k) { return (Node*)gvn().intcon(k); }
+   Node* makecon(const Type *t)  const { return _gvn.makecon(t); }
+ 
+   Node* AddI(Node* l, Node* r) { return transform(new AddINode(l, r)); }
+   Node* SubI(Node* l, Node* r) { return transform(new SubINode(l, r)); }
++  Node* SubL(Node* l, Node* r) { return transform(new SubLNode(l, r)); }
+   Node* AndI(Node* l, Node* r) { return transform(new AndINode(l, r)); }
+   Node* OrI(Node* l, Node* r)  { return transform(new OrINode(l, r));  }
+   Node* MaxI(Node* l, Node* r) { return transform(new MaxINode(l, r)); }
+   Node* LShiftI(Node* l, Node* r) { return transform(new LShiftINode(l, r)); }
+   Node* CmpI(Node* l, Node* r) { return transform(new CmpINode(l, r)); }
++  Node* CmpU(Node* l, Node* r) { return transform(new CmpUNode(l, r)); }
+   Node* Bool(Node* cmp, BoolTest::mask relop) { return transform(new BoolNode(cmp, relop)); }
+   void  increment(IdealVariable& v, Node* j)  { set(v, AddI(value(v), j)); }
+   void  decrement(IdealVariable& v, Node* j)  { set(v, SubI(value(v), j)); }
+ 
+   Node* CmpL(Node* l, Node* r) { return transform(new CmpLNode(l, r)); }
++  Node* CmpUL(Node* l, Node* r) { return transform(new CmpULNode(l, r)); }
+ 
+   // TLS
+   Node* thread()  {  return gvn().transform(new ThreadLocalNode()); }
+ 
+   // Pointers

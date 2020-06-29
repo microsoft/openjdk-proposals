@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/opto/callnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="c2_globals.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/callnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 483,29 ***</span>
+        }
+        st-&gt;print(&quot;={&quot;);
+        uint nf = spobj-&gt;n_fields();
+        if (nf &gt; 0) {
+          uint first_ind = spobj-&gt;first_index(mcall-&gt;jvms());
+<span class="line-modified">!         Node* fld_node = mcall-&gt;in(first_ind);</span>
+          ciField* cifield;
+          if (iklass != NULL) {
+            st-&gt;print(&quot; [&quot;);
+            cifield = iklass-&gt;nonstatic_field_at(0);
+            cifield-&gt;print_name_on(st);
+<span class="line-modified">!           format_helper(regalloc, st, fld_node, &quot;:&quot;, 0, &amp;scobjs);</span>
+          } else {
+<span class="line-modified">!           format_helper(regalloc, st, fld_node, &quot;[&quot;, 0, &amp;scobjs);</span>
+          }
+          for (uint j = 1; j &lt; nf; j++) {
+<span class="line-removed">-           fld_node = mcall-&gt;in(first_ind+j);</span>
+            if (iklass != NULL) {
+              st-&gt;print(&quot;, [&quot;);
+              cifield = iklass-&gt;nonstatic_field_at(j);
+              cifield-&gt;print_name_on(st);
+<span class="line-modified">!             format_helper(regalloc, st, fld_node, &quot;:&quot;, j, &amp;scobjs);</span>
+            } else {
+<span class="line-modified">!             format_helper(regalloc, st, fld_node, &quot;, [&quot;, j, &amp;scobjs);</span>
+            }
+          }
+        }
+        st-&gt;print(&quot; }&quot;);
+      }
+<span class="line-new-header">--- 483,48 ---</span>
+        }
+        st-&gt;print(&quot;={&quot;);
+        uint nf = spobj-&gt;n_fields();
+        if (nf &gt; 0) {
+          uint first_ind = spobj-&gt;first_index(mcall-&gt;jvms());
+<span class="line-modified">!         Node* fld_node = NULL;</span>
+          ciField* cifield;
+          if (iklass != NULL) {
+            st-&gt;print(&quot; [&quot;);
+            cifield = iklass-&gt;nonstatic_field_at(0);
+            cifield-&gt;print_name_on(st);
+<span class="line-modified">!           if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added">+             st-&gt;print(&quot;:*0]&quot;);</span>
+<span class="line-added">+           } else {</span>
+<span class="line-added">+             fld_node = mcall-&gt;in(first_ind);</span>
+<span class="line-added">+             format_helper(regalloc, st, fld_node, &quot;:&quot;, 0, &amp;scobjs);</span>
+<span class="line-added">+           }</span>
+          } else {
+<span class="line-modified">!           if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added">+             st-&gt;print(&quot;[*0]&quot;);</span>
+<span class="line-added">+           } else {</span>
+<span class="line-added">+             fld_node = mcall-&gt;in(first_ind);</span>
+<span class="line-added">+             format_helper(regalloc, st, fld_node, &quot;[&quot;, 0, &amp;scobjs);</span>
+<span class="line-added">+           }</span>
+          }
+          for (uint j = 1; j &lt; nf; j++) {
+            if (iklass != NULL) {
+              st-&gt;print(&quot;, [&quot;);
+              cifield = iklass-&gt;nonstatic_field_at(j);
+              cifield-&gt;print_name_on(st);
+<span class="line-modified">!             if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added">+               st-&gt;print(&quot;:*%d]&quot;, j);</span>
+<span class="line-added">+             } else {</span>
+<span class="line-added">+               fld_node = mcall-&gt;in(first_ind+j);</span>
+<span class="line-added">+               format_helper(regalloc, st, fld_node, &quot;:&quot;, j, &amp;scobjs);</span>
+<span class="line-added">+             }</span>
+            } else {
+<span class="line-modified">!             if(spobj-&gt;stack_allocated()) {</span>
+<span class="line-added">+               st-&gt;print(&quot;, [*%d]&quot;, j);</span>
+<span class="line-added">+             } else {</span>
+<span class="line-added">+               fld_node = mcall-&gt;in(first_ind+j);</span>
+<span class="line-added">+               format_helper(regalloc, st, fld_node, &quot;, [&quot;, j, &amp;scobjs);</span>
+<span class="line-added">+             }</span>
+            }
+          }
+        }
+        st-&gt;print(&quot; }&quot;);
+      }
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 959,10 ***</span>
+<span class="line-new-header">--- 978,17 ---</span>
+      return true;
+    }
+    return false;
+  }
+  
+<span class="line-added">+ bool CallNode::is_call_to_osr_migration_end() const {</span>
+<span class="line-added">+   if (_name != NULL &amp;&amp; strstr(_name, &quot;OSR_migration_end&quot;) != 0) {</span>
+<span class="line-added">+     return true;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+   return false;</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+  //=============================================================================
+  uint CallJavaNode::size_of() const { return sizeof(*this); }
+  bool CallJavaNode::cmp( const Node &amp;n ) const {
+    CallJavaNode &amp;call = (CallJavaNode&amp;)n;
+    return CallNode::cmp(call) &amp;&amp; _method == call._method &amp;&amp;
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 1300,11 ***</span>
+  #endif
+                                                       uint first_index,
+                                                       uint n_fields) :
+    TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+    _first_index(first_index),
+<span class="line-modified">!   _n_fields(n_fields)</span>
+  #ifdef ASSERT
+    , _alloc(alloc)
+  #endif
+  {
+    init_class_id(Class_SafePointScalarObject);
+<span class="line-new-header">--- 1326,12 ---</span>
+  #endif
+                                                       uint first_index,
+                                                       uint n_fields) :
+    TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+    _first_index(first_index),
+<span class="line-modified">!   _n_fields(n_fields),</span>
+<span class="line-added">+   _is_stack_allocated(false)</span>
+  #ifdef ASSERT
+    , _alloc(alloc)
+  #endif
+  {
+    init_class_id(Class_SafePointScalarObject);
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 1362,10 ***</span>
+<span class="line-new-header">--- 1389,12 ---</span>
+  {
+    init_class_id(Class_Allocate);
+    init_flags(Flag_is_macro);
+    _is_scalar_replaceable = false;
+    _is_non_escaping = false;
+<span class="line-added">+   _is_stack_allocateable = false;</span>
+<span class="line-added">+   _is_referenced_stack_allocation = false;</span>
+    _is_allocation_MemBar_redundant = false;
+    Node *topnode = C-&gt;top();
+  
+    init_req( TypeFunc::Control  , ctrl );
+    init_req( TypeFunc::I_O      , abio );
+</pre>
+<center><a href="c2_globals.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

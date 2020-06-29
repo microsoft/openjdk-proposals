@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.cpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+    <script type="text/javascript" src="../../../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;ci/ciUtilities.hpp&quot;
+ 27 #include &quot;gc/shared/cardTable.hpp&quot;
+ 28 #include &quot;gc/shared/cardTableBarrierSet.hpp&quot;
+ 29 #include &quot;gc/shared/c2/cardTableBarrierSetC2.hpp&quot;
+ 30 #include &quot;opto/arraycopynode.hpp&quot;
+ 31 #include &quot;opto/graphKit.hpp&quot;
+ 32 #include &quot;opto/idealKit.hpp&quot;
+ 33 #include &quot;opto/macro.hpp&quot;
+<a name="1" id="anc1"></a>
+ 34 #include &quot;utilities/macros.hpp&quot;
+ 35 
+ 36 #define __ ideal.
+ 37 
+ 38 Node* CardTableBarrierSetC2::byte_map_base_node(GraphKit* kit) const {
+ 39   // Get base of card map
+ 40   CardTable::CardValue* card_table_base = ci_card_table_address();
+ 41    if (card_table_base != NULL) {
+ 42      return kit-&gt;makecon(TypeRawPtr::make((address)card_table_base));
+ 43    } else {
+ 44      return kit-&gt;null();
+ 45    }
+ 46 }
+ 47 
+ 48 // vanilla post barrier
+ 49 // Insert a write-barrier store.  This is to let generational GC work; we have
+ 50 // to flag all oop-stores before the next GC point.
+ 51 void CardTableBarrierSetC2::post_barrier(GraphKit* kit,
+ 52                                          Node* ctl,
+ 53                                          Node* oop_store,
+ 54                                          Node* obj,
+ 55                                          Node* adr,
+ 56                                          uint  adr_idx,
+ 57                                          Node* val,
+ 58                                          BasicType bt,
+ 59                                          bool use_precise) const {
+<a name="2" id="anc2"></a><span class="line-removed"> 60   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(BarrierSet::barrier_set());</span>
+<span class="line-removed"> 61   CardTable* ct = ctbs-&gt;card_table();</span>
+ 62   // No store check needed if we&#39;re storing a NULL or an old object
+ 63   // (latter case is probably a string constant). The concurrent
+ 64   // mark sweep garbage collector, however, needs to have all nonNull
+ 65   // oop updates flagged via card-marks.
+ 66   if (val != NULL &amp;&amp; val-&gt;is_Con()) {
+ 67     // must be either an oop or NULL
+ 68     const Type* t = val-&gt;bottom_type();
+ 69     if (t == TypePtr::NULL_PTR || t == Type::TOP)
+ 70       // stores of null never (?) need barriers
+ 71       return;
+ 72   }
+ 73 
+ 74   if (use_ReduceInitialCardMarks()
+ 75       &amp;&amp; obj == kit-&gt;just_allocated_object(kit-&gt;control())) {
+ 76     // We can skip marks on a freshly-allocated object in Eden.
+ 77     // Keep this code in sync with new_deferred_store_barrier() in runtime.cpp.
+ 78     // That routine informs GC to take appropriate compensating steps,
+ 79     // upon a slow-path allocation, so as to make this card-mark
+ 80     // elision safe.
+ 81     return;
+ 82   }
+ 83 
+ 84   if (!use_precise) {
+ 85     // All card marks for a (non-array) instance are in one place:
+ 86     adr = obj;
+ 87   }
+ 88   // (Else it&#39;s an array (or unknown), and we want more precise card marks.)
+ 89   assert(adr != NULL, &quot;&quot;);
+ 90 
+ 91   IdealKit ideal(kit, true);
+ 92 
+<a name="3" id="anc3"></a>
+
+
+
+
+
+ 93   // Convert the pointer to an int prior to doing math on it
+ 94   Node* cast = __ CastPX(__ ctrl(), adr);
+ 95 
+ 96   // Divide by card size
+ 97   Node* card_offset = __ URShiftX( cast, __ ConI(CardTable::card_shift) );
+ 98 
+ 99   // Combine card table base and card offset
+100   Node* card_adr = __ AddP(__ top(), byte_map_base_node(kit), card_offset );
+101 
+102   // Get the alias_index for raw card-mark memory
+103   int adr_type = Compile::AliasIdxRaw;
+104   Node*   zero = __ ConI(0); // Dirty card value
+105 
+<a name="4" id="anc4"></a><span class="line-modified">106   if (UseCondCardMark) {</span>
+<span class="line-modified">107     if (ct-&gt;scanned_concurrently()) {</span>
+<span class="line-modified">108       kit-&gt;insert_mem_bar(Op_MemBarVolatile, oop_store);</span>
+<span class="line-modified">109       __ sync_kit(kit);</span>
+<span class="line-modified">110     }</span>
+<span class="line-modified">111     // The classic GC reference write barrier is typically implemented</span>
+<span class="line-modified">112     // as a store into the global card mark table.  Unfortunately</span>
+<span class="line-modified">113     // unconditional stores can result in false sharing and excessive</span>
+<span class="line-modified">114     // coherence traffic as well as false transactional aborts.</span>
+<span class="line-modified">115     // UseCondCardMark enables MP &quot;polite&quot; conditional card mark</span>
+<span class="line-modified">116     // stores.  In theory we could relax the load from ctrl() to</span>
+<span class="line-modified">117     // no_ctrl, but that doesn&#39;t buy much latitude.</span>
+<span class="line-modified">118     Node* card_val = __ load( __ ctrl(), card_adr, TypeInt::BYTE, T_BYTE, adr_type);</span>
+<span class="line-modified">119     __ if_then(card_val, BoolTest::ne, zero);</span>
+<span class="line-modified">120   }</span>
+<span class="line-modified">121 </span>
+<span class="line-modified">122   // Smash zero into card</span>
+<span class="line-modified">123   if(!ct-&gt;scanned_concurrently()) {</span>
+<span class="line-modified">124     __ store(__ ctrl(), card_adr, zero, T_BYTE, adr_type, MemNode::unordered);</span>
+<span class="line-modified">125   } else {</span>
+<span class="line-modified">126     // Specialized path for CM store barrier</span>
+<span class="line-modified">127     __ storeCM(__ ctrl(), card_adr, zero, oop_store, adr_idx, T_BYTE, adr_type);</span>
+<span class="line-modified">128   }</span>
+<span class="line-modified">129 </span>
+<span class="line-modified">130   if (UseCondCardMark) {</span>
+
+
+
+
+
+
+
+
+
+
+
+
+
+131     __ end_if();
+132   }
+133 
+134   // Final sync IdealKit and GraphKit.
+135   kit-&gt;final_sync(ideal);
+136 }
+137 
+138 void CardTableBarrierSetC2::clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const {
+139   BarrierSetC2::clone(kit, src, dst, size, is_array);
+140   const TypePtr* raw_adr_type = TypeRawPtr::BOTTOM;
+141 
+142   // If necessary, emit some card marks afterwards.  (Non-arrays only.)
+143   bool card_mark = !is_array &amp;&amp; !use_ReduceInitialCardMarks();
+144   if (card_mark) {
+145     assert(!is_array, &quot;&quot;);
+146     // Put in store barrier for any and all oops we are sticking
+147     // into this object.  (We could avoid this if we could prove
+148     // that the object type contains no oop fields at all.)
+149     Node* no_particular_value = NULL;
+150     Node* no_particular_field = NULL;
+151     int raw_adr_idx = Compile::AliasIdxRaw;
+152     post_barrier(kit, kit-&gt;control(),
+153                  kit-&gt;memory(raw_adr_type),
+154                  dst,
+155                  no_particular_field,
+156                  raw_adr_idx,
+157                  no_particular_value,
+158                  T_OBJECT,
+159                  false);
+160   }
+161 }
+162 
+163 bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() const {
+164   return ReduceInitialCardMarks;
+165 }
+166 
+167 bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {
+168   return ModRefBarrierSetC2::is_gc_barrier_node(node) || node-&gt;Opcode() == Op_StoreCM;
+169 }
+170 
+<a name="5" id="anc5"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+171 void CardTableBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+172   assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);
+<a name="6" id="anc6"></a><span class="line-modified">173   Node *shift = node-&gt;unique_out();</span>
+
+
+
+
+
+
+
+
+
+174   Node *addp = shift-&gt;unique_out();
+175   for (DUIterator_Last jmin, j = addp-&gt;last_outs(jmin); j &gt;= jmin; --j) {
+176     Node *mem = addp-&gt;last_out(j);
+177     if (UseCondCardMark &amp;&amp; mem-&gt;is_Load()) {
+178       assert(mem-&gt;Opcode() == Op_LoadB, &quot;unexpected code shape&quot;);
+179       // The load is checking if the card has been written so
+180       // replace it with zero to fold the test.
+181       macro-&gt;replace_node(mem, macro-&gt;intcon(0));
+182       continue;
+183     }
+184     assert(mem-&gt;is_Store(), &quot;store required&quot;);
+185     macro-&gt;replace_node(mem, mem-&gt;in(MemNode::Memory));
+186   }
+<a name="7" id="anc7"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+187 }
+188 
+189 bool CardTableBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const {
+190   bool is_oop = is_reference_type(type);
+191   return is_oop &amp;&amp; (!tightly_coupled_alloc || !use_ReduceInitialCardMarks());
+192 }
+<a name="8" id="anc8"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<a name="9" id="anc9"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="9" type="hidden" />
+</body>
+</html>

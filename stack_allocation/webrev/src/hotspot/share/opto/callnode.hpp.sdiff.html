@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/callnode.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="callnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compile.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/callnode.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 477   virtual const RegMask &amp;out_RegMask() const;
+ 478   virtual uint           match_edge(uint idx) const;
+ 479 
+ 480   static  bool           needs_polling_address_input();
+ 481 
+ 482 #ifndef PRODUCT
+ 483   virtual void           dump_spec(outputStream *st) const;
+ 484   virtual void           related(GrowableArray&lt;Node*&gt; *in_rel, GrowableArray&lt;Node*&gt; *out_rel, bool compact) const;
+ 485 #endif
+ 486 };
+ 487 
+ 488 //------------------------------SafePointScalarObjectNode----------------------
+ 489 // A SafePointScalarObjectNode represents the state of a scalarized object
+ 490 // at a safepoint.
+ 491 
+ 492 class SafePointScalarObjectNode: public TypeNode {
+ 493   uint _first_index; // First input edge relative index of a SafePoint node where
+ 494                      // states of the scalarized object fields are collected.
+ 495                      // It is relative to the last (youngest) jvms-&gt;_scloff.
+ 496   uint _n_fields;    // Number of non-static fields of the scalarized object.
+
+ 497   DEBUG_ONLY(AllocateNode* _alloc;)
+ 498 
+ 499   virtual uint hash() const ; // { return NO_HASH; }
+ 500   virtual bool cmp( const Node &amp;n ) const;
+ 501 
+ 502   uint first_index() const { return _first_index; }
+ 503 
+ 504 public:
+ 505   SafePointScalarObjectNode(const TypeOopPtr* tp,
+ 506 #ifdef ASSERT
+ 507                             AllocateNode* alloc,
+ 508 #endif
+ 509                             uint first_index, uint n_fields);
+ 510   virtual int Opcode() const;
+ 511   virtual uint           ideal_reg() const;
+ 512   virtual const RegMask &amp;in_RegMask(uint) const;
+ 513   virtual const RegMask &amp;out_RegMask() const;
+ 514   virtual uint           match_edge(uint idx) const;
+ 515 
+ 516   uint first_index(JVMState* jvms) const {
+ 517     assert(jvms != NULL, &quot;missed JVMS&quot;);
+ 518     return jvms-&gt;scloff() + _first_index;
+ 519   }
+ 520   uint n_fields()    const { return _n_fields; }
+ 521 
+
+
+
+ 522 #ifdef ASSERT
+ 523   AllocateNode* alloc() const { return _alloc; }
+ 524 #endif
+ 525 
+ 526   virtual uint size_of() const { return sizeof(*this); }
+ 527 
+ 528   // Assumes that &quot;this&quot; is an argument to a safepoint node &quot;s&quot;, and that
+ 529   // &quot;new_call&quot; is being created to correspond to &quot;s&quot;.  But the difference
+ 530   // between the start index of the jvmstates of &quot;new_call&quot; and &quot;s&quot; is
+ 531   // &quot;jvms_adj&quot;.  Produce and return a SafePointScalarObjectNode that
+ 532   // corresponds appropriately to &quot;this&quot; in &quot;new_call&quot;.  Assumes that
+ 533   // &quot;sosn_map&quot; is a map, specific to the translation of &quot;s&quot; to &quot;new_call&quot;,
+ 534   // mapping old SafePointScalarObjectNodes to new, to avoid multiple copies.
+ 535   SafePointScalarObjectNode* clone(Dict* sosn_map) const;
+ 536 
+ 537 #ifndef PRODUCT
+ 538   virtual void              dump_spec(outputStream *st) const;
+ 539 #endif
+ 540 };
+ 541 
+</pre>
+<hr />
+<pre>
+ 622   bool                has_non_debug_use(Node *n);
+ 623   // Returns the unique CheckCastPP of a call
+ 624   // or result projection is there are several CheckCastPP
+ 625   // or returns NULL if there is no one.
+ 626   Node *result_cast();
+ 627   // Does this node returns pointer?
+ 628   bool returns_pointer() const {
+ 629     const TypeTuple *r = tf()-&gt;range();
+ 630     return (r-&gt;cnt() &gt; TypeFunc::Parms &amp;&amp;
+ 631             r-&gt;field_at(TypeFunc::Parms)-&gt;isa_ptr());
+ 632   }
+ 633 
+ 634   // Collect all the interesting edges from a call for use in
+ 635   // replacing the call by something else.  Used by macro expansion
+ 636   // and the late inlining support.
+ 637   void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+ 638 
+ 639   virtual uint match_edge(uint idx) const;
+ 640 
+ 641   bool is_call_to_arraycopystub() const;
+
+ 642 
+ 643 #ifndef PRODUCT
+ 644   virtual void        dump_req(outputStream *st = tty) const;
+ 645   virtual void        dump_spec(outputStream *st) const;
+ 646 #endif
+ 647 };
+ 648 
+ 649 
+ 650 //------------------------------CallJavaNode-----------------------------------
+ 651 // Make a static or dynamic subroutine call node using Java calling
+ 652 // convention.  (The &quot;Java&quot; calling convention is the compiler&#39;s calling
+ 653 // convention, as opposed to the interpreter&#39;s or that of native C.)
+ 654 class CallJavaNode : public CallNode {
+ 655   friend class VMStructs;
+ 656 protected:
+ 657   virtual bool cmp( const Node &amp;n ) const;
+ 658   virtual uint size_of() const; // Size is bigger
+ 659 
+ 660   bool    _optimized_virtual;
+ 661   bool    _method_handle_invoke;
+</pre>
+<hr />
+<pre>
+ 824 //  AllocateNode and AllocateArrayNode are subclasses of CallNode because they will
+ 825 //  get expanded into a code sequence containing a call.  Unlike other CallNodes,
+ 826 //  they have 2 memory projections and 2 i_o projections (which are distinguished by
+ 827 //  the _is_io_use flag in the projection.)  This is needed when expanding the node in
+ 828 //  order to differentiate the uses of the projection on the normal control path from
+ 829 //  those on the exception return path.
+ 830 //
+ 831 class AllocateNode : public CallNode {
+ 832 public:
+ 833   enum {
+ 834     // Output:
+ 835     RawAddress  = TypeFunc::Parms,    // the newly-allocated raw address
+ 836     // Inputs:
+ 837     AllocSize   = TypeFunc::Parms,    // size (in bytes) of the new object
+ 838     KlassNode,                        // type (maybe dynamic) of the obj.
+ 839     InitialTest,                      // slow-path test (may be constant)
+ 840     ALength,                          // array length (or TOP if none)
+ 841     ParmLimit
+ 842   };
+ 843 
+
+
+
+ 844   static const TypeFunc* alloc_type(const Type* t) {
+ 845     const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+ 846     fields[AllocSize]   = TypeInt::POS;
+ 847     fields[KlassNode]   = TypeInstPtr::NOTNULL;
+ 848     fields[InitialTest] = TypeInt::BOOL;
+ 849     fields[ALength]     = t;  // length (can be a bad length)
+ 850 
+ 851     const TypeTuple *domain = TypeTuple::make(ParmLimit, fields);
+ 852 
+ 853     // create result type (range)
+ 854     fields = TypeTuple::fields(1);
+ 855     fields[TypeFunc::Parms+0] = TypeRawPtr::NOTNULL; // Returned oop
+ 856 
+ 857     const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+1, fields);
+ 858 
+ 859     return TypeFunc::make(domain, range);
+ 860   }
+ 861 
+ 862   // Result of Escape Analysis
+ 863   bool _is_scalar_replaceable;
+ 864   bool _is_non_escaping;
+
+
+ 865   // True when MemBar for new is redundant with MemBar at initialzer exit
+ 866   bool _is_allocation_MemBar_redundant;
+ 867 
+ 868   virtual uint size_of() const; // Size is bigger
+ 869   AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+ 870                Node *size, Node *klass_node, Node *initial_test);
+ 871   // Expansion modifies the JVMState, so we need to clone it
+ 872   virtual void  clone_jvms(Compile* C) {
+ 873     if (jvms() != NULL) {
+ 874       set_jvms(jvms()-&gt;clone_deep(C));
+ 875       jvms()-&gt;set_map_deep(this);
+ 876     }
+ 877   }
+ 878   virtual int Opcode() const;
+ 879   virtual uint ideal_reg() const { return Op_RegP; }
+ 880   virtual bool        guaranteed_safepoint()  { return false; }
+ 881 
+ 882   // allocations do not modify their arguments
+ 883   virtual bool        may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) { return false;}
+ 884 
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 477   virtual const RegMask &amp;out_RegMask() const;
+ 478   virtual uint           match_edge(uint idx) const;
+ 479 
+ 480   static  bool           needs_polling_address_input();
+ 481 
+ 482 #ifndef PRODUCT
+ 483   virtual void           dump_spec(outputStream *st) const;
+ 484   virtual void           related(GrowableArray&lt;Node*&gt; *in_rel, GrowableArray&lt;Node*&gt; *out_rel, bool compact) const;
+ 485 #endif
+ 486 };
+ 487 
+ 488 //------------------------------SafePointScalarObjectNode----------------------
+ 489 // A SafePointScalarObjectNode represents the state of a scalarized object
+ 490 // at a safepoint.
+ 491 
+ 492 class SafePointScalarObjectNode: public TypeNode {
+ 493   uint _first_index; // First input edge relative index of a SafePoint node where
+ 494                      // states of the scalarized object fields are collected.
+ 495                      // It is relative to the last (youngest) jvms-&gt;_scloff.
+ 496   uint _n_fields;    // Number of non-static fields of the scalarized object.
+<span class="line-added"> 497   bool _is_stack_allocated;</span>
+ 498   DEBUG_ONLY(AllocateNode* _alloc;)
+ 499 
+ 500   virtual uint hash() const ; // { return NO_HASH; }
+ 501   virtual bool cmp( const Node &amp;n ) const;
+ 502 
+ 503   uint first_index() const { return _first_index; }
+ 504 
+ 505 public:
+ 506   SafePointScalarObjectNode(const TypeOopPtr* tp,
+ 507 #ifdef ASSERT
+ 508                             AllocateNode* alloc,
+ 509 #endif
+ 510                             uint first_index, uint n_fields);
+ 511   virtual int Opcode() const;
+ 512   virtual uint           ideal_reg() const;
+ 513   virtual const RegMask &amp;in_RegMask(uint) const;
+ 514   virtual const RegMask &amp;out_RegMask() const;
+ 515   virtual uint           match_edge(uint idx) const;
+ 516 
+ 517   uint first_index(JVMState* jvms) const {
+ 518     assert(jvms != NULL, &quot;missed JVMS&quot;);
+ 519     return jvms-&gt;scloff() + _first_index;
+ 520   }
+ 521   uint n_fields()    const { return _n_fields; }
+ 522 
+<span class="line-added"> 523   void set_stack_allocated(bool v) { _is_stack_allocated = true; }</span>
+<span class="line-added"> 524   bool stack_allocated() { return _is_stack_allocated; }</span>
+<span class="line-added"> 525 </span>
+ 526 #ifdef ASSERT
+ 527   AllocateNode* alloc() const { return _alloc; }
+ 528 #endif
+ 529 
+ 530   virtual uint size_of() const { return sizeof(*this); }
+ 531 
+ 532   // Assumes that &quot;this&quot; is an argument to a safepoint node &quot;s&quot;, and that
+ 533   // &quot;new_call&quot; is being created to correspond to &quot;s&quot;.  But the difference
+ 534   // between the start index of the jvmstates of &quot;new_call&quot; and &quot;s&quot; is
+ 535   // &quot;jvms_adj&quot;.  Produce and return a SafePointScalarObjectNode that
+ 536   // corresponds appropriately to &quot;this&quot; in &quot;new_call&quot;.  Assumes that
+ 537   // &quot;sosn_map&quot; is a map, specific to the translation of &quot;s&quot; to &quot;new_call&quot;,
+ 538   // mapping old SafePointScalarObjectNodes to new, to avoid multiple copies.
+ 539   SafePointScalarObjectNode* clone(Dict* sosn_map) const;
+ 540 
+ 541 #ifndef PRODUCT
+ 542   virtual void              dump_spec(outputStream *st) const;
+ 543 #endif
+ 544 };
+ 545 
+</pre>
+<hr />
+<pre>
+ 626   bool                has_non_debug_use(Node *n);
+ 627   // Returns the unique CheckCastPP of a call
+ 628   // or result projection is there are several CheckCastPP
+ 629   // or returns NULL if there is no one.
+ 630   Node *result_cast();
+ 631   // Does this node returns pointer?
+ 632   bool returns_pointer() const {
+ 633     const TypeTuple *r = tf()-&gt;range();
+ 634     return (r-&gt;cnt() &gt; TypeFunc::Parms &amp;&amp;
+ 635             r-&gt;field_at(TypeFunc::Parms)-&gt;isa_ptr());
+ 636   }
+ 637 
+ 638   // Collect all the interesting edges from a call for use in
+ 639   // replacing the call by something else.  Used by macro expansion
+ 640   // and the late inlining support.
+ 641   void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+ 642 
+ 643   virtual uint match_edge(uint idx) const;
+ 644 
+ 645   bool is_call_to_arraycopystub() const;
+<span class="line-added"> 646   bool is_call_to_osr_migration_end() const;</span>
+ 647 
+ 648 #ifndef PRODUCT
+ 649   virtual void        dump_req(outputStream *st = tty) const;
+ 650   virtual void        dump_spec(outputStream *st) const;
+ 651 #endif
+ 652 };
+ 653 
+ 654 
+ 655 //------------------------------CallJavaNode-----------------------------------
+ 656 // Make a static or dynamic subroutine call node using Java calling
+ 657 // convention.  (The &quot;Java&quot; calling convention is the compiler&#39;s calling
+ 658 // convention, as opposed to the interpreter&#39;s or that of native C.)
+ 659 class CallJavaNode : public CallNode {
+ 660   friend class VMStructs;
+ 661 protected:
+ 662   virtual bool cmp( const Node &amp;n ) const;
+ 663   virtual uint size_of() const; // Size is bigger
+ 664 
+ 665   bool    _optimized_virtual;
+ 666   bool    _method_handle_invoke;
+</pre>
+<hr />
+<pre>
+ 829 //  AllocateNode and AllocateArrayNode are subclasses of CallNode because they will
+ 830 //  get expanded into a code sequence containing a call.  Unlike other CallNodes,
+ 831 //  they have 2 memory projections and 2 i_o projections (which are distinguished by
+ 832 //  the _is_io_use flag in the projection.)  This is needed when expanding the node in
+ 833 //  order to differentiate the uses of the projection on the normal control path from
+ 834 //  those on the exception return path.
+ 835 //
+ 836 class AllocateNode : public CallNode {
+ 837 public:
+ 838   enum {
+ 839     // Output:
+ 840     RawAddress  = TypeFunc::Parms,    // the newly-allocated raw address
+ 841     // Inputs:
+ 842     AllocSize   = TypeFunc::Parms,    // size (in bytes) of the new object
+ 843     KlassNode,                        // type (maybe dynamic) of the obj.
+ 844     InitialTest,                      // slow-path test (may be constant)
+ 845     ALength,                          // array length (or TOP if none)
+ 846     ParmLimit
+ 847   };
+ 848 
+<span class="line-added"> 849   // Maximum object size considered for stack allocation</span>
+<span class="line-added"> 850   static const int StackAllocSizeLimit = 0x100;</span>
+<span class="line-added"> 851 </span>
+ 852   static const TypeFunc* alloc_type(const Type* t) {
+ 853     const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+ 854     fields[AllocSize]   = TypeInt::POS;
+ 855     fields[KlassNode]   = TypeInstPtr::NOTNULL;
+ 856     fields[InitialTest] = TypeInt::BOOL;
+ 857     fields[ALength]     = t;  // length (can be a bad length)
+ 858 
+ 859     const TypeTuple *domain = TypeTuple::make(ParmLimit, fields);
+ 860 
+ 861     // create result type (range)
+ 862     fields = TypeTuple::fields(1);
+ 863     fields[TypeFunc::Parms+0] = TypeRawPtr::NOTNULL; // Returned oop
+ 864 
+ 865     const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+1, fields);
+ 866 
+ 867     return TypeFunc::make(domain, range);
+ 868   }
+ 869 
+ 870   // Result of Escape Analysis
+ 871   bool _is_scalar_replaceable;
+ 872   bool _is_non_escaping;
+<span class="line-added"> 873   bool _is_stack_allocateable;</span>
+<span class="line-added"> 874   bool _is_referenced_stack_allocation;</span>
+ 875   // True when MemBar for new is redundant with MemBar at initialzer exit
+ 876   bool _is_allocation_MemBar_redundant;
+ 877 
+ 878   virtual uint size_of() const; // Size is bigger
+ 879   AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,
+ 880                Node *size, Node *klass_node, Node *initial_test);
+ 881   // Expansion modifies the JVMState, so we need to clone it
+ 882   virtual void  clone_jvms(Compile* C) {
+ 883     if (jvms() != NULL) {
+ 884       set_jvms(jvms()-&gt;clone_deep(C));
+ 885       jvms()-&gt;set_map_deep(this);
+ 886     }
+ 887   }
+ 888   virtual int Opcode() const;
+ 889   virtual uint ideal_reg() const { return Op_RegP; }
+ 890   virtual bool        guaranteed_safepoint()  { return false; }
+ 891 
+ 892   // allocations do not modify their arguments
+ 893   virtual bool        may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) { return false;}
+ 894 
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="callnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="compile.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

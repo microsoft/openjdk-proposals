@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/memnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="macro.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="output.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/memnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -186,11 +186,14 @@</span>
+          result = proj_in-&gt;in(TypeFunc::Memory);
+        } else {
+          assert(false, &quot;unexpected projection&quot;);
+        }
+      } else if (result-&gt;is_ClearArray()) {
+<span class="udiff-line-modified-removed">-       if (!is_instance || !ClearArrayNode::step_through(&amp;result, instance_id, phase)) {</span>
+<span class="udiff-line-modified-added">+       intptr_t offset;</span>
+<span class="udiff-line-added">+       AllocateNode* alloc = AllocateNode::Ideal_allocation(result-&gt;in(3), phase, offset);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+       if (!is_instance || (alloc == NULL) || !ClearArrayNode::step_through(&amp;result, instance_id, phase)) {</span>
+          // Can not bypass initialization of the instance
+          // we are looking for.
+          break;
+        }
+        // Otherwise skip it (the call updated &#39;result&#39; value).
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -706,11 +709,14 @@</span>
+            break;
+          }
+          mem = mem-&gt;in(0)-&gt;in(TypeFunc::Memory);
+          continue;           // (a) advance through independent MemBar memory
+        } else if (mem-&gt;is_ClearArray()) {
+<span class="udiff-line-modified-removed">-         if (ClearArrayNode::step_through(&amp;mem, (uint)addr_t-&gt;instance_id(), phase)) {</span>
+<span class="udiff-line-modified-added">+         intptr_t offset;</span>
+<span class="udiff-line-added">+         AllocateNode* alloc = AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+         if ((alloc != NULL) &amp;&amp; ClearArrayNode::step_through(&amp;mem, (uint)addr_t-&gt;instance_id(), phase)) {</span>
+            // (the call updated &#39;mem&#39; value)
+            continue;         // (a) advance through independent allocation memory
+          } else {
+            // Can not bypass initialization of the instance
+            // we are looking for.
+</pre>
+<center><a href="macro.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="output.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

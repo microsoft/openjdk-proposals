@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/block.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="../memory/iterator.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="buildOopMap.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/block.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -175,11 +175,11 @@</span>
+    }
+  
+    // Ideal nodes are allowable in empty blocks: skip them  Only MachNodes
+    // turn directly into code, because only MachNodes have non-trivial
+    // emit() functions.
+<span class="udiff-line-modified-removed">-   while ((end_idx &gt; 0) &amp;&amp; !get_node(end_idx)-&gt;is_Mach()) {</span>
+<span class="udiff-line-modified-added">+   while ((end_idx &gt; 0) &amp;&amp; !(get_node(end_idx)-&gt;is_Mach() || get_node(end_idx)-&gt;is_BoxLock())) {</span>
+      end_idx--;
+    }
+  
+    // No room for any interesting instructions?
+    if (end_idx == 0) {
+</pre>
+<center><a href="../memory/iterator.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="buildOopMap.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

@@ -1,0 +1,17 @@
+diff a/src/hotspot/share/opto/buildOopMap.cpp b/src/hotspot/share/opto/buildOopMap.cpp
+--- a/src/hotspot/share/opto/buildOopMap.cpp
++++ b/src/hotspot/share/opto/buildOopMap.cpp
+@@ -239,11 +239,12 @@
+     Node *def = _defs[reg];     // Get reaching def
+     assert( def, "since live better have reaching def" );
+ 
+     // Classify the reaching def as oop, derived, callee-save, dead, or other
+     const Type *t = def->bottom_type();
+-    if( t->isa_oop_ptr() ) {    // Oop or derived?
++    if( t->isa_oop_ptr() || // Oop or derived?
++       (C->do_stack_allocation() && t->isa_rawptr() && def->is_BoxLock())) {  // consider stack oops too
+       assert( !OptoReg::is_valid(_callees[reg]), "oop can't be callee save" );
+ #ifdef _LP64
+       // 64-bit pointers record oop-ishness on 2 aligned adjacent registers.
+       // Make sure both are record from the same reaching def, but do not
+       // put both into the oopmap.

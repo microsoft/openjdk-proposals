@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/compiler/oopMap.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compilerDirectives.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/oopMap.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -28,17 +28,18 @@</span>
+  #include &quot;code/nmethod.hpp&quot;
+  #include &quot;code/scopeDesc.hpp&quot;
+  #include &quot;compiler/oopMap.hpp&quot;
+  #include &quot;gc/shared/collectedHeap.hpp&quot;
+  #include &quot;memory/allocation.inline.hpp&quot;
+<span class="udiff-line-modified-removed">- #include &quot;memory/iterator.hpp&quot;</span>
+<span class="udiff-line-modified-added">+ #include &quot;memory/iterator.inline.hpp&quot;</span>
+  #include &quot;memory/resourceArea.hpp&quot;
+  #include &quot;memory/universe.hpp&quot;
+  #include &quot;oops/compressedOops.hpp&quot;
+  #include &quot;runtime/frame.inline.hpp&quot;
+  #include &quot;runtime/handles.inline.hpp&quot;
+  #include &quot;runtime/signature.hpp&quot;
+<span class="udiff-line-added">+ #include &quot;runtime/vframe_hp.hpp&quot;</span>
+  #include &quot;utilities/align.hpp&quot;
+  #include &quot;utilities/lockFreeStack.hpp&quot;
+  #ifdef COMPILER1
+  #include &quot;c1/c1_Defs.hpp&quot;
+  #endif
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -269,16 +270,28 @@</span>
+        // equal to CompressedOops::base() when a narrow oop
+        // implicit null check is used in compiled code.
+        // The narrow_oop_base could be NULL or be the address
+        // of the page below heap depending on compressed oops mode.
+        if (base_loc != NULL &amp;&amp; *base_loc != NULL &amp;&amp; !CompressedOops::is_base(*base_loc)) {
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+         if (UseStackAllocationRuntime) {</span>
+<span class="udiff-line-added">+           intptr_t *stack_base = fr-&gt;unextended_sp();</span>
+<span class="udiff-line-added">+           intptr_t *stack_top = stack_base + cb-&gt;frame_size();</span>
+<span class="udiff-line-added">+           intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(*base_loc);</span>
+<span class="udiff-line-added">+           if ((stack_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; stack_top)) {</span>
+<span class="udiff-line-added">+             // If the base is a stack oop just continue because stack oops will not move</span>
+<span class="udiff-line-added">+             continue;</span>
+<span class="udiff-line-added">+           }</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+ </span>
+          derived_oop_fn(base_loc, derived_loc);
+        }
+      }
+    }
+  
+    {
+<span class="udiff-line-added">+     GrowableArray&lt;oop&gt; stack_oops;</span>
+      // We want coop and oop oop_types
+      for (OopMapStream oms(map); !oms.is_done(); oms.next()) {
+        OopMapValue omv = oms.current();
+        oop* loc = fr-&gt;oopmapreg_to_location(omv.reg(),reg_map);
+        // It should be an error if no location can be found for a
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -294,10 +307,47 @@</span>
+            // implicit null check is used in compiled code.
+            // The narrow_oop_base could be NULL or be the address
+            // of the page below heap depending on compressed oops mode.
+            continue;
+          }
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+         // TODO can we check if a CodeBlob includes stack allocated objects?</span>
+<span class="udiff-line-added">+         // If macro.cpp tags the compilation as including stack allocated objects</span>
+<span class="udiff-line-added">+         // then it should be possible to set something on codeblob.</span>
+<span class="udiff-line-added">+         if (UseStackAllocationRuntime) {</span>
+<span class="udiff-line-added">+           intptr_t *base = fr-&gt;unextended_sp();</span>
+<span class="udiff-line-added">+           intptr_t *top = base + cb-&gt;frame_size();</span>
+<span class="udiff-line-added">+           intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);</span>
+<span class="udiff-line-added">+           // If a stack slot points to a stack allocated object handle it</span>
+<span class="udiff-line-added">+           if ((base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; top)) {</span>
+<span class="udiff-line-added">+             // If we are verifying the stack, do extra checking that this</span>
+<span class="udiff-line-added">+             // stack location is indeed one of the stack allocated objects we</span>
+<span class="udiff-line-added">+             // have described in the oop maps.</span>
+<span class="udiff-line-added">+             if (VerifyStack) {</span>
+<span class="udiff-line-added">+               Thread* current_thread = Thread::current();</span>
+<span class="udiff-line-added">+               ResourceMark rm(current_thread);</span>
+<span class="udiff-line-added">+               HandleMark hm(current_thread);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+               vframe*  vf = vframe::new_vframe(fr, reg_map, reg_map-&gt;thread());</span>
+<span class="udiff-line-added">+               if (vf-&gt;is_compiled_frame()) {</span>
+<span class="udiff-line-added">+                 compiledVFrame* cvf = compiledVFrame::cast(vf);</span>
+<span class="udiff-line-added">+                 GrowableArray&lt;ScopeValue*&gt;* objects = cvf-&gt;scope()-&gt;objects();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+                 // Match the stack location offset to any described</span>
+<span class="udiff-line-added">+                 // stack allocated objects.</span>
+<span class="udiff-line-added">+                 // In case we didn&#39;t find this location in our described objects</span>
+<span class="udiff-line-added">+                 // we just continue, it&#39;s not really a stack oop.</span>
+<span class="udiff-line-added">+                 if (cvf-&gt;match_object_to_stack_oop(oop_ptr, base, objects) == NULL) {</span>
+<span class="udiff-line-added">+                   continue;</span>
+<span class="udiff-line-added">+                 }</span>
+<span class="udiff-line-added">+               }</span>
+<span class="udiff-line-added">+             }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+             OopMapSet::stack_oop_do(loc, oop_fn, &amp;stack_oops, base, top);</span>
+<span class="udiff-line-added">+             continue;</span>
+<span class="udiff-line-added">+           }</span>
+<span class="udiff-line-added">+         }</span>
+  #ifdef ASSERT
+          if ((((uintptr_t)loc &amp; (sizeof(*loc)-1)) != 0) ||
+              !Universe::heap()-&gt;is_in_or_null(*loc)) {
+            tty-&gt;print_cr(&quot;# Found non oop pointer.  Dumping state at failure&quot;);
+            // try to dump out some helpful debugging information
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -326,10 +376,59 @@</span>
+        }
+      }
+    }
+  }
+  
+<span class="udiff-line-added">+ class OopClosureWalker: public BasicOopIterateClosure {</span>
+<span class="udiff-line-added">+ protected:</span>
+<span class="udiff-line-added">+   OopClosure *_closure;</span>
+<span class="udiff-line-added">+   GrowableArray&lt;oop&gt; *_stack_oops;</span>
+<span class="udiff-line-added">+   intptr_t *_base;</span>
+<span class="udiff-line-added">+   intptr_t *_top;</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ public:</span>
+<span class="udiff-line-added">+   OopClosureWalker(OopClosure *closure, GrowableArray&lt;oop&gt; *stack_oops, intptr_t *base, intptr_t *top) :</span>
+<span class="udiff-line-added">+     BasicOopIterateClosure(NULL),</span>
+<span class="udiff-line-added">+     _closure(closure),</span>
+<span class="udiff-line-added">+     _stack_oops(stack_oops),</span>
+<span class="udiff-line-added">+     _base(base),</span>
+<span class="udiff-line-added">+     _top(top) {}</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   void do_oop(oop *o) {</span>
+<span class="udiff-line-added">+     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(*o);</span>
+<span class="udiff-line-added">+     if ((_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; _top)) {</span>
+<span class="udiff-line-added">+       OopMapSet::stack_oop_do(o, _closure, _stack_oops, _base, _top);</span>
+<span class="udiff-line-added">+     } else {</span>
+<span class="udiff-line-added">+       _closure-&gt;do_oop(o);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   void do_oop(narrowOop *o) {</span>
+<span class="udiff-line-added">+     oop obj = RawAccess&lt;&gt;::oop_load(o);</span>
+<span class="udiff-line-added">+     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(obj);</span>
+<span class="udiff-line-added">+     if ((_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; _top)) {</span>
+<span class="udiff-line-added">+       // no references to stack allocated oops in UseCompressedOops</span>
+<span class="udiff-line-added">+       assert(false, &quot;unreachable&quot;);</span>
+<span class="udiff-line-added">+     } else {</span>
+<span class="udiff-line-added">+       _closure-&gt;do_oop(o);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   debug_only(virtual bool should_verify_oops() { return false; })</span>
+<span class="udiff-line-added">+ };</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void OopMapSet::stack_oop_do(oop *p, OopClosure* oop_fn, GrowableArray&lt;oop&gt; *stack_oops, intptr_t *stack_base, intptr_t *stack_top) {</span>
+<span class="udiff-line-added">+   oop o = RawAccess&lt;IS_NOT_NULL&gt;::oop_load(p);</span>
+<span class="udiff-line-added">+   Klass *t = o-&gt;klass();</span>
+<span class="udiff-line-added">+   assert(t-&gt;is_klass(), &quot;Has to be a class&quot;);</span>
+<span class="udiff-line-added">+   if (!t-&gt;is_typeArray_klass()) {</span>
+<span class="udiff-line-added">+     if (stack_oops-&gt;append_if_missing(o)) {</span>
+<span class="udiff-line-added">+       OopClosureWalker walk_elements(oop_fn, stack_oops, stack_base, stack_top);</span>
+<span class="udiff-line-added">+       o-&gt;oop_iterate(&amp;walk_elements);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+  
+  // Update callee-saved register info for the following frame
+  void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
+    ResourceMark rm;
+    CodeBlob* cb = fr-&gt;cb();
+</pre>
+<center><a href="compilerDirectives.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

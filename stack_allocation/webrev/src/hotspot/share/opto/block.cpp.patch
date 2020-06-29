@@ -1,0 +1,16 @@
+diff a/src/hotspot/share/opto/block.cpp b/src/hotspot/share/opto/block.cpp
+--- a/src/hotspot/share/opto/block.cpp
++++ b/src/hotspot/share/opto/block.cpp
+@@ -175,11 +175,11 @@
+   }
+ 
+   // Ideal nodes are allowable in empty blocks: skip them  Only MachNodes
+   // turn directly into code, because only MachNodes have non-trivial
+   // emit() functions.
+-  while ((end_idx > 0) && !get_node(end_idx)->is_Mach()) {
++  while ((end_idx > 0) && !(get_node(end_idx)->is_Mach() || get_node(end_idx)->is_BoxLock())) {
+     end_idx--;
+   }
+ 
+   // No room for any interesting instructions?
+   if (end_idx == 0) {

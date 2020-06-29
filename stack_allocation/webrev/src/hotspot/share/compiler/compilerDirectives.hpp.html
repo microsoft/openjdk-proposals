@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New src/hotspot/share/compiler/compilerDirectives.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_COMPILER_COMPILERDIRECTIVES_HPP
+ 26 #define SHARE_COMPILER_COMPILERDIRECTIVES_HPP
+ 27 
+ 28 #include &quot;ci/ciMetadata.hpp&quot;
+ 29 #include &quot;ci/ciMethod.hpp&quot;
+ 30 #include &quot;compiler/methodMatcher.hpp&quot;
+ 31 #include &quot;compiler/compilerOracle.hpp&quot;
+ 32 #include &quot;utilities/exceptions.hpp&quot;
+ 33 #include &quot;utilities/tribool.hpp&quot;
+ 34 
+ 35   //      Directives flag name,    type, default value, compile command name
+ 36   #define compilerdirectives_common_flags(cflags) \
+ 37     cflags(Enable,                  bool, false, X) \
+ 38     cflags(Exclude,                 bool, false, X) \
+ 39     cflags(BreakAtExecute,          bool, false, X) \
+ 40     cflags(BreakAtCompile,          bool, false, X) \
+ 41     cflags(Log,                     bool, LogCompilation, X) \
+ 42     cflags(PrintAssembly,           bool, PrintAssembly, PrintAssembly) \
+ 43     cflags(PrintInlining,           bool, PrintInlining, PrintInlining) \
+ 44     cflags(PrintNMethods,           bool, PrintNMethods, PrintNMethods) \
+ 45     cflags(BackgroundCompilation,   bool, BackgroundCompilation, BackgroundCompilation) \
+ 46     cflags(ReplayInline,            bool, false, ReplayInline) \
+ 47     cflags(DumpReplay,              bool, false, DumpReplay) \
+ 48     cflags(DumpInline,              bool, false, DumpInline) \
+ 49     cflags(CompilerDirectivesIgnoreCompileCommands, bool, CompilerDirectivesIgnoreCompileCommands, X) \
+ 50     cflags(DisableIntrinsic,        ccstrlist, DisableIntrinsic, DisableIntrinsic) \
+ 51     cflags(ControlIntrinsic,        ccstrlist, ControlIntrinsic, ControlIntrinsic)
+ 52 
+ 53 #ifdef COMPILER1
+ 54   #define compilerdirectives_c1_flags(cflags)
+ 55 #else
+ 56   #define compilerdirectives_c1_flags(cflags)
+ 57 #endif
+ 58 
+ 59 #ifdef COMPILER2
+ 60   #define compilerdirectives_c2_flags(cflags) \
+ 61     cflags(BlockLayoutByFrequency,  bool, BlockLayoutByFrequency,  BlockLayoutByFrequency) \
+ 62     cflags(PrintOptoAssembly,       bool, PrintOptoAssembly, PrintOptoAssembly) \
+ 63     cflags(PrintIntrinsics,         bool, PrintIntrinsics, PrintIntrinsics) \
+ 64 NOT_PRODUCT(cflags(TraceOptoPipelining, bool, TraceOptoPipelining, TraceOptoPipelining)) \
+ 65 NOT_PRODUCT(cflags(TraceOptoOutput,     bool, TraceOptoOutput, TraceOptoOutput)) \
+ 66 NOT_PRODUCT(cflags(PrintIdeal,          bool, PrintIdeal, PrintIdeal)) \
+ 67 NOT_PRODUCT(cflags(IGVPrintLevel,       intx, PrintIdealGraphLevel, IGVPrintLevel)) \
+ 68     cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
+ 69     cflags(Vectorize,               bool, false, Vectorize) \
+ 70     cflags(VectorizeDebug,          uintx, 0, VectorizeDebug) \
+ 71     cflags(CloneMapDebug,           bool, false, CloneMapDebug) \
+ 72     cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit) \
+ 73 NOT_PRODUCT(cflags(PrintEscapeAnalysis,       bool, PrintEscapeAnalysis, PrintEscapeAnalysis)) \
+ 74 NOT_PRODUCT(cflags(PrintEliminateAllocations, bool, PrintEliminateAllocations, PrintEliminateAllocations)) \
+ 75     cflags(UseStackAllocation,                bool, UseStackAllocation, UseStackAllocation) \
+ 76 NOT_PRODUCT(cflags(PrintStackAllocation,      bool, PrintStackAllocation, PrintStackAllocation))
+ 77 #else
+ 78   #define compilerdirectives_c2_flags(cflags)
+ 79 #endif
+ 80 
+ 81 class CompilerDirectives;
+ 82 class DirectiveSet;
+ 83 
+ 84 class DirectivesStack : AllStatic {
+ 85 private:
+ 86   static CompilerDirectives* _top;
+ 87   static CompilerDirectives* _bottom;
+ 88   static int _depth;
+ 89 
+ 90   static void pop_inner(); // no lock version of pop
+ 91 public:
+ 92   static void init();
+ 93   static DirectiveSet* getMatchingDirective(const methodHandle&amp; mh, AbstractCompiler* comp);
+ 94   static DirectiveSet* getDefaultDirective(AbstractCompiler* comp);
+ 95   static void push(CompilerDirectives* directive);
+ 96   static void pop(int count);
+ 97   static bool check_capacity(int request_size, outputStream* st);
+ 98   static void clear();
+ 99   static void print(outputStream* st);
+100   static void release(DirectiveSet* set);
+101   static void release(CompilerDirectives* dir);
+102 };
+103 
+104 class DirectiveSet : public CHeapObj&lt;mtCompiler&gt; {
+105 private:
+106   InlineMatcher* _inlinematchers;
+107   CompilerDirectives* _directive;
+108   TriBoolArray&lt;vmIntrinsics::ID_LIMIT, int&gt; _intrinsic_control_words;
+109 
+110 public:
+111   DirectiveSet(CompilerDirectives* directive);
+112   ~DirectiveSet();
+113   void init_control_intrinsic();
+114   CompilerDirectives* directive();
+115   bool parse_and_add_inline(char* str, const char*&amp; error_msg);
+116   void append_inline(InlineMatcher* m);
+117   bool should_inline(ciMethod* inlinee);
+118   bool should_not_inline(ciMethod* inlinee);
+119   void print_inline(outputStream* st);
+120   DirectiveSet* compilecommand_compatibility_init(const methodHandle&amp; method);
+121   bool is_exclusive_copy() { return _directive == NULL; }
+122   bool matches_inline(const methodHandle&amp; method, int inline_action);
+123   static DirectiveSet* clone(DirectiveSet const* src);
+124   bool is_intrinsic_disabled(const methodHandle&amp; method);
+125   static ccstrlist canonicalize_control_intrinsic(ccstrlist option_value);
+126   void finalize(outputStream* st);
+127 
+128   typedef enum {
+129 #define enum_of_flags(name, type, dvalue, cc_flag) name##Index,
+130     compilerdirectives_common_flags(enum_of_flags)
+131     compilerdirectives_c2_flags(enum_of_flags)
+132     compilerdirectives_c1_flags(enum_of_flags)
+133     number_of_flags
+134   } flags;
+135 
+136  private:
+137   bool _modified[number_of_flags]; // Records what options where set by a directive
+138 
+139  public:
+140 #define flag_store_definition(name, type, dvalue, cc_flag) type name##Option;
+141   compilerdirectives_common_flags(flag_store_definition)
+142   compilerdirectives_c2_flags(flag_store_definition)
+143   compilerdirectives_c1_flags(flag_store_definition)
+144 
+145 // Casting to get the same function signature for all setters. Used from parser.
+146 #define set_function_definition(name, type, dvalue, cc_flag) void set_##name(void* value) { type val = *(type*)value; name##Option = val; _modified[name##Index] = true; }
+147   compilerdirectives_common_flags(set_function_definition)
+148   compilerdirectives_c2_flags(set_function_definition)
+149   compilerdirectives_c1_flags(set_function_definition)
+150 
+151   void print_intx(outputStream* st, ccstr n, intx v, bool mod) { if (mod) { st-&gt;print(&quot;%s:&quot; INTX_FORMAT &quot; &quot;, n, v); } }
+152   void print_uintx(outputStream* st, ccstr n, intx v, bool mod) { if (mod) { st-&gt;print(&quot;%s:&quot; UINTX_FORMAT &quot; &quot;, n, v); } }
+153   void print_bool(outputStream* st, ccstr n, bool v, bool mod) { if (mod) { st-&gt;print(&quot;%s:%s &quot;, n, v ? &quot;true&quot; : &quot;false&quot;); } }
+154   void print_double(outputStream* st, ccstr n, double v, bool mod) { if (mod) { st-&gt;print(&quot;%s:%f &quot;, n, v); } }
+155   void print_ccstr(outputStream* st, ccstr n, ccstr v, bool mod) { if (mod) { st-&gt;print(&quot;%s:%s &quot;, n, v); } }
+156   void print_ccstrlist(outputStream* st, ccstr n, ccstr v, bool mod) { print_ccstr(st, n, v, mod); }
+157 
+158 void print(outputStream* st) {
+159     print_inline(st);
+160     st-&gt;print(&quot;  &quot;);
+161 #define print_function_definition(name, type, dvalue, cc_flag) print_##type(st, #name, this-&gt;name##Option, true);
+162     compilerdirectives_common_flags(print_function_definition)
+163     compilerdirectives_c2_flags(print_function_definition)
+164     compilerdirectives_c1_flags(print_function_definition)
+165     st-&gt;cr();
+166   }
+167 };
+168 
+169 // Iterator of ControlIntrinsic
+170 // if disable_all is true, it accepts DisableIntrinsic(deprecated) and all intrinsics
+171 // appear in the list are to disable
+172 class ControlIntrinsicIter {
+173  private:
+174   bool _enabled;
+175   char* _token;
+176   char* _saved_ptr;
+177   char* _list;
+178   const bool _disableIntrinsic;
+179   void next_token();
+180 
+181  public:
+182   ControlIntrinsicIter(ccstrlist option, bool disable_all = false);
+183   ~ControlIntrinsicIter();
+184 
+185   bool is_enabled() const { return _enabled; }
+186   const char* operator*() const { return _token; }
+187 
+188   ControlIntrinsicIter&amp; operator++();
+189 };
+190 
+191 class CompilerDirectives : public CHeapObj&lt;mtCompiler&gt; {
+192 private:
+193   CompilerDirectives* _next;
+194   BasicMatcher* _match;
+195   int _ref_count;
+196 
+197 public:
+198 
+199   CompilerDirectives();
+200   ~CompilerDirectives();
+201 
+202   CompilerDirectives* next();
+203   void set_next(CompilerDirectives* next) {_next = next; }
+204 
+205   bool match(const methodHandle&amp; method);
+206   BasicMatcher* match() { return _match; }
+207   bool add_match(char* str, const char*&amp; error_msg);
+208   DirectiveSet* get_for(AbstractCompiler *comp);
+209   void print(outputStream* st);
+210   bool is_default_directive() { return _next == NULL; }
+211   void finalize(outputStream* st);
+212 
+213   void inc_refcount();
+214   void dec_refcount();
+215   int refcount();
+216 
+217   DirectiveSet* _c1_store;
+218   DirectiveSet* _c2_store;
+219 };
+220 
+221 #endif // SHARE_COMPILER_COMPILERDIRECTIVES_HPP
+    </pre>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/c2_globals.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="buildOopMap.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/c2_globals.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -532,10 +532,19 @@</span>
+                                                                              \
+    product(intx, EliminateAllocationArraySizeLimit, 64,                      \
+            &quot;Array size (number of elements) limit for scalar replacement&quot;)   \
+            range(0, max_jint)                                                \
+                                                                              \
+<span class="udiff-line-added">+   experimental(bool, UseStackAllocation, false,                             \</span>
+<span class="udiff-line-added">+           &quot;Leverage stack allocation to reduce heap pressure&quot;)              \</span>
+<span class="udiff-line-added">+                                                                             \</span>
+<span class="udiff-line-added">+   experimental(bool, UseStackAllocationRuntime, false,                      \</span>
+<span class="udiff-line-added">+           &quot;Enable the stack allocation runtime code in oopmap&quot;)             \</span>
+<span class="udiff-line-added">+                                                                             \</span>
+<span class="udiff-line-added">+   notproduct(bool, PrintStackAllocation, false,                             \</span>
+<span class="udiff-line-added">+           &quot;Print stack allocation debug information&quot;)                       \</span>
+<span class="udiff-line-added">+                                                                             \</span>
+    product(bool, OptimizePtrCompare, true,                                   \
+            &quot;Use escape analysis to optimize pointers compare&quot;)               \
+                                                                              \
+    notproduct(bool, PrintOptimizePtrCompare, false,                          \
+            &quot;Print information about optimized pointers compare&quot;)             \
+</pre>
+<center><a href="buildOopMap.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="callnode.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

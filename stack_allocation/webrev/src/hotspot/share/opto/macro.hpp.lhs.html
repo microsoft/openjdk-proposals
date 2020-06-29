@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Frames src/hotspot/share/opto/macro.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+    <script type="text/javascript" src="../../../../navigation.js"></script>
+  </head>
+<body onkeypress="keypress(event);">
+<a name="0"></a>
+<hr />
+<pre>  1 /*
+  2  * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_OPTO_MACRO_HPP
+ 26 #define SHARE_OPTO_MACRO_HPP
+ 27 
+ 28 #include &quot;opto/phase.hpp&quot;
+ 29 
+ 30 class  AllocateNode;
+ 31 class  AllocateArrayNode;
+ 32 class  CallNode;
+ 33 class  SubTypeCheckNode;
+ 34 class  Node;
+ 35 class  PhaseIterGVN;
+ 36 
+ 37 class PhaseMacroExpand : public Phase {
+ 38 private:
+ 39   PhaseIterGVN &amp;_igvn;
+ 40 
+ 41 public:
+ 42   // Helper methods roughly modeled after GraphKit:
+ 43   Node* basic_plus_adr(Node* base, int offset) {
+ 44     return (offset == 0)? base: basic_plus_adr(base, MakeConX(offset));
+ 45   }
+ 46   Node* basic_plus_adr(Node* base, Node* ptr, int offset) {
+ 47     return (offset == 0)? ptr: basic_plus_adr(base, ptr, MakeConX(offset));
+ 48   }
+ 49   Node* basic_plus_adr(Node* base, Node* offset) {
+ 50     return basic_plus_adr(base, base, offset);
+ 51   }
+ 52   Node* basic_plus_adr(Node* base, Node* ptr, Node* offset) {
+ 53     Node* adr = new AddPNode(base, ptr, offset);
+ 54     return transform_later(adr);
+ 55   }
+ 56   Node* transform_later(Node* n) {
+ 57     // equivalent to _gvn.transform in GraphKit, Ideal, etc.
+ 58     _igvn.register_new_node_with_optimizer(n);
+ 59     return n;
+ 60   }
+ 61   void set_eden_pointers(Node* &amp;eden_top_adr, Node* &amp;eden_end_adr);
+ 62   Node* make_load( Node* ctl, Node* mem, Node* base, int offset,
+ 63                    const Type* value_type, BasicType bt);
+ 64   Node* make_store(Node* ctl, Node* mem, Node* base, int offset,
+ 65                    Node* value, BasicType bt);
+ 66 
+ 67   Node* make_leaf_call(Node* ctrl, Node* mem,
+ 68                        const TypeFunc* call_type, address call_addr,
+ 69                        const char* call_name,
+ 70                        const TypePtr* adr_type,
+ 71                        Node* parm0 = NULL, Node* parm1 = NULL,
+ 72                        Node* parm2 = NULL, Node* parm3 = NULL,
+ 73                        Node* parm4 = NULL, Node* parm5 = NULL,
+ 74                        Node* parm6 = NULL, Node* parm7 = NULL);
+ 75 
+ 76   address basictype2arraycopy(BasicType t,
+ 77                               Node* src_offset,
+ 78                               Node* dest_offset,
+ 79                               bool disjoint_bases,
+ 80                               const char* &amp;name,
+ 81                               bool dest_uninitialized);
+ 82 
+ 83 private:
+ 84   // projections extracted from a call node
+ 85   ProjNode *_fallthroughproj;
+ 86   ProjNode *_fallthroughcatchproj;
+ 87   ProjNode *_ioproj_fallthrough;
+ 88   ProjNode *_ioproj_catchall;
+ 89   ProjNode *_catchallcatchproj;
+ 90   ProjNode *_memproj_fallthrough;
+ 91   ProjNode *_memproj_catchall;
+ 92   ProjNode *_resproj;
+ 93 
+ 94   // Additional data collected during macro expansion
+ 95   bool _has_locks;
+ 96 
+ 97   void expand_allocate(AllocateNode *alloc);
+ 98   void expand_allocate_array(AllocateArrayNode *alloc);
+ 99   void expand_allocate_common(AllocateNode* alloc,
+100                               Node* length,
+101                               const TypeFunc* slow_call_type,
+102                               address slow_call_address);
+103   void yank_initalize_node(InitializeNode* node);
+104   void yank_alloc_node(AllocateNode* alloc);
+105   Node *value_from_mem(Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
+106   Node *value_from_mem_phi(Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
+<a name="1" id="anc1"></a>
+
+
+
+107 
+108   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
+109   bool eliminate_allocate_node(AllocateNode *alloc);
+110   bool can_eliminate_allocation(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints);
+111   bool scalar_replacement(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints_done);
+112   void process_users_of_allocation(CallNode *alloc);
+<a name="2" id="anc2"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+113 
+114   void eliminate_gc_barrier(Node *p2x);
+115   void mark_eliminated_box(Node* box, Node* obj);
+116   void mark_eliminated_locking_nodes(AbstractLockNode *alock);
+117   bool eliminate_locking_node(AbstractLockNode *alock);
+118   void expand_lock_node(LockNode *lock);
+119   void expand_unlock_node(UnlockNode *unlock);
+120 
+121   // More helper methods modeled after GraphKit for array copy
+122   void insert_mem_bar(Node** ctrl, Node** mem, int opcode, Node* precedent = NULL);
+123   Node* array_element_address(Node* ary, Node* idx, BasicType elembt);
+124   Node* ConvI2L(Node* offset);
+125 
+126   // helper methods modeled after LibraryCallKit for array copy
+127   Node* generate_guard(Node** ctrl, Node* test, RegionNode* region, float true_prob);
+128   Node* generate_slow_guard(Node** ctrl, Node* test, RegionNode* region);
+129   void generate_negative_guard(Node** ctrl, Node* index, RegionNode* region);
+130   void generate_limit_guard(Node** ctrl, Node* offset, Node* subseq_length, Node* array_length, RegionNode* region);
+131 
+132   // More helper methods for array copy
+133   Node* generate_nonpositive_guard(Node** ctrl, Node* index, bool never_negative);
+134   void finish_arraycopy_call(Node* call, Node** ctrl, MergeMemNode** mem, const TypePtr* adr_type);
+135   Node* generate_arraycopy(ArrayCopyNode *ac,
+136                            AllocateArrayNode* alloc,
+137                            Node** ctrl, MergeMemNode* mem, Node** io,
+138                            const TypePtr* adr_type,
+139                            BasicType basic_elem_type,
+140                            Node* src,  Node* src_offset,
+141                            Node* dest, Node* dest_offset,
+142                            Node* copy_length,
+143                            bool disjoint_bases = false,
+144                            bool length_never_negative = false,
+145                            RegionNode* slow_region = NULL);
+146   void generate_clear_array(Node* ctrl, MergeMemNode* merge_mem,
+147                             const TypePtr* adr_type,
+148                             Node* dest,
+149                             BasicType basic_elem_type,
+150                             Node* slice_idx,
+151                             Node* slice_len,
+152                             Node* dest_size);
+153   bool generate_block_arraycopy(Node** ctrl, MergeMemNode** mem, Node* io,
+154                                 const TypePtr* adr_type,
+155                                 BasicType basic_elem_type,
+156                                 AllocateNode* alloc,
+157                                 Node* src,  Node* src_offset,
+158                                 Node* dest, Node* dest_offset,
+159                                 Node* dest_size, bool dest_uninitialized);
+160   MergeMemNode* generate_slow_arraycopy(ArrayCopyNode *ac,
+161                                         Node** ctrl, Node* mem, Node** io,
+162                                         const TypePtr* adr_type,
+163                                         Node* src,  Node* src_offset,
+164                                         Node* dest, Node* dest_offset,
+165                                         Node* copy_length, bool dest_uninitialized);
+166   Node* generate_checkcast_arraycopy(Node** ctrl, MergeMemNode** mem,
+167                                      const TypePtr* adr_type,
+168                                      Node* dest_elem_klass,
+169                                      Node* src,  Node* src_offset,
+170                                      Node* dest, Node* dest_offset,
+171                                      Node* copy_length, bool dest_uninitialized);
+172   Node* generate_generic_arraycopy(Node** ctrl, MergeMemNode** mem,
+173                                    const TypePtr* adr_type,
+174                                    Node* src,  Node* src_offset,
+175                                    Node* dest, Node* dest_offset,
+176                                    Node* copy_length, bool dest_uninitialized);
+177   void generate_unchecked_arraycopy(Node** ctrl, MergeMemNode** mem,
+178                                     const TypePtr* adr_type,
+179                                     BasicType basic_elem_type,
+180                                     bool disjoint_bases,
+181                                     Node* src,  Node* src_offset,
+182                                     Node* dest, Node* dest_offset,
+183                                     Node* copy_length, bool dest_uninitialized);
+184 
+185   void expand_arraycopy_node(ArrayCopyNode *ac);
+186 
+187   void expand_subtypecheck_node(SubTypeCheckNode *check);
+188 
+189   int replace_input(Node *use, Node *oldref, Node *newref);
+190   void migrate_outs(Node *old, Node *target);
+191   void copy_call_debug_info(CallNode *oldcall, CallNode * newcall);
+192   Node* opt_bits_test(Node* ctrl, Node* region, int edge, Node* word, int mask, int bits, bool return_fast_path = false);
+193   void copy_predefined_input_for_runtime_call(Node * ctrl, CallNode* oldcall, CallNode* call);
+194   CallNode* make_slow_call(CallNode *oldcall, const TypeFunc* slow_call_type, address slow_call,
+195                            const char* leaf_name, Node* slow_path, Node* parm0, Node* parm1,
+196                            Node* parm2);
+197   void extract_call_projections(CallNode *call);
+198 
+199   Node* initialize_object(AllocateNode* alloc,
+200                           Node* control, Node* rawmem, Node* object,
+201                           Node* klass_node, Node* length,
+202                           Node* size_in_bytes);
+203 
+204   Node* make_arraycopy_load(ArrayCopyNode* ac, intptr_t offset, Node* ctl, Node* mem, BasicType ft, const Type *ftype, AllocateNode *alloc);
+205 
+<a name="3" id="anc3"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+206 public:
+207   PhaseMacroExpand(PhaseIterGVN &amp;igvn) : Phase(Macro_Expand), _igvn(igvn), _has_locks(false) {
+208     _igvn.set_delay_transform(true);
+209   }
+210   void eliminate_macro_nodes();
+211   bool expand_macro_nodes();
+212 
+213   PhaseIterGVN &amp;igvn() const { return _igvn; }
+214 
+215   // Members accessed from BarrierSetC2
+216   void replace_node(Node* source, Node* target) { _igvn.replace_node(source, target); }
+217   Node* intcon(jint con)        const { return _igvn.intcon(con); }
+218   Node* longcon(jlong con)      const { return _igvn.longcon(con); }
+219   Node* makecon(const Type *t)  const { return _igvn.makecon(t); }
+220   Node* top()                   const { return C-&gt;top(); }
+221 
+222   Node* prefetch_allocation(Node* i_o,
+223                             Node*&amp; needgc_false, Node*&amp; contended_phi_rawmem,
+224                             Node* old_eden_top, Node* new_eden_top,
+225                             intx lines);
+226   void expand_dtrace_alloc_probe(AllocateNode* alloc, Node* fast_oop, Node*&amp;fast_oop_ctrl, Node*&amp;fast_oop_rawmem);
+227   void expand_initialize_membar(AllocateNode* alloc, InitializeNode* init, Node*&amp;fast_oop_ctrl, Node*&amp;fast_oop_rawmem);
+228 };
+229 
+230 #endif // SHARE_OPTO_MACRO_HPP
+<a name="4" id="anc4"></a><b style="font-size: large; color: red">--- EOF ---</b>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+<input id="eof" value="4" type="hidden" />
+</body>
+</html>

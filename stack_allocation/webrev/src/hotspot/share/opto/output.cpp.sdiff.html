@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/output.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="memnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../runtime/deoptimization.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/output.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 742     // New functionality:
+ 743     //   Assert if the local is not top. In product mode let the new node
+ 744     //   override the old entry.
+ 745     assert(local == C-&gt;top(), &quot;LocArray collision&quot;);
+ 746     if (local == C-&gt;top()) {
+ 747       return;
+ 748     }
+ 749     array-&gt;pop();
+ 750   }
+ 751   const Type *t = local-&gt;bottom_type();
+ 752 
+ 753   // Is it a safepoint scalar object node?
+ 754   if (local-&gt;is_SafePointScalarObject()) {
+ 755     SafePointScalarObjectNode* spobj = local-&gt;as_SafePointScalarObject();
+ 756 
+ 757     ObjectValue* sv = sv_for_node_id(objs, spobj-&gt;_idx);
+ 758     if (sv == NULL) {
+ 759       ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+ 760       assert(cik-&gt;is_instance_klass() ||
+ 761              cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="line-modified"> 762       sv = new ObjectValue(spobj-&gt;_idx,</span>
+
+
+
+
+
+
+
+
+
+ 763                            new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));
+<span class="line-modified"> 764       set_sv_for_object_node(objs, sv);</span>
+ 765 
+<span class="line-modified"> 766       uint first_ind = spobj-&gt;first_index(sfpt-&gt;jvms());</span>
+<span class="line-modified"> 767       for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="line-modified"> 768         Node* fld_node = sfpt-&gt;in(first_ind+i);</span>
+<span class="line-modified"> 769         (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfpt, fld_node, sv-&gt;field_values(), objs);</span>
+
+ 770       }
+ 771     }
+ 772     array-&gt;append(sv);
+ 773     return;
+ 774   }
+ 775 
+ 776   // Grab the register number for the local
+ 777   OptoReg::Name regnum = C-&gt;regalloc()-&gt;get_reg_first(local);
+ 778   if( OptoReg::is_valid(regnum) ) {// Got a register/stack?
+ 779     // Record the double as two float registers.
+ 780     // The register mask for such a value always specifies two adjacent
+ 781     // float registers, with the lower register number even.
+ 782     // Normally, the allocation of high and low words to these registers
+ 783     // is irrelevant, because nearly all operations on register pairs
+ 784     // (e.g., StoreD) treat them as a single unit.
+ 785     // Here, we assume in addition that the words in these two registers
+ 786     // stored &quot;naturally&quot; (by operations like StoreD and double stores
+ 787     // within the interpreter) such that the lower-numbered register
+ 788     // is written to the lower memory address.  This may seem like
+ 789     // a machine dependency, but it is not--it is a requirement on
+</pre>
+<hr />
+<pre>
+ 993     for( idx = 0; idx &lt; num_exps; idx++ ) {
+ 994       FillLocArray( idx,  sfn, sfn-&gt;stack(jvms, idx), exparray, objs );
+ 995     }
+ 996 
+ 997     // Add in mappings of the monitors
+ 998     assert( !method ||
+ 999             !method-&gt;is_synchronized() ||
+1000             method-&gt;is_native() ||
+1001             num_mon &gt; 0 ||
+1002             !GenerateSynchronizationCode,
+1003             &quot;monitors must always exist for synchronized methods&quot;);
+1004 
+1005     // Build the growable array of ScopeValues for exp stack
+1006     GrowableArray&lt;MonitorValue*&gt; *monarray = new GrowableArray&lt;MonitorValue*&gt;(num_mon);
+1007 
+1008     // Loop over monitors and insert into array
+1009     for (idx = 0; idx &lt; num_mon; idx++) {
+1010       // Grab the node that defines this monitor
+1011       Node* box_node = sfn-&gt;monitor_box(jvms, idx);
+1012       Node* obj_node = sfn-&gt;monitor_obj(jvms, idx);
+
+1013 
+1014       // Create ScopeValue for object
+1015       ScopeValue *scval = NULL;
+1016 
+1017       if (obj_node-&gt;is_SafePointScalarObject()) {
+1018         SafePointScalarObjectNode* spobj = obj_node-&gt;as_SafePointScalarObject();
+1019         scval = PhaseOutput::sv_for_node_id(objs, spobj-&gt;_idx);
+1020         if (scval == NULL) {
+1021           const Type *t = spobj-&gt;bottom_type();
+1022           ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+1023           assert(cik-&gt;is_instance_klass() ||
+1024                  cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="line-modified">1025           ObjectValue* sv = new ObjectValue(spobj-&gt;_idx,</span>
+<span class="line-modified">1026                                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));</span>
+<span class="line-modified">1027           PhaseOutput::set_sv_for_object_node(objs, sv);</span>
+<span class="line-modified">1028 </span>
+<span class="line-modified">1029           uint first_ind = spobj-&gt;first_index(youngest_jvms);</span>
+<span class="line-modified">1030           for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="line-modified">1031             Node* fld_node = sfn-&gt;in(first_ind+i);</span>
+<span class="line-modified">1032             (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfn, fld_node, sv-&gt;field_values(), objs);</span>
+
+
+
+
+
+
+
+
+
+
+
+
+1033           }
+1034           scval = sv;
+1035         }
+1036       } else if (!obj_node-&gt;is_Con()) {
+1037         OptoReg::Name obj_reg = C-&gt;regalloc()-&gt;get_reg_first(obj_node);
+1038         if( obj_node-&gt;bottom_type()-&gt;base() == Type::NarrowOop ) {
+1039           scval = new_loc_value( C-&gt;regalloc(), obj_reg, Location::narrowoop );
+1040         } else {
+1041           scval = new_loc_value( C-&gt;regalloc(), obj_reg, Location::oop );
+1042         }
+1043       } else {
+1044         const TypePtr *tp = obj_node-&gt;get_ptr_type();
+1045         scval = new ConstantOopWriteValue(tp-&gt;is_oopptr()-&gt;const_oop()-&gt;constant_encoding());
+1046       }
+1047 
+1048       OptoReg::Name box_reg = BoxLockNode::reg(box_node);
+1049       Location basic_lock = Location::new_stk_loc(Location::normal,C-&gt;regalloc()-&gt;reg2offset(box_reg));
+<span class="line-removed">1050       bool eliminated = (box_node-&gt;is_BoxLock() &amp;&amp; box_node-&gt;as_BoxLock()-&gt;is_eliminated());</span>
+1051       monarray-&gt;append(new MonitorValue(scval, basic_lock, eliminated));
+1052     }
+1053 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1054     // We dump the object pool first, since deoptimization reads it in first.
+1055     C-&gt;debug_info()-&gt;dump_object_pool(objs);
+1056 
+1057     // Build first class objects to pass to scope
+1058     DebugToken *locvals = C-&gt;debug_info()-&gt;create_scope_values(locarray);
+1059     DebugToken *expvals = C-&gt;debug_info()-&gt;create_scope_values(exparray);
+1060     DebugToken *monvals = C-&gt;debug_info()-&gt;create_monitor_values(monarray);
+1061 
+1062     // Make method available for all Safepoints
+1063     ciMethod* scope_method = method ? method : C-&gt;method();
+1064     // Describe the scope here
+1065     assert(jvms-&gt;bci() &gt;= InvocationEntryBci &amp;&amp; jvms-&gt;bci() &lt;= 0x10000, &quot;must be a valid or entry BCI&quot;);
+1066     assert(!jvms-&gt;should_reexecute() || depth == max_depth, &quot;reexecute allowed only for the youngest&quot;);
+1067     // Now we can describe the scope.
+1068     methodHandle null_mh;
+1069     bool rethrow_exception = false;
+1070     C-&gt;debug_info()-&gt;describe_scope(safepoint_pc_offset, null_mh, scope_method, jvms-&gt;bci(), jvms-&gt;should_reexecute(), rethrow_exception, is_method_handle_invoke, return_oop, locvals, expvals, monvals);
+1071   } // End jvms loop
+1072 
+1073   // Mark the end of the scope set.
+</pre>
+<hr />
+<pre>
+1257   if (C-&gt;has_method_handle_invokes())
+1258     total_req += deopt_handler_req;  // deopt MH handler
+1259 
+1260   CodeBuffer* cb = code_buffer();
+1261   cb-&gt;initialize(total_req, _buf_sizes._reloc);
+1262 
+1263   // Have we run out of code space?
+1264   if ((cb-&gt;blob() == NULL) || (!CompileBroker::should_compile_new_jobs())) {
+1265     C-&gt;record_failure(&quot;CodeCache is full&quot;);
+1266     return NULL;
+1267   }
+1268   // Configure the code buffer.
+1269   cb-&gt;initialize_consts_size(const_req);
+1270   cb-&gt;initialize_stubs_size(stub_req);
+1271   cb-&gt;initialize_oop_recorder(C-&gt;env()-&gt;oop_recorder());
+1272 
+1273   // fill in the nop array for bundling computations
+1274   MachNode *_nop_list[Bundle::_nop_count];
+1275   Bundle::initialize_nops(_nop_list);
+1276 
+
+
+
+
+
+
+
+1277   return cb;
+1278 }
+1279 
+1280 //------------------------------fill_buffer------------------------------------
+1281 void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
+1282   // blk_starts[] contains offsets calculated during short branches processing,
+1283   // offsets should not be increased during following steps.
+1284 
+1285   // Compute the size of first NumberOfLoopInstrToAlign instructions at head
+1286   // of a loop. It is used to determine the padding for loop alignment.
+1287   compute_loop_first_inst_sizes();
+1288 
+1289   // Create oopmap set.
+1290   _oop_map_set = new OopMapSet();
+1291 
+1292   // !!!!! This preserves old handling of oopmaps for now
+1293   C-&gt;debug_info()-&gt;set_oopmaps(_oop_map_set);
+1294 
+1295   uint nblocks  = C-&gt;cfg()-&gt;number_of_blocks();
+1296   // Count and start of implicit null check instructions
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 742     // New functionality:
+ 743     //   Assert if the local is not top. In product mode let the new node
+ 744     //   override the old entry.
+ 745     assert(local == C-&gt;top(), &quot;LocArray collision&quot;);
+ 746     if (local == C-&gt;top()) {
+ 747       return;
+ 748     }
+ 749     array-&gt;pop();
+ 750   }
+ 751   const Type *t = local-&gt;bottom_type();
+ 752 
+ 753   // Is it a safepoint scalar object node?
+ 754   if (local-&gt;is_SafePointScalarObject()) {
+ 755     SafePointScalarObjectNode* spobj = local-&gt;as_SafePointScalarObject();
+ 756 
+ 757     ObjectValue* sv = sv_for_node_id(objs, spobj-&gt;_idx);
+ 758     if (sv == NULL) {
+ 759       ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+ 760       assert(cik-&gt;is_instance_klass() ||
+ 761              cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="line-modified"> 762       if (spobj-&gt;stack_allocated()) {</span>
+<span class="line-added"> 763         Node *box_lock = spobj-&gt;in(1);</span>
+<span class="line-added"> 764         assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="line-added"> 765         sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="line-added"> 766                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="line-added"> 767                             Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="line-added"> 768                             new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="line-added"> 769         set_sv_for_object_node(objs, sv);</span>
+<span class="line-added"> 770       } else {</span>
+<span class="line-added"> 771         sv = new ObjectValue(spobj-&gt;_idx,</span>
+ 772                            new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));
+<span class="line-modified"> 773         set_sv_for_object_node(objs, sv);</span>
+ 774 
+<span class="line-modified"> 775         uint first_ind = spobj-&gt;first_index(sfpt-&gt;jvms());</span>
+<span class="line-modified"> 776         for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="line-modified"> 777           Node* fld_node = sfpt-&gt;in(first_ind+i);</span>
+<span class="line-modified"> 778           (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfpt, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="line-added"> 779         }</span>
+ 780       }
+ 781     }
+ 782     array-&gt;append(sv);
+ 783     return;
+ 784   }
+ 785 
+ 786   // Grab the register number for the local
+ 787   OptoReg::Name regnum = C-&gt;regalloc()-&gt;get_reg_first(local);
+ 788   if( OptoReg::is_valid(regnum) ) {// Got a register/stack?
+ 789     // Record the double as two float registers.
+ 790     // The register mask for such a value always specifies two adjacent
+ 791     // float registers, with the lower register number even.
+ 792     // Normally, the allocation of high and low words to these registers
+ 793     // is irrelevant, because nearly all operations on register pairs
+ 794     // (e.g., StoreD) treat them as a single unit.
+ 795     // Here, we assume in addition that the words in these two registers
+ 796     // stored &quot;naturally&quot; (by operations like StoreD and double stores
+ 797     // within the interpreter) such that the lower-numbered register
+ 798     // is written to the lower memory address.  This may seem like
+ 799     // a machine dependency, but it is not--it is a requirement on
+</pre>
+<hr />
+<pre>
+1003     for( idx = 0; idx &lt; num_exps; idx++ ) {
+1004       FillLocArray( idx,  sfn, sfn-&gt;stack(jvms, idx), exparray, objs );
+1005     }
+1006 
+1007     // Add in mappings of the monitors
+1008     assert( !method ||
+1009             !method-&gt;is_synchronized() ||
+1010             method-&gt;is_native() ||
+1011             num_mon &gt; 0 ||
+1012             !GenerateSynchronizationCode,
+1013             &quot;monitors must always exist for synchronized methods&quot;);
+1014 
+1015     // Build the growable array of ScopeValues for exp stack
+1016     GrowableArray&lt;MonitorValue*&gt; *monarray = new GrowableArray&lt;MonitorValue*&gt;(num_mon);
+1017 
+1018     // Loop over monitors and insert into array
+1019     for (idx = 0; idx &lt; num_mon; idx++) {
+1020       // Grab the node that defines this monitor
+1021       Node* box_node = sfn-&gt;monitor_box(jvms, idx);
+1022       Node* obj_node = sfn-&gt;monitor_obj(jvms, idx);
+<span class="line-added">1023       bool eliminated = (box_node-&gt;is_BoxLock() &amp;&amp; box_node-&gt;as_BoxLock()-&gt;is_eliminated());</span>
+1024 
+1025       // Create ScopeValue for object
+1026       ScopeValue *scval = NULL;
+1027 
+1028       if (obj_node-&gt;is_SafePointScalarObject()) {
+1029         SafePointScalarObjectNode* spobj = obj_node-&gt;as_SafePointScalarObject();
+1030         scval = PhaseOutput::sv_for_node_id(objs, spobj-&gt;_idx);
+1031         if (scval == NULL) {
+1032           const Type *t = spobj-&gt;bottom_type();
+1033           ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();
+1034           assert(cik-&gt;is_instance_klass() ||
+1035                  cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);
+<span class="line-modified">1036           ObjectValue* sv = NULL;</span>
+<span class="line-modified">1037           if (spobj-&gt;stack_allocated()) {</span>
+<span class="line-modified">1038             Node *box_lock = spobj-&gt;in(1);</span>
+<span class="line-modified">1039             assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="line-modified">1040             assert(eliminated, &quot;monitor has to be eliminated for stack allocation&quot;);</span>
+<span class="line-modified">1041             sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="line-modified">1042                                 new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="line-modified">1043                                 Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="line-added">1044                                 new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="line-added">1045             set_sv_for_object_node(objs, sv);</span>
+<span class="line-added">1046           } else {</span>
+<span class="line-added">1047             sv = new ObjectValue(spobj-&gt;_idx,</span>
+<span class="line-added">1048                               new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()));</span>
+<span class="line-added">1049             set_sv_for_object_node(objs, sv);</span>
+<span class="line-added">1050 </span>
+<span class="line-added">1051             uint first_ind = spobj-&gt;first_index(youngest_jvms);</span>
+<span class="line-added">1052             for (uint i = 0; i &lt; spobj-&gt;n_fields(); i++) {</span>
+<span class="line-added">1053               Node* fld_node = sfn-&gt;in(first_ind+i);</span>
+<span class="line-added">1054               (void)FillLocArray(sv-&gt;field_values()-&gt;length(), sfn, fld_node, sv-&gt;field_values(), objs);</span>
+<span class="line-added">1055             }</span>
+1056           }
+1057           scval = sv;
+1058         }
+1059       } else if (!obj_node-&gt;is_Con()) {
+1060         OptoReg::Name obj_reg = C-&gt;regalloc()-&gt;get_reg_first(obj_node);
+1061         if( obj_node-&gt;bottom_type()-&gt;base() == Type::NarrowOop ) {
+1062           scval = new_loc_value( C-&gt;regalloc(), obj_reg, Location::narrowoop );
+1063         } else {
+1064           scval = new_loc_value( C-&gt;regalloc(), obj_reg, Location::oop );
+1065         }
+1066       } else {
+1067         const TypePtr *tp = obj_node-&gt;get_ptr_type();
+1068         scval = new ConstantOopWriteValue(tp-&gt;is_oopptr()-&gt;const_oop()-&gt;constant_encoding());
+1069       }
+1070 
+1071       OptoReg::Name box_reg = BoxLockNode::reg(box_node);
+1072       Location basic_lock = Location::new_stk_loc(Location::normal,C-&gt;regalloc()-&gt;reg2offset(box_reg));
+
+1073       monarray-&gt;append(new MonitorValue(scval, basic_lock, eliminated));
+1074     }
+1075 
+<span class="line-added">1076     for (idx = 0; idx &lt; jvms-&gt;scl_size(); idx++ ) {</span>
+<span class="line-added">1077       Node* obj_node = sfn-&gt;scalar(jvms, idx);</span>
+<span class="line-added">1078 </span>
+<span class="line-added">1079       if (obj_node-&gt;is_SafePointScalarObject()) {</span>
+<span class="line-added">1080         SafePointScalarObjectNode* spobj = obj_node-&gt;as_SafePointScalarObject();</span>
+<span class="line-added">1081         if (sv_for_node_id(objs, spobj-&gt;_idx) == NULL) {</span>
+<span class="line-added">1082           const Type *t = spobj-&gt;bottom_type();</span>
+<span class="line-added">1083           ciKlass* cik = t-&gt;is_oopptr()-&gt;klass();</span>
+<span class="line-added">1084           assert(cik-&gt;is_instance_klass() ||</span>
+<span class="line-added">1085                   cik-&gt;is_array_klass(), &quot;Not supported allocation.&quot;);</span>
+<span class="line-added">1086           assert(spobj-&gt;stack_allocated(), &quot;has to be stack allocated&quot;);</span>
+<span class="line-added">1087           Node *box_lock = spobj-&gt;in(1);</span>
+<span class="line-added">1088           assert(box_lock != NULL, &quot;Need to have a box lock&quot;);</span>
+<span class="line-added">1089           StackObjectValue* sv = new StackObjectValue(spobj-&gt;_idx,</span>
+<span class="line-added">1090                                             new ConstantOopWriteValue(cik-&gt;java_mirror()-&gt;constant_encoding()),</span>
+<span class="line-added">1091                                             Location::new_stk_loc(Location::oop, C-&gt;regalloc()-&gt;reg2offset(BoxLockNode::reg(box_lock))),</span>
+<span class="line-added">1092                                             new ConstantIntValue(spobj-&gt;n_fields()));</span>
+<span class="line-added">1093           set_sv_for_object_node(objs, sv);</span>
+<span class="line-added">1094         }</span>
+<span class="line-added">1095       }</span>
+<span class="line-added">1096     }</span>
+1097     // We dump the object pool first, since deoptimization reads it in first.
+1098     C-&gt;debug_info()-&gt;dump_object_pool(objs);
+1099 
+1100     // Build first class objects to pass to scope
+1101     DebugToken *locvals = C-&gt;debug_info()-&gt;create_scope_values(locarray);
+1102     DebugToken *expvals = C-&gt;debug_info()-&gt;create_scope_values(exparray);
+1103     DebugToken *monvals = C-&gt;debug_info()-&gt;create_monitor_values(monarray);
+1104 
+1105     // Make method available for all Safepoints
+1106     ciMethod* scope_method = method ? method : C-&gt;method();
+1107     // Describe the scope here
+1108     assert(jvms-&gt;bci() &gt;= InvocationEntryBci &amp;&amp; jvms-&gt;bci() &lt;= 0x10000, &quot;must be a valid or entry BCI&quot;);
+1109     assert(!jvms-&gt;should_reexecute() || depth == max_depth, &quot;reexecute allowed only for the youngest&quot;);
+1110     // Now we can describe the scope.
+1111     methodHandle null_mh;
+1112     bool rethrow_exception = false;
+1113     C-&gt;debug_info()-&gt;describe_scope(safepoint_pc_offset, null_mh, scope_method, jvms-&gt;bci(), jvms-&gt;should_reexecute(), rethrow_exception, is_method_handle_invoke, return_oop, locvals, expvals, monvals);
+1114   } // End jvms loop
+1115 
+1116   // Mark the end of the scope set.
+</pre>
+<hr />
+<pre>
+1300   if (C-&gt;has_method_handle_invokes())
+1301     total_req += deopt_handler_req;  // deopt MH handler
+1302 
+1303   CodeBuffer* cb = code_buffer();
+1304   cb-&gt;initialize(total_req, _buf_sizes._reloc);
+1305 
+1306   // Have we run out of code space?
+1307   if ((cb-&gt;blob() == NULL) || (!CompileBroker::should_compile_new_jobs())) {
+1308     C-&gt;record_failure(&quot;CodeCache is full&quot;);
+1309     return NULL;
+1310   }
+1311   // Configure the code buffer.
+1312   cb-&gt;initialize_consts_size(const_req);
+1313   cb-&gt;initialize_stubs_size(stub_req);
+1314   cb-&gt;initialize_oop_recorder(C-&gt;env()-&gt;oop_recorder());
+1315 
+1316   // fill in the nop array for bundling computations
+1317   MachNode *_nop_list[Bundle::_nop_count];
+1318   Bundle::initialize_nops(_nop_list);
+1319 
+<span class="line-added">1320   // if we are using stack allocation enable the runtime part</span>
+<span class="line-added">1321   // stack allocation can be enabled selectively via compiler directive</span>
+<span class="line-added">1322   // so we need to enable the runtime part</span>
+<span class="line-added">1323   if (!UseStackAllocationRuntime &amp;&amp; C-&gt;do_stack_allocation()) {</span>
+<span class="line-added">1324     FLAG_SET_ERGO(UseStackAllocationRuntime, true);</span>
+<span class="line-added">1325   }</span>
+<span class="line-added">1326 </span>
+1327   return cb;
+1328 }
+1329 
+1330 //------------------------------fill_buffer------------------------------------
+1331 void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
+1332   // blk_starts[] contains offsets calculated during short branches processing,
+1333   // offsets should not be increased during following steps.
+1334 
+1335   // Compute the size of first NumberOfLoopInstrToAlign instructions at head
+1336   // of a loop. It is used to determine the padding for loop alignment.
+1337   compute_loop_first_inst_sizes();
+1338 
+1339   // Create oopmap set.
+1340   _oop_map_set = new OopMapSet();
+1341 
+1342   // !!!!! This preserves old handling of oopmaps for now
+1343   C-&gt;debug_info()-&gt;set_oopmaps(_oop_map_set);
+1344 
+1345   uint nblocks  = C-&gt;cfg()-&gt;number_of_blocks();
+1346   // Count and start of implicit null check instructions
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="memnode.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="../runtime/deoptimization.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

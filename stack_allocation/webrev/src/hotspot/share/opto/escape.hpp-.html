@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Old src/hotspot/share/opto/escape.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+  <body>
+    <pre>
+  1 /*
+  2  * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+  3  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  4  *
+  5  * This code is free software; you can redistribute it and/or modify it
+  6  * under the terms of the GNU General Public License version 2 only, as
+  7  * published by the Free Software Foundation.
+  8  *
+  9  * This code is distributed in the hope that it will be useful, but WITHOUT
+ 10  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ 11  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ 12  * version 2 for more details (a copy is included in the LICENSE file that
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #ifndef SHARE_OPTO_ESCAPE_HPP
+ 26 #define SHARE_OPTO_ESCAPE_HPP
+ 27 
+ 28 #include &quot;opto/addnode.hpp&quot;
+ 29 #include &quot;opto/node.hpp&quot;
+ 30 #include &quot;utilities/growableArray.hpp&quot;
+ 31 
+ 32 //
+ 33 // Adaptation for C2 of the escape analysis algorithm described in:
+ 34 //
+ 35 // [Choi99] Jong-Deok Shoi, Manish Gupta, Mauricio Seffano,
+ 36 //          Vugranam C. Sreedhar, Sam Midkiff,
+ 37 //          &quot;Escape Analysis for Java&quot;, Procedings of ACM SIGPLAN
+ 38 //          OOPSLA  Conference, November 1, 1999
+ 39 //
+ 40 // The flow-insensitive analysis described in the paper has been implemented.
+ 41 //
+ 42 // The analysis requires construction of a &quot;connection graph&quot; (CG) for
+ 43 // the method being analyzed.  The nodes of the connection graph are:
+ 44 //
+ 45 //     -  Java objects (JO)
+ 46 //     -  Local variables (LV)
+ 47 //     -  Fields of an object (OF),  these also include array elements
+ 48 //
+ 49 // The CG contains 3 types of edges:
+ 50 //
+ 51 //   -  PointsTo  (-P&gt;)    {LV, OF} to JO
+ 52 //   -  Deferred  (-D&gt;)    from {LV, OF} to {LV, OF}
+ 53 //   -  Field     (-F&gt;)    from JO to OF
+ 54 //
+ 55 // The following  utility functions is used by the algorithm:
+ 56 //
+ 57 //   PointsTo(n) - n is any CG node, it returns the set of JO that n could
+ 58 //                 point to.
+ 59 //
+ 60 // The algorithm describes how to construct the connection graph
+ 61 // in the following 4 cases:
+ 62 //
+ 63 //          Case                  Edges Created
+ 64 //
+ 65 // (1)   p   = new T()              LV -P&gt; JO
+ 66 // (2)   p   = q                    LV -D&gt; LV
+ 67 // (3)   p.f = q                    JO -F&gt; OF,  OF -D&gt; LV
+ 68 // (4)   p   = q.f                  JO -F&gt; OF,  LV -D&gt; OF
+ 69 //
+ 70 // In all these cases, p and q are local variables.  For static field
+ 71 // references, we can construct a local variable containing a reference
+ 72 // to the static memory.
+ 73 //
+ 74 // C2 does not have local variables.  However for the purposes of constructing
+ 75 // the connection graph, the following IR nodes are treated as local variables:
+ 76 //     Phi    (pointer values)
+ 77 //     LoadP, LoadN
+ 78 //     Proj#5 (value returned from callnodes including allocations)
+ 79 //     CheckCastPP, CastPP
+ 80 //
+ 81 // The LoadP, Proj and CheckCastPP behave like variables assigned to only once.
+ 82 // Only a Phi can have multiple assignments.  Each input to a Phi is treated
+ 83 // as an assignment to it.
+ 84 //
+ 85 // The following node types are JavaObject:
+ 86 //
+ 87 //     phantom_object (general globally escaped object)
+ 88 //     Allocate
+ 89 //     AllocateArray
+ 90 //     Parm  (for incoming arguments)
+ 91 //     CastX2P (&quot;unsafe&quot; operations)
+ 92 //     CreateEx
+ 93 //     ConP
+ 94 //     LoadKlass
+ 95 //     ThreadLocal
+ 96 //     CallStaticJava (which returns Object)
+ 97 //
+ 98 // AddP nodes are fields.
+ 99 //
+100 // After building the graph, a pass is made over the nodes, deleting deferred
+101 // nodes and copying the edges from the target of the deferred edge to the
+102 // source.  This results in a graph with no deferred edges, only:
+103 //
+104 //    LV -P&gt; JO
+105 //    OF -P&gt; JO (the object whose oop is stored in the field)
+106 //    JO -F&gt; OF
+107 //
+108 // Then, for each node which is GlobalEscape, anything it could point to
+109 // is marked GlobalEscape.  Finally, for any node marked ArgEscape, anything
+110 // it could point to is marked ArgEscape.
+111 //
+112 
+113 class  Compile;
+114 class  Node;
+115 class  CallNode;
+116 class  PhiNode;
+117 class  PhaseTransform;
+118 class  PointsToNode;
+119 class  Type;
+120 class  TypePtr;
+121 class  VectorSet;
+122 
+123 class JavaObjectNode;
+124 class LocalVarNode;
+125 class FieldNode;
+126 class ArraycopyNode;
+127 
+128 class ConnectionGraph;
+129 
+130 // ConnectionGraph nodes
+131 class PointsToNode : public ResourceObj {
+132   GrowableArray&lt;PointsToNode*&gt; _edges; // List of nodes this node points to
+133   GrowableArray&lt;PointsToNode*&gt; _uses;  // List of nodes which point to this node
+134 
+135   const u1           _type;  // NodeType
+136   u1                _flags;  // NodeFlags
+137   u1               _escape;  // EscapeState of object
+138   u1        _fields_escape;  // EscapeState of object&#39;s fields
+139 
+140   Node* const        _node;  // Ideal node corresponding to this PointsTo node.
+141   const int           _idx;  // Cached ideal node&#39;s _idx
+142   const uint         _pidx;  // Index of this node
+143 
+144 public:
+145   typedef enum {
+146     UnknownType = 0,
+147     JavaObject  = 1,
+148     LocalVar    = 2,
+149     Field       = 3,
+150     Arraycopy   = 4
+151   } NodeType;
+152 
+153   typedef enum {
+154     UnknownEscape = 0,
+155     NoEscape      = 1, // An object does not escape method or thread and it is
+156                        // not passed to call. It could be replaced with scalar.
+157     ArgEscape     = 2, // An object does not escape method or thread but it is
+158                        // passed as argument to call or referenced by argument
+159                        // and it does not escape during call.
+160     GlobalEscape  = 3  // An object escapes the method or thread.
+161   } EscapeState;
+162 
+163   typedef enum {
+164     ScalarReplaceable = 1,  // Not escaped object could be replaced with scalar
+165     PointsToUnknown   = 2,  // Has edge to phantom_object
+166     ArraycopySrc      = 4,  // Has edge from Arraycopy node
+167     ArraycopyDst      = 8   // Has edge to Arraycopy node
+168   } NodeFlags;
+169 
+170 
+171   inline PointsToNode(ConnectionGraph* CG, Node* n, EscapeState es, NodeType type);
+172 
+173   uint        pidx()   const { return _pidx; }
+174 
+175   Node* ideal_node()   const { return _node; }
+176   int          idx()   const { return _idx; }
+177 
+178   bool is_JavaObject() const { return _type == (u1)JavaObject; }
+179   bool is_LocalVar()   const { return _type == (u1)LocalVar; }
+180   bool is_Field()      const { return _type == (u1)Field; }
+181   bool is_Arraycopy()  const { return _type == (u1)Arraycopy; }
+182 
+183   JavaObjectNode* as_JavaObject() { assert(is_JavaObject(),&quot;&quot;); return (JavaObjectNode*)this; }
+184   LocalVarNode*   as_LocalVar()   { assert(is_LocalVar(),&quot;&quot;);   return (LocalVarNode*)this; }
+185   FieldNode*      as_Field()      { assert(is_Field(),&quot;&quot;);      return (FieldNode*)this; }
+186   ArraycopyNode*  as_Arraycopy()  { assert(is_Arraycopy(),&quot;&quot;);  return (ArraycopyNode*)this; }
+187 
+188   EscapeState escape_state() const { return (EscapeState)_escape; }
+189   void    set_escape_state(EscapeState state) { _escape = (u1)state; }
+190 
+191   EscapeState fields_escape_state() const { return (EscapeState)_fields_escape; }
+192   void    set_fields_escape_state(EscapeState state) { _fields_escape = (u1)state; }
+193 
+194   bool     has_unknown_ptr() const { return (_flags &amp; PointsToUnknown) != 0; }
+195   void set_has_unknown_ptr()       { _flags |= PointsToUnknown; }
+196 
+197   bool     arraycopy_src() const { return (_flags &amp; ArraycopySrc) != 0; }
+198   void set_arraycopy_src()       { _flags |= ArraycopySrc; }
+199   bool     arraycopy_dst() const { return (_flags &amp; ArraycopyDst) != 0; }
+200   void set_arraycopy_dst()       { _flags |= ArraycopyDst; }
+201 
+202   bool     scalar_replaceable() const { return (_flags &amp; ScalarReplaceable) != 0;}
+203   void set_scalar_replaceable(bool v) {
+204     if (v)
+205       _flags |= ScalarReplaceable;
+206     else
+207       _flags &amp;= ~ScalarReplaceable;
+208   }
+209 
+210   int edge_count()              const { return _edges.length(); }
+211   PointsToNode* edge(int e)     const { return _edges.at(e); }
+212   bool add_edge(PointsToNode* edge)    { return _edges.append_if_missing(edge); }
+213 
+214   int use_count()             const { return _uses.length(); }
+215   PointsToNode* use(int e)    const { return _uses.at(e); }
+216   bool add_use(PointsToNode* use)    { return _uses.append_if_missing(use); }
+217 
+218   // Mark base edge use to distinguish from stored value edge.
+219   bool add_base_use(FieldNode* use) { return _uses.append_if_missing((PointsToNode*)((intptr_t)use + 1)); }
+220   static bool is_base_use(PointsToNode* use) { return (((intptr_t)use) &amp; 1); }
+221   static PointsToNode* get_use_node(PointsToNode* use) { return (PointsToNode*)(((intptr_t)use) &amp; ~1); }
+222 
+223   // Return true if this node points to specified node or nodes it points to.
+224   bool points_to(JavaObjectNode* ptn) const;
+225 
+226   // Return true if this node points only to non-escaping allocations.
+227   bool non_escaping_allocation();
+228 
+229   // Return true if one node points to an other.
+230   bool meet(PointsToNode* ptn);
+231 
+232 #ifndef PRODUCT
+233   NodeType node_type() const { return (NodeType)_type;}
+234   void dump(bool print_state=true) const;
+235 #endif
+236 
+237 };
+238 
+239 class LocalVarNode: public PointsToNode {
+240 public:
+241   LocalVarNode(ConnectionGraph *CG, Node* n, EscapeState es):
+242     PointsToNode(CG, n, es, LocalVar) {}
+243 };
+244 
+245 class JavaObjectNode: public PointsToNode {
+246 public:
+247   JavaObjectNode(ConnectionGraph *CG, Node* n, EscapeState es):
+248     PointsToNode(CG, n, es, JavaObject) {
+249       if (es &gt; NoEscape)
+250         set_scalar_replaceable(false);
+251     }
+252 };
+253 
+254 class FieldNode: public PointsToNode {
+255   GrowableArray&lt;PointsToNode*&gt; _bases; // List of JavaObject nodes which point to this node
+256   const int   _offset; // Field&#39;s offset.
+257   const bool  _is_oop; // Field points to object
+258         bool  _has_unknown_base; // Has phantom_object base
+259 public:
+260   FieldNode(ConnectionGraph *CG, Node* n, EscapeState es, int offs, bool is_oop):
+261     PointsToNode(CG, n, es, Field),
+262     _offset(offs), _is_oop(is_oop),
+263     _has_unknown_base(false) {}
+264 
+265   int      offset()              const { return _offset;}
+266   bool     is_oop()              const { return _is_oop;}
+267   bool     has_unknown_base()    const { return _has_unknown_base; }
+268   void set_has_unknown_base()          { _has_unknown_base = true; }
+269 
+270   int base_count()              const { return _bases.length(); }
+271   PointsToNode* base(int e)     const { return _bases.at(e); }
+272   bool add_base(PointsToNode* base)    { return _bases.append_if_missing(base); }
+273 #ifdef ASSERT
+274   // Return true if bases points to this java object.
+275   bool has_base(JavaObjectNode* ptn) const;
+276 #endif
+277 
+278 };
+279 
+280 class ArraycopyNode: public PointsToNode {
+281 public:
+282   ArraycopyNode(ConnectionGraph *CG, Node* n, EscapeState es):
+283     PointsToNode(CG, n, es, Arraycopy) {}
+284 };
+285 
+286 // Iterators for PointsTo node&#39;s edges:
+287 //   for (EdgeIterator i(n); i.has_next(); i.next()) {
+288 //     PointsToNode* u = i.get();
+289 class PointsToIterator: public StackObj {
+290 protected:
+291   const PointsToNode* node;
+292   const int cnt;
+293   int i;
+294 public:
+295   inline PointsToIterator(const PointsToNode* n, int cnt) : node(n), cnt(cnt), i(0) { }
+296   inline bool has_next() const { return i &lt; cnt; }
+297   inline void next() { i++; }
+298   PointsToNode* get() const { ShouldNotCallThis(); return NULL; }
+299 };
+300 
+301 class EdgeIterator: public PointsToIterator {
+302 public:
+303   inline EdgeIterator(const PointsToNode* n) : PointsToIterator(n, n-&gt;edge_count()) { }
+304   inline PointsToNode* get() const { return node-&gt;edge(i); }
+305 };
+306 
+307 class UseIterator: public PointsToIterator {
+308 public:
+309   inline UseIterator(const PointsToNode* n) : PointsToIterator(n, n-&gt;use_count()) { }
+310   inline PointsToNode* get() const { return node-&gt;use(i); }
+311 };
+312 
+313 class BaseIterator: public PointsToIterator {
+314 public:
+315   inline BaseIterator(const FieldNode* n) : PointsToIterator(n, n-&gt;base_count()) { }
+316   inline PointsToNode* get() const { return ((PointsToNode*)node)-&gt;as_Field()-&gt;base(i); }
+317 };
+318 
+319 
+320 class ConnectionGraph: public ResourceObj {
+321   friend class PointsToNode;
+322 private:
+323   GrowableArray&lt;PointsToNode*&gt;  _nodes; // Map from ideal nodes to
+324                                         // ConnectionGraph nodes.
+325 
+326   GrowableArray&lt;PointsToNode*&gt;  _worklist; // Nodes to be processed
+327   VectorSet                  _in_worklist;
+328   uint                         _next_pidx;
+329 
+330   bool            _collecting; // Indicates whether escape information
+331                                // is still being collected. If false,
+332                                // no new nodes will be processed.
+333 
+334   bool               _verify;  // verify graph
+335 
+336   JavaObjectNode*    null_obj;
+337   Node*             _pcmp_neq; // ConI(#CC_GT)
+338   Node*              _pcmp_eq; // ConI(#CC_EQ)
+339 
+340   Compile*           _compile; // Compile object for current compilation
+341   PhaseIterGVN*         _igvn; // Value numbering
+342 
+343   Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
+344 
+345 public:
+346   JavaObjectNode* phantom_obj; // Unknown object
+347 
+348 private:
+349   // Address of an element in _nodes.  Used when the element is to be modified
+350   PointsToNode* ptnode_adr(int idx) const {
+351     // There should be no new ideal nodes during ConnectionGraph build,
+352     // growableArray::at() will throw assert otherwise.
+353     return _nodes.at(idx);
+354   }
+355   uint nodes_size() const { return _nodes.length(); }
+356 
+357   uint next_pidx() { return _next_pidx++; }
+358 
+359   // Add nodes to ConnectionGraph.
+360   void add_local_var(Node* n, PointsToNode::EscapeState es);
+361   void add_java_object(Node* n, PointsToNode::EscapeState es);
+362   void add_field(Node* n, PointsToNode::EscapeState es, int offset);
+363   void add_arraycopy(Node* n, PointsToNode::EscapeState es, PointsToNode* src, PointsToNode* dst);
+364 
+365   // Compute the escape state for arguments to a call.
+366   void process_call_arguments(CallNode *call);
+367 
+368   // Add PointsToNode node corresponding to a call
+369   void add_call_node(CallNode* call);
+370 
+371   // Create PointsToNode node and add it to Connection Graph.
+372   void add_node_to_connection_graph(Node *n, Unique_Node_List *delayed_worklist);
+373 
+374   // Add final simple edges to graph.
+375   void add_final_edges(Node *n);
+376 
+377   // Finish Graph construction.
+378   bool complete_connection_graph(GrowableArray&lt;PointsToNode*&gt;&amp;   ptnodes_worklist,
+379                                  GrowableArray&lt;JavaObjectNode*&gt;&amp; non_escaped_worklist,
+380                                  GrowableArray&lt;JavaObjectNode*&gt;&amp; java_objects_worklist,
+381                                  GrowableArray&lt;FieldNode*&gt;&amp;      oop_fields_worklist);
+382 
+383 #ifdef ASSERT
+384   void verify_connection_graph(GrowableArray&lt;PointsToNode*&gt;&amp;   ptnodes_worklist,
+385                                GrowableArray&lt;JavaObjectNode*&gt;&amp; non_escaped_worklist,
+386                                GrowableArray&lt;JavaObjectNode*&gt;&amp; java_objects_worklist,
+387                                GrowableArray&lt;Node*&gt;&amp; addp_worklist);
+388 #endif
+389 
+390   // Add all references to this JavaObject node.
+391   int add_java_object_edges(JavaObjectNode* jobj, bool populate_worklist);
+392 
+393   // Put node on worklist if it is (or was) not there.
+394   inline void add_to_worklist(PointsToNode* pt) {
+395     PointsToNode* ptf = pt;
+396     uint pidx_bias = 0;
+397     if (PointsToNode::is_base_use(pt)) {
+398       // Create a separate entry in _in_worklist for a marked base edge
+399       // because _worklist may have an entry for a normal edge pointing
+400       // to the same node. To separate them use _next_pidx as bias.
+401       ptf = PointsToNode::get_use_node(pt)-&gt;as_Field();
+402       pidx_bias = _next_pidx;
+403     }
+404     if (!_in_worklist.test_set(ptf-&gt;pidx() + pidx_bias)) {
+405       _worklist.append(pt);
+406     }
+407   }
+408 
+409   // Put on worklist all uses of this node.
+410   inline void add_uses_to_worklist(PointsToNode* pt) {
+411     for (UseIterator i(pt); i.has_next(); i.next()) {
+412       add_to_worklist(i.get());
+413     }
+414   }
+415 
+416   // Put on worklist all field&#39;s uses and related field nodes.
+417   void add_field_uses_to_worklist(FieldNode* field);
+418 
+419   // Put on worklist all related field nodes.
+420   void add_fields_to_worklist(FieldNode* field, PointsToNode* base);
+421 
+422   // Find fields which have unknown value.
+423   int find_field_value(FieldNode* field);
+424 
+425   // Find fields initializing values for allocations.
+426   int find_init_values(JavaObjectNode* ptn, PointsToNode* init_val, PhaseTransform* phase);
+427 
+428   // Set the escape state of an object and its fields.
+429   void set_escape_state(PointsToNode* ptn, PointsToNode::EscapeState esc) {
+430     // Don&#39;t change non-escaping state of NULL pointer.
+431     if (ptn != null_obj) {
+432       if (ptn-&gt;escape_state() &lt; esc)
+433         ptn-&gt;set_escape_state(esc);
+434       if (ptn-&gt;fields_escape_state() &lt; esc)
+435         ptn-&gt;set_fields_escape_state(esc);
+436     }
+437   }
+438   void set_fields_escape_state(PointsToNode* ptn, PointsToNode::EscapeState esc) {
+439     // Don&#39;t change non-escaping state of NULL pointer.
+440     if (ptn != null_obj) {
+441       if (ptn-&gt;fields_escape_state() &lt; esc)
+442         ptn-&gt;set_fields_escape_state(esc);
+443     }
+444   }
+445 
+446   // Propagate GlobalEscape and ArgEscape escape states to all nodes
+447   // and check that we still have non-escaping java objects.
+448   bool find_non_escaped_objects(GrowableArray&lt;PointsToNode*&gt;&amp; ptnodes_worklist,
+449                                 GrowableArray&lt;JavaObjectNode*&gt;&amp; non_escaped_worklist);
+450 
+451   // Adjust scalar_replaceable state after Connection Graph is built.
+452   void adjust_scalar_replaceable_state(JavaObjectNode* jobj);
+453 
+454   // Optimize ideal graph.
+455   void optimize_ideal_graph(GrowableArray&lt;Node*&gt;&amp; ptr_cmp_worklist,
+456                             GrowableArray&lt;Node*&gt;&amp; storestore_worklist);
+457   // Optimize objects compare.
+458   Node* optimize_ptr_compare(Node* n);
+459 
+460   // Returns unique corresponding java object or NULL.
+461   JavaObjectNode* unique_java_object(Node *n);
+462 
+463   // Add an edge of the specified type pointing to the specified target.
+464   bool add_edge(PointsToNode* from, PointsToNode* to) {
+465     assert(!from-&gt;is_Field() || from-&gt;as_Field()-&gt;is_oop(), &quot;sanity&quot;);
+466 
+467     if (to == phantom_obj) {
+468       if (from-&gt;has_unknown_ptr()) {
+469         return false; // already points to phantom_obj
+470       }
+471       from-&gt;set_has_unknown_ptr();
+472     }
+473 
+474     bool is_new = from-&gt;add_edge(to);
+475     assert(to != phantom_obj || is_new, &quot;sanity&quot;);
+476     if (is_new) { // New edge?
+477       assert(!_verify, &quot;graph is incomplete&quot;);
+478       is_new = to-&gt;add_use(from);
+479       assert(is_new, &quot;use should be also new&quot;);
+480     }
+481     return is_new;
+482   }
+483 
+484   // Add an edge from Field node to its base and back.
+485   bool add_base(FieldNode* from, PointsToNode* to) {
+486     assert(!to-&gt;is_Arraycopy(), &quot;sanity&quot;);
+487     if (to == phantom_obj) {
+488       if (from-&gt;has_unknown_base()) {
+489         return false; // already has phantom_obj base
+490       }
+491       from-&gt;set_has_unknown_base();
+492     }
+493     bool is_new = from-&gt;add_base(to);
+494     assert(to != phantom_obj || is_new, &quot;sanity&quot;);
+495     if (is_new) {      // New edge?
+496       assert(!_verify, &quot;graph is incomplete&quot;);
+497       if (to == null_obj)
+498         return is_new; // Don&#39;t add fields to NULL pointer.
+499       if (to-&gt;is_JavaObject()) {
+500         is_new = to-&gt;add_edge(from);
+501       } else {
+502         is_new = to-&gt;add_base_use(from);
+503       }
+504       assert(is_new, &quot;use should be also new&quot;);
+505     }
+506     return is_new;
+507   }
+508 
+509   // Helper functions
+510   bool   is_oop_field(Node* n, int offset, bool* unsafe);
+511   static Node* find_second_addp(Node* addp, Node* n);
+512   // offset of a field reference
+513   int address_offset(Node* adr, PhaseTransform *phase);
+514 
+515 
+516   // Propagate unique types created for unescaped allocated objects
+517   // through the graph
+518   void split_unique_types(GrowableArray&lt;Node *&gt;  &amp;alloc_worklist, GrowableArray&lt;ArrayCopyNode*&gt; &amp;arraycopy_worklist);
+519 
+520   // Helper methods for unique types split.
+521   bool split_AddP(Node *addp, Node *base);
+522 
+523   PhiNode *create_split_phi(PhiNode *orig_phi, int alias_idx, GrowableArray&lt;PhiNode *&gt;  &amp;orig_phi_worklist, bool &amp;new_created);
+524   PhiNode *split_memory_phi(PhiNode *orig_phi, int alias_idx, GrowableArray&lt;PhiNode *&gt;  &amp;orig_phi_worklist);
+525 
+526   void  move_inst_mem(Node* n, GrowableArray&lt;PhiNode *&gt;  &amp;orig_phis);
+527   Node* find_inst_mem(Node* mem, int alias_idx,GrowableArray&lt;PhiNode *&gt;  &amp;orig_phi_worklist);
+528   Node* step_through_mergemem(MergeMemNode *mmem, int alias_idx, const TypeOopPtr *toop);
+529 
+530 
+531   GrowableArray&lt;MergeMemNode*&gt;  _mergemem_worklist; // List of all MergeMem nodes
+532 
+533   Node_Array _node_map; // used for bookeeping during type splitting
+534                         // Used for the following purposes:
+535                         // Memory Phi    - most recent unique Phi split out
+536                         //                 from this Phi
+537                         // MemNode       - new memory input for this node
+538                         // ChecCastPP    - allocation that this is a cast of
+539                         // allocation    - CheckCastPP of the allocation
+540 
+541   // manage entries in _node_map
+542 
+543   void  set_map(Node* from, Node* to)  {
+544     ideal_nodes.push(from);
+545     _node_map.map(from-&gt;_idx, to);
+546   }
+547 
+548   Node* get_map(int idx) { return _node_map[idx]; }
+549 
+550   PhiNode* get_map_phi(int idx) {
+551     Node* phi = _node_map[idx];
+552     return (phi == NULL) ? NULL : phi-&gt;as_Phi();
+553   }
+554 
+555   // Notify optimizer that a node has been modified
+556   void record_for_optimizer(Node *n);
+557 
+558   // Compute the escape information
+559   bool compute_escape();
+560 
+561 public:
+562   ConnectionGraph(Compile *C, PhaseIterGVN *igvn);
+563 
+564   // Check for non-escaping candidates
+565   static bool has_candidates(Compile *C);
+566 
+567   // Perform escape analysis
+568   static void do_analysis(Compile *C, PhaseIterGVN *igvn);
+569 
+570   bool not_global_escape(Node *n);
+571 
+572   // To be used by, e.g., BarrierSetC2 impls
+573   Node* get_addp_base(Node* addp);
+574 
+575   // Utility function for nodes that load an object
+576   void add_objload_to_connection_graph(Node* n, Unique_Node_List* delayed_worklist);
+577 
+578   // Add LocalVar node and edge if possible
+579   void add_local_var_and_edge(Node* n, PointsToNode::EscapeState es, Node* to,
+580                               Unique_Node_List *delayed_worklist) {
+581     PointsToNode* ptn = ptnode_adr(to-&gt;_idx);
+582     if (delayed_worklist != NULL) { // First iteration of CG construction
+583       add_local_var(n, es);
+584       if (ptn == NULL) {
+585         delayed_worklist-&gt;push(n);
+586         return; // Process it later.
+587       }
+588     } else {
+589       assert(ptn != NULL, &quot;node should be registered&quot;);
+590     }
+591     add_edge(ptnode_adr(n-&gt;_idx), ptn);
+592   }
+593 
+594   // Map ideal node to existing PointsTo node (usually phantom_object).
+595   void map_ideal_node(Node *n, PointsToNode* ptn) {
+596     assert(ptn != NULL, &quot;only existing PointsTo node&quot;);
+597     _nodes.at_put(n-&gt;_idx, ptn);
+598   }
+599 
+600   void add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist);
+601   bool add_final_edges_unsafe_access(Node* n, uint opcode);
+602 
+603 #ifndef PRODUCT
+604   void dump(GrowableArray&lt;PointsToNode*&gt;&amp; ptnodes_worklist);
+605 #endif
+606 };
+607 
+608 inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, NodeType type):
+609   _edges(CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+610   _uses (CG-&gt;_compile-&gt;comp_arena(), 2, 0, NULL),
+611   _type((u1)type),
+612   _flags(ScalarReplaceable),
+613   _escape((u1)es),
+614   _fields_escape((u1)es),
+615   _node(n),
+616   _idx(n-&gt;_idx),
+617   _pidx(CG-&gt;next_pidx()) {
+618   assert(n != NULL &amp;&amp; es != UnknownEscape, &quot;sanity&quot;);
+619 }
+620 
+621 #endif // SHARE_OPTO_ESCAPE_HPP
+    </pre>
+  </body>
+</html>

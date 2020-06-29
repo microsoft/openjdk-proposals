@@ -1,0 +1,35 @@
+diff a/src/hotspot/share/opto/memnode.cpp b/src/hotspot/share/opto/memnode.cpp
+--- a/src/hotspot/share/opto/memnode.cpp
++++ b/src/hotspot/share/opto/memnode.cpp
+@@ -186,11 +186,14 @@
+         result = proj_in->in(TypeFunc::Memory);
+       } else {
+         assert(false, "unexpected projection");
+       }
+     } else if (result->is_ClearArray()) {
+-      if (!is_instance || !ClearArrayNode::step_through(&result, instance_id, phase)) {
++      intptr_t offset;
++      AllocateNode* alloc = AllocateNode::Ideal_allocation(result->in(3), phase, offset);
++
++      if (!is_instance || (alloc == NULL) || !ClearArrayNode::step_through(&result, instance_id, phase)) {
+         // Can not bypass initialization of the instance
+         // we are looking for.
+         break;
+       }
+       // Otherwise skip it (the call updated 'result' value).
+@@ -706,11 +709,14 @@
+           break;
+         }
+         mem = mem->in(0)->in(TypeFunc::Memory);
+         continue;           // (a) advance through independent MemBar memory
+       } else if (mem->is_ClearArray()) {
+-        if (ClearArrayNode::step_through(&mem, (uint)addr_t->instance_id(), phase)) {
++        intptr_t offset;
++        AllocateNode* alloc = AllocateNode::Ideal_allocation(mem->in(3), phase, offset);
++
++        if ((alloc != NULL) && ClearArrayNode::step_through(&mem, (uint)addr_t->instance_id(), phase)) {
+           // (the call updated 'mem' value)
+           continue;         // (a) advance through independent allocation memory
+         } else {
+           // Can not bypass initialization of the instance
+           // we are looking for.

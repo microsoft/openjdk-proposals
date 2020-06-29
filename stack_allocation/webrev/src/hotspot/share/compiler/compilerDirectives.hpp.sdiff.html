@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/compiler/compilerDirectives.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compilerDefinitions.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/compilerDirectives.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 52 
+ 53 #ifdef COMPILER1
+ 54   #define compilerdirectives_c1_flags(cflags)
+ 55 #else
+ 56   #define compilerdirectives_c1_flags(cflags)
+ 57 #endif
+ 58 
+ 59 #ifdef COMPILER2
+ 60   #define compilerdirectives_c2_flags(cflags) \
+ 61     cflags(BlockLayoutByFrequency,  bool, BlockLayoutByFrequency,  BlockLayoutByFrequency) \
+ 62     cflags(PrintOptoAssembly,       bool, PrintOptoAssembly, PrintOptoAssembly) \
+ 63     cflags(PrintIntrinsics,         bool, PrintIntrinsics, PrintIntrinsics) \
+ 64 NOT_PRODUCT(cflags(TraceOptoPipelining, bool, TraceOptoPipelining, TraceOptoPipelining)) \
+ 65 NOT_PRODUCT(cflags(TraceOptoOutput,     bool, TraceOptoOutput, TraceOptoOutput)) \
+ 66 NOT_PRODUCT(cflags(PrintIdeal,          bool, PrintIdeal, PrintIdeal)) \
+ 67 NOT_PRODUCT(cflags(IGVPrintLevel,       intx, PrintIdealGraphLevel, IGVPrintLevel)) \
+ 68     cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
+ 69     cflags(Vectorize,               bool, false, Vectorize) \
+ 70     cflags(VectorizeDebug,          uintx, 0, VectorizeDebug) \
+ 71     cflags(CloneMapDebug,           bool, false, CloneMapDebug) \
+<span class="line-modified"> 72     cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit)</span>
+
+
+
+
+ 73 #else
+ 74   #define compilerdirectives_c2_flags(cflags)
+ 75 #endif
+ 76 
+ 77 class CompilerDirectives;
+ 78 class DirectiveSet;
+ 79 
+ 80 class DirectivesStack : AllStatic {
+ 81 private:
+ 82   static CompilerDirectives* _top;
+ 83   static CompilerDirectives* _bottom;
+ 84   static int _depth;
+ 85 
+ 86   static void pop_inner(); // no lock version of pop
+ 87 public:
+ 88   static void init();
+ 89   static DirectiveSet* getMatchingDirective(const methodHandle&amp; mh, AbstractCompiler* comp);
+ 90   static DirectiveSet* getDefaultDirective(AbstractCompiler* comp);
+ 91   static void push(CompilerDirectives* directive);
+ 92   static void pop(int count);
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 52 
+ 53 #ifdef COMPILER1
+ 54   #define compilerdirectives_c1_flags(cflags)
+ 55 #else
+ 56   #define compilerdirectives_c1_flags(cflags)
+ 57 #endif
+ 58 
+ 59 #ifdef COMPILER2
+ 60   #define compilerdirectives_c2_flags(cflags) \
+ 61     cflags(BlockLayoutByFrequency,  bool, BlockLayoutByFrequency,  BlockLayoutByFrequency) \
+ 62     cflags(PrintOptoAssembly,       bool, PrintOptoAssembly, PrintOptoAssembly) \
+ 63     cflags(PrintIntrinsics,         bool, PrintIntrinsics, PrintIntrinsics) \
+ 64 NOT_PRODUCT(cflags(TraceOptoPipelining, bool, TraceOptoPipelining, TraceOptoPipelining)) \
+ 65 NOT_PRODUCT(cflags(TraceOptoOutput,     bool, TraceOptoOutput, TraceOptoOutput)) \
+ 66 NOT_PRODUCT(cflags(PrintIdeal,          bool, PrintIdeal, PrintIdeal)) \
+ 67 NOT_PRODUCT(cflags(IGVPrintLevel,       intx, PrintIdealGraphLevel, IGVPrintLevel)) \
+ 68     cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
+ 69     cflags(Vectorize,               bool, false, Vectorize) \
+ 70     cflags(VectorizeDebug,          uintx, 0, VectorizeDebug) \
+ 71     cflags(CloneMapDebug,           bool, false, CloneMapDebug) \
+<span class="line-modified"> 72     cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit) \</span>
+<span class="line-added"> 73 NOT_PRODUCT(cflags(PrintEscapeAnalysis,       bool, PrintEscapeAnalysis, PrintEscapeAnalysis)) \</span>
+<span class="line-added"> 74 NOT_PRODUCT(cflags(PrintEliminateAllocations, bool, PrintEliminateAllocations, PrintEliminateAllocations)) \</span>
+<span class="line-added"> 75     cflags(UseStackAllocation,                bool, UseStackAllocation, UseStackAllocation) \</span>
+<span class="line-added"> 76 NOT_PRODUCT(cflags(PrintStackAllocation,      bool, PrintStackAllocation, PrintStackAllocation))</span>
+ 77 #else
+ 78   #define compilerdirectives_c2_flags(cflags)
+ 79 #endif
+ 80 
+ 81 class CompilerDirectives;
+ 82 class DirectiveSet;
+ 83 
+ 84 class DirectivesStack : AllStatic {
+ 85 private:
+ 86   static CompilerDirectives* _top;
+ 87   static CompilerDirectives* _bottom;
+ 88   static int _depth;
+ 89 
+ 90   static void pop_inner(); // no lock version of pop
+ 91 public:
+ 92   static void init();
+ 93   static DirectiveSet* getMatchingDirective(const methodHandle&amp; mh, AbstractCompiler* comp);
+ 94   static DirectiveSet* getDefaultDirective(AbstractCompiler* comp);
+ 95   static void push(CompilerDirectives* directive);
+ 96   static void pop(int count);
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="compilerDefinitions.cpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

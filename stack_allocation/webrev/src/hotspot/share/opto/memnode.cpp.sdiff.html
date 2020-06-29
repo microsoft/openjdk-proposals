@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/opto/memnode.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="macro.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="output.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/memnode.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 171         }
+ 172         if (is_instance) {
+ 173           result = proj_in-&gt;in(TypeFunc::Memory);
+ 174         } else if (is_boxed_value_load) {
+ 175           Node* klass = alloc-&gt;in(AllocateNode::KlassNode);
+ 176           const TypeKlassPtr* tklass = phase-&gt;type(klass)-&gt;is_klassptr();
+ 177           if (tklass-&gt;klass_is_exact() &amp;&amp; !tklass-&gt;klass()-&gt;equals(t_oop-&gt;klass())) {
+ 178             result = proj_in-&gt;in(TypeFunc::Memory); // not related allocation
+ 179           }
+ 180         }
+ 181       } else if (proj_in-&gt;is_MemBar()) {
+ 182         ArrayCopyNode* ac = NULL;
+ 183         if (ArrayCopyNode::may_modify(t_oop, proj_in-&gt;as_MemBar(), phase, ac)) {
+ 184           break;
+ 185         }
+ 186         result = proj_in-&gt;in(TypeFunc::Memory);
+ 187       } else {
+ 188         assert(false, &quot;unexpected projection&quot;);
+ 189       }
+ 190     } else if (result-&gt;is_ClearArray()) {
+<span class="line-modified"> 191       if (!is_instance || !ClearArrayNode::step_through(&amp;result, instance_id, phase)) {</span>
+
+
+
+ 192         // Can not bypass initialization of the instance
+ 193         // we are looking for.
+ 194         break;
+ 195       }
+ 196       // Otherwise skip it (the call updated &#39;result&#39; value).
+ 197     } else if (result-&gt;is_MergeMem()) {
+ 198       result = step_through_mergemem(phase, result-&gt;as_MergeMem(), t_oop, NULL, tty);
+ 199     }
+ 200   }
+ 201   return result;
+ 202 }
+ 203 
+ 204 Node *MemNode::optimize_memory_chain(Node *mchain, const TypePtr *t_adr, Node *load, PhaseGVN *phase) {
+ 205   const TypeOopPtr* t_oop = t_adr-&gt;isa_oopptr();
+ 206   if (t_oop == NULL)
+ 207     return mchain;  // don&#39;t try to optimize non-oop types
+ 208   Node* result = optimize_simple_memory_chain(mchain, t_oop, load, phase);
+ 209   bool is_instance = t_oop-&gt;is_known_instance_field();
+ 210   PhaseIterGVN *igvn = phase-&gt;is_IterGVN();
+ 211   if (is_instance &amp;&amp; igvn != NULL &amp;&amp; result-&gt;is_Phi()) {
+</pre>
+<hr />
+<pre>
+ 691       }
+ 692       // Found an arraycopy that may affect that load
+ 693       return mem;
+ 694     } else if (addr_t != NULL &amp;&amp; addr_t-&gt;is_known_instance_field()) {
+ 695       // Can&#39;t use optimize_simple_memory_chain() since it needs PhaseGVN.
+ 696       if (mem-&gt;is_Proj() &amp;&amp; mem-&gt;in(0)-&gt;is_Call()) {
+ 697         // ArrayCopyNodes processed here as well.
+ 698         CallNode *call = mem-&gt;in(0)-&gt;as_Call();
+ 699         if (!call-&gt;may_modify(addr_t, phase)) {
+ 700           mem = call-&gt;in(TypeFunc::Memory);
+ 701           continue;         // (a) advance through independent call memory
+ 702         }
+ 703       } else if (mem-&gt;is_Proj() &amp;&amp; mem-&gt;in(0)-&gt;is_MemBar()) {
+ 704         ArrayCopyNode* ac = NULL;
+ 705         if (ArrayCopyNode::may_modify(addr_t, mem-&gt;in(0)-&gt;as_MemBar(), phase, ac)) {
+ 706           break;
+ 707         }
+ 708         mem = mem-&gt;in(0)-&gt;in(TypeFunc::Memory);
+ 709         continue;           // (a) advance through independent MemBar memory
+ 710       } else if (mem-&gt;is_ClearArray()) {
+<span class="line-modified"> 711         if (ClearArrayNode::step_through(&amp;mem, (uint)addr_t-&gt;instance_id(), phase)) {</span>
+
+
+
+ 712           // (the call updated &#39;mem&#39; value)
+ 713           continue;         // (a) advance through independent allocation memory
+ 714         } else {
+ 715           // Can not bypass initialization of the instance
+ 716           // we are looking for.
+ 717           return mem;
+ 718         }
+ 719       } else if (mem-&gt;is_MergeMem()) {
+ 720         int alias_idx = phase-&gt;C-&gt;get_alias_index(adr_type());
+ 721         mem = mem-&gt;as_MergeMem()-&gt;memory_at(alias_idx);
+ 722         continue;           // (a) advance through independent MergeMem memory
+ 723       }
+ 724     }
+ 725 
+ 726     // Unless there is an explicit &#39;continue&#39;, we must bail out here,
+ 727     // because &#39;mem&#39; is an inscrutable memory state (e.g., a call).
+ 728     break;
+ 729   }
+ 730 
+ 731   return NULL;              // bail out
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 171         }
+ 172         if (is_instance) {
+ 173           result = proj_in-&gt;in(TypeFunc::Memory);
+ 174         } else if (is_boxed_value_load) {
+ 175           Node* klass = alloc-&gt;in(AllocateNode::KlassNode);
+ 176           const TypeKlassPtr* tklass = phase-&gt;type(klass)-&gt;is_klassptr();
+ 177           if (tklass-&gt;klass_is_exact() &amp;&amp; !tklass-&gt;klass()-&gt;equals(t_oop-&gt;klass())) {
+ 178             result = proj_in-&gt;in(TypeFunc::Memory); // not related allocation
+ 179           }
+ 180         }
+ 181       } else if (proj_in-&gt;is_MemBar()) {
+ 182         ArrayCopyNode* ac = NULL;
+ 183         if (ArrayCopyNode::may_modify(t_oop, proj_in-&gt;as_MemBar(), phase, ac)) {
+ 184           break;
+ 185         }
+ 186         result = proj_in-&gt;in(TypeFunc::Memory);
+ 187       } else {
+ 188         assert(false, &quot;unexpected projection&quot;);
+ 189       }
+ 190     } else if (result-&gt;is_ClearArray()) {
+<span class="line-modified"> 191       intptr_t offset;</span>
+<span class="line-added"> 192       AllocateNode* alloc = AllocateNode::Ideal_allocation(result-&gt;in(3), phase, offset);</span>
+<span class="line-added"> 193 </span>
+<span class="line-added"> 194       if (!is_instance || (alloc == NULL) || !ClearArrayNode::step_through(&amp;result, instance_id, phase)) {</span>
+ 195         // Can not bypass initialization of the instance
+ 196         // we are looking for.
+ 197         break;
+ 198       }
+ 199       // Otherwise skip it (the call updated &#39;result&#39; value).
+ 200     } else if (result-&gt;is_MergeMem()) {
+ 201       result = step_through_mergemem(phase, result-&gt;as_MergeMem(), t_oop, NULL, tty);
+ 202     }
+ 203   }
+ 204   return result;
+ 205 }
+ 206 
+ 207 Node *MemNode::optimize_memory_chain(Node *mchain, const TypePtr *t_adr, Node *load, PhaseGVN *phase) {
+ 208   const TypeOopPtr* t_oop = t_adr-&gt;isa_oopptr();
+ 209   if (t_oop == NULL)
+ 210     return mchain;  // don&#39;t try to optimize non-oop types
+ 211   Node* result = optimize_simple_memory_chain(mchain, t_oop, load, phase);
+ 212   bool is_instance = t_oop-&gt;is_known_instance_field();
+ 213   PhaseIterGVN *igvn = phase-&gt;is_IterGVN();
+ 214   if (is_instance &amp;&amp; igvn != NULL &amp;&amp; result-&gt;is_Phi()) {
+</pre>
+<hr />
+<pre>
+ 694       }
+ 695       // Found an arraycopy that may affect that load
+ 696       return mem;
+ 697     } else if (addr_t != NULL &amp;&amp; addr_t-&gt;is_known_instance_field()) {
+ 698       // Can&#39;t use optimize_simple_memory_chain() since it needs PhaseGVN.
+ 699       if (mem-&gt;is_Proj() &amp;&amp; mem-&gt;in(0)-&gt;is_Call()) {
+ 700         // ArrayCopyNodes processed here as well.
+ 701         CallNode *call = mem-&gt;in(0)-&gt;as_Call();
+ 702         if (!call-&gt;may_modify(addr_t, phase)) {
+ 703           mem = call-&gt;in(TypeFunc::Memory);
+ 704           continue;         // (a) advance through independent call memory
+ 705         }
+ 706       } else if (mem-&gt;is_Proj() &amp;&amp; mem-&gt;in(0)-&gt;is_MemBar()) {
+ 707         ArrayCopyNode* ac = NULL;
+ 708         if (ArrayCopyNode::may_modify(addr_t, mem-&gt;in(0)-&gt;as_MemBar(), phase, ac)) {
+ 709           break;
+ 710         }
+ 711         mem = mem-&gt;in(0)-&gt;in(TypeFunc::Memory);
+ 712         continue;           // (a) advance through independent MemBar memory
+ 713       } else if (mem-&gt;is_ClearArray()) {
+<span class="line-modified"> 714         intptr_t offset;</span>
+<span class="line-added"> 715         AllocateNode* alloc = AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset);</span>
+<span class="line-added"> 716 </span>
+<span class="line-added"> 717         if ((alloc != NULL) &amp;&amp; ClearArrayNode::step_through(&amp;mem, (uint)addr_t-&gt;instance_id(), phase)) {</span>
+ 718           // (the call updated &#39;mem&#39; value)
+ 719           continue;         // (a) advance through independent allocation memory
+ 720         } else {
+ 721           // Can not bypass initialization of the instance
+ 722           // we are looking for.
+ 723           return mem;
+ 724         }
+ 725       } else if (mem-&gt;is_MergeMem()) {
+ 726         int alias_idx = phase-&gt;C-&gt;get_alias_index(adr_type());
+ 727         mem = mem-&gt;as_MergeMem()-&gt;memory_at(alias_idx);
+ 728         continue;           // (a) advance through independent MergeMem memory
+ 729       }
+ 730     }
+ 731 
+ 732     // Unless there is an explicit &#39;continue&#39;, we must bail out here,
+ 733     // because &#39;mem&#39; is an inscrutable memory state (e.g., a call).
+ 734     break;
+ 735   }
+ 736 
+ 737   return NULL;              // bail out
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="macro.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="output.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

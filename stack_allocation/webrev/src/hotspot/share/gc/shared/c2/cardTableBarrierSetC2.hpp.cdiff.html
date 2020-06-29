@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="cardTableBarrierSetC2.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../cardTable.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/shared/c2/cardTableBarrierSetC2.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 24,10 ***</span>
+<span class="line-new-header">--- 24,28 ---</span>
+  
+  #ifndef SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+  #define SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+  
+  #include &quot;gc/shared/c2/modRefBarrierSetC2.hpp&quot;
+<span class="line-added">+ #include &quot;utilities/growableArray.hpp&quot;</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ class CastP2XNode;</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ class BarrierSetC2State : public ResourceObj {</span>
+<span class="line-added">+ private:</span>
+<span class="line-added">+   GrowableArray&lt;CastP2XNode*&gt;* _enqueue_barriers;</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ public:</span>
+<span class="line-added">+   BarrierSetC2State(Arena* comp_arena);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   int enqueue_barriers_count() const;</span>
+<span class="line-added">+   CastP2XNode* enqueue_barrier(int idx) const;</span>
+<span class="line-added">+   void add_enqueue_barrier(CastP2XNode* n);</span>
+<span class="line-added">+   void remove_enqueue_barrier(CastP2XNode* n);</span>
+<span class="line-added">+   bool is_a_barrier(CastP2XNode* n);</span>
+<span class="line-added">+ };</span>
+<span class="line-added">+ </span>
+  
+  class CardTableBarrierSetC2: public ModRefBarrierSetC2 {
+  protected:
+    virtual void post_barrier(GraphKit* kit,
+                              Node* ctl,
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 44,10 ***</span>
+<span class="line-new-header">--- 62,19 ---</span>
+  public:
+    virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
+    virtual bool is_gc_barrier_node(Node* node) const;
+    virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+    virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, ArrayCopyPhase phase) const;
+<span class="line-added">+   virtual bool process_barrier_node(Node* cast_node, PhaseIterGVN&amp; igvn) const;</span>
+<span class="line-added">+   virtual Node* step_over_gc_barrier(Node* c) const;</span>
+  
+    bool use_ReduceInitialCardMarks() const;
+<span class="line-added">+ </span>
+<span class="line-added">+   BarrierSetC2State* state() const;</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   virtual void register_potential_barrier_node(Node* node) const;</span>
+<span class="line-added">+   virtual void unregister_potential_barrier_node(Node* node) const;</span>
+<span class="line-added">+   virtual bool expand_barriers(Compile* C, PhaseIterGVN&amp; igvn) const;</span>
+<span class="line-added">+   virtual void* create_barrier_state(Arena* comp_arena) const;</span>
+  };
+  
+  #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP
+</pre>
+<center><a href="cardTableBarrierSetC2.cpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="../cardTable.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/opto/macro.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="machnode.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="macro.hpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/macro.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -301,10 +301,17 @@</span>
+        } else {
+          assert(adr_idx == Compile::AliasIdxRaw, &quot;address must match or be raw&quot;);
+        }
+        mem = mem-&gt;in(MemNode::Memory);
+      } else if (mem-&gt;is_ClearArray()) {
+<span class="udiff-line-added">+       intptr_t offset;</span>
+<span class="udiff-line-added">+       AllocateNode* alloc = AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+       if (alloc == NULL) {</span>
+<span class="udiff-line-added">+         return start_mem;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+ </span>
+        if (!ClearArrayNode::step_through(&amp;mem, alloc-&gt;_idx, phase)) {
+          // Can not bypass initialization of the instance
+          // we are looking.
+          debug_only(intptr_t offset;)
+          assert(alloc == AllocateNode::Ideal_allocation(mem-&gt;in(3), phase, offset), &quot;sanity&quot;);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -725,11 +732,11 @@</span>
+        }
+      }
+    }
+  
+  #ifndef PRODUCT
+<span class="udiff-line-modified-removed">-   if (PrintEliminateAllocations) {</span>
+<span class="udiff-line-modified-added">+   if (print_eliminate_allocations()) {</span>
+      if (can_eliminate) {
+        tty-&gt;print(&quot;Scalar &quot;);
+        if (res == NULL)
+          alloc-&gt;dump();
+        else
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -750,10 +757,22 @@</span>
+    }
+  #endif
+    return can_eliminate;
+  }
+  
+<span class="udiff-line-added">+ void PhaseMacroExpand::adjust_safepoint_jvms(SafePointNode* sfpt, Node* res, SafePointScalarObjectNode* sobj) {</span>
+<span class="udiff-line-added">+   JVMState *jvms = sfpt-&gt;jvms();</span>
+<span class="udiff-line-added">+   jvms-&gt;set_endoff(sfpt-&gt;req());</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Now make a pass over the debug information replacing any references</span>
+<span class="udiff-line-added">+   // to the allocated object with &quot;sobj&quot;</span>
+<span class="udiff-line-added">+   int start = jvms-&gt;debug_start();</span>
+<span class="udiff-line-added">+   int end   = jvms-&gt;debug_end();</span>
+<span class="udiff-line-added">+   sfpt-&gt;replace_edges_in_range(res, sobj, start, end);</span>
+<span class="udiff-line-added">+   _igvn._worklist.push(sfpt);</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+  // Do scalar replacement.
+  bool PhaseMacroExpand::scalar_replacement(AllocateNode *alloc, GrowableArray &lt;SafePointNode *&gt;&amp; safepoints) {
+    GrowableArray &lt;SafePointNode *&gt; safepoints_done;
+  
+    ciKlass* klass = NULL;
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -882,11 +901,11 @@</span>
+              }
+            }
+            _igvn._worklist.push(sfpt_done);
+          }
+  #ifndef PRODUCT
+<span class="udiff-line-modified-removed">-         if (PrintEliminateAllocations) {</span>
+<span class="udiff-line-modified-added">+         if (print_eliminate_allocations()) {</span>
+            if (field != NULL) {
+              tty-&gt;print(&quot;=== At SafePoint node %d can&#39;t find value of Field: &quot;,
+                         sfpt-&gt;_idx);
+              field-&gt;print();
+              int field_idx = C-&gt;get_alias_index(field_addr_type);
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -913,18 +932,11 @@</span>
+            field_val = transform_later(new DecodeNNode(field_val, field_val-&gt;get_ptr_type()));
+          }
+        }
+        sfpt-&gt;add_req(field_val);
+      }
+<span class="udiff-line-modified-removed">-     JVMState *jvms = sfpt-&gt;jvms();</span>
+<span class="udiff-line-removed">-     jvms-&gt;set_endoff(sfpt-&gt;req());</span>
+<span class="udiff-line-removed">-     // Now make a pass over the debug information replacing any references</span>
+<span class="udiff-line-removed">-     // to the allocated object with &quot;sobj&quot;</span>
+<span class="udiff-line-removed">-     int start = jvms-&gt;debug_start();</span>
+<span class="udiff-line-removed">-     int end   = jvms-&gt;debug_end();</span>
+<span class="udiff-line-removed">-     sfpt-&gt;replace_edges_in_range(res, sobj, start, end);</span>
+<span class="udiff-line-removed">-     _igvn._worklist.push(sfpt);</span>
+<span class="udiff-line-modified-added">+     adjust_safepoint_jvms(sfpt, res, sobj);</span>
+      safepoints_done.append_if_missing(sfpt); // keep it for rollback
+    }
+    return true;
+  }
+  
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1016,10 +1028,14 @@</span>
+      }
+      assert(res-&gt;outcnt() == 0, &quot;all uses of allocated objects must be deleted&quot;);
+      _igvn.remove_dead_node(res);
+    }
+  
+<span class="udiff-line-added">+   eliminate_unused_allocation_edges(alloc);</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void PhaseMacroExpand::eliminate_unused_allocation_edges(CallNode* alloc) {</span>
+    //
+    // Process other users of allocation&#39;s projections
+    //
+    if (_resproj != NULL &amp;&amp; _resproj-&gt;outcnt() != 0) {
+      // First disconnect stores captured by Initialize node.
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1084,10 +1100,492 @@</span>
+    if (_catchallcatchproj != NULL) {
+      _igvn.replace_node(_catchallcatchproj, C-&gt;top());
+    }
+  }
+  
+<span class="udiff-line-added">+ #define STACK_REG_BUFFER 4</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool PhaseMacroExpand::stack_allocation_location_representable(int slot_location) {</span>
+<span class="udiff-line-added">+   // TODO This is likely not enough as there are values on the stack above the fixed slots</span>
+<span class="udiff-line-added">+   // Revist to see if there is a better check</span>
+<span class="udiff-line-added">+   OptoReg::Name stack_reg = OptoReg::stack2reg(slot_location + STACK_REG_BUFFER);</span>
+<span class="udiff-line-added">+   if (RegMask::can_represent(stack_reg)) {</span>
+<span class="udiff-line-added">+     return true;</span>
+<span class="udiff-line-added">+   } else {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ #undef STACK_REG_BUFFER</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ int PhaseMacroExpand::next_stack_allocated_object(int num_slots) {</span>
+<span class="udiff-line-added">+   int current = C-&gt;fixed_slots();</span>
+<span class="udiff-line-added">+   int next    = current + num_slots;</span>
+<span class="udiff-line-added">+   if (!stack_allocation_location_representable(next)) {</span>
+<span class="udiff-line-added">+     return -1;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   // Keep the toplevel high water mark current:</span>
+<span class="udiff-line-added">+   if (C-&gt;fixed_slots() &lt; next) C-&gt;set_fixed_slots(next);</span>
+<span class="udiff-line-added">+   return current;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool PhaseMacroExpand::process_write_barriers_on_stack_allocated_objects(AllocateNode* alloc) {</span>
+<span class="udiff-line-added">+   GrowableArray&lt;Node*&gt; barriers;</span>
+<span class="udiff-line-added">+   Node *res = alloc-&gt;result_cast();</span>
+<span class="udiff-line-added">+   assert(res != NULL, &quot;result node must not be null&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Find direct barriers on the stack allocated objects.</span>
+<span class="udiff-line-added">+   // Those we can simply eliminate.</span>
+<span class="udiff-line-added">+   for (DUIterator_Fast imax, i = res-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+     Node *use = res-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+     if (use-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="udiff-line-added">+       barriers.append_if_missing(use);</span>
+<span class="udiff-line-added">+     } else if (use-&gt;is_AddP()) {</span>
+<span class="udiff-line-added">+       for (DUIterator_Fast jmax, j = use-&gt;fast_outs(jmax); j &lt; jmax; j++) {</span>
+<span class="udiff-line-added">+         Node *addp_out = use-&gt;fast_out(j);</span>
+<span class="udiff-line-added">+         if (addp_out-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="udiff-line-added">+           barriers.append_if_missing(addp_out);</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   while (barriers.length() != 0) {</span>
+<span class="udiff-line-added">+     eliminate_gc_barrier(barriers.pop());</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // After removing the direct barriers result may no longer be used</span>
+<span class="udiff-line-added">+   if (alloc-&gt;result_cast() == NULL) {</span>
+<span class="udiff-line-added">+     return true;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Next walk all uses of the allocate to discover the barriers that</span>
+<span class="udiff-line-added">+   // might be reachable from our allocate. If the barrier is reachable</span>
+<span class="udiff-line-added">+   // from stack allocated object, we unregister it, so that the check</span>
+<span class="udiff-line-added">+   // elimination code doesn&#39;t run on it.</span>
+<span class="udiff-line-added">+   VectorSet visited(Thread::current()-&gt;resource_area());</span>
+<span class="udiff-line-added">+   GrowableArray&lt;Node*&gt; node_worklist;</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   BarrierSetC2 *bs = BarrierSet::barrier_set()-&gt;barrier_set_c2();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   node_worklist.push(res);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   while(node_worklist.length() != 0) {</span>
+<span class="udiff-line-added">+     Node* n = node_worklist.pop();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     if (visited.test_set(n-&gt;_idx)) {</span>
+<span class="udiff-line-added">+       continue;  // already processed</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = n-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *use = n-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       if (use-&gt;Opcode() == Op_CastP2X) {</span>
+<span class="udiff-line-added">+         bs-&gt;unregister_potential_barrier_node(use);</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_Phi() ||</span>
+<span class="udiff-line-added">+                  use-&gt;is_CheckCastPP() ||</span>
+<span class="udiff-line-added">+                  use-&gt;is_EncodeP() ||</span>
+<span class="udiff-line-added">+                  use-&gt;is_DecodeN() ||</span>
+<span class="udiff-line-added">+                  use-&gt;is_SafePoint() ||</span>
+<span class="udiff-line-added">+                  use-&gt;is_Proj() ||</span>
+<span class="udiff-line-added">+                  (use-&gt;is_ConstraintCast() &amp;&amp; use-&gt;Opcode() == Op_CastPP)) {</span>
+<span class="udiff-line-added">+         // Find barriers beyond our current result</span>
+<span class="udiff-line-added">+         node_worklist.push(use);</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_Store() &amp;&amp; use-&gt;Opcode() == Op_StoreP) {</span>
+<span class="udiff-line-added">+         if (n != use-&gt;in(MemNode::ValueIn)) {</span>
+<span class="udiff-line-added">+           continue;</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+         // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.</span>
+<span class="udiff-line-added">+         // Common up this code into a helper</span>
+<span class="udiff-line-added">+         Node *memory = use-&gt;in(MemNode::Address);</span>
+<span class="udiff-line-added">+         if (memory-&gt;is_AddP()) {</span>
+<span class="udiff-line-added">+           Node *base = memory-&gt;in(AddPNode::Base);</span>
+<span class="udiff-line-added">+           if (base-&gt;uncast()-&gt;is_top()) { // The AddP case #3 and #6 and #9.</span>
+<span class="udiff-line-added">+             base = memory-&gt;in(AddPNode::Address);</span>
+<span class="udiff-line-added">+             while (base-&gt;is_AddP()) {</span>
+<span class="udiff-line-added">+               // Case #6 (unsafe access) may have several chained AddP nodes.</span>
+<span class="udiff-line-added">+               assert(base-&gt;in(AddPNode::Base)-&gt;uncast()-&gt;is_top(), &quot;expected unsafe access address only&quot;);</span>
+<span class="udiff-line-added">+               base = base-&gt;in(AddPNode::Address);</span>
+<span class="udiff-line-added">+             }</span>
+<span class="udiff-line-added">+             if (base-&gt;Opcode() == Op_CheckCastPP &amp;&amp;</span>
+<span class="udiff-line-added">+                 base-&gt;bottom_type()-&gt;isa_rawptr() &amp;&amp;</span>
+<span class="udiff-line-added">+                 _igvn.type(base-&gt;in(1))-&gt;isa_oopptr()) {</span>
+<span class="udiff-line-added">+               base = base-&gt;in(1); // Case #9</span>
+<span class="udiff-line-added">+             }</span>
+<span class="udiff-line-added">+           }</span>
+<span class="udiff-line-added">+           node_worklist.push(base);</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_AddP() ||</span>
+<span class="udiff-line-added">+            (use-&gt;is_Load() &amp;&amp; use-&gt;Opcode() == Op_LoadP)) {</span>
+<span class="udiff-line-added">+         // Find barriers for loads</span>
+<span class="udiff-line-added">+         node_worklist.push(use);</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   return false;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool PhaseMacroExpand::register_stack_allocated_object_with_safepoints(AllocateNode* alloc, Node* stack_oop) {</span>
+<span class="udiff-line-added">+   VectorSet visited(Thread::current()-&gt;resource_area());</span>
+<span class="udiff-line-added">+   GrowableArray&lt;Node*&gt; node_worklist;</span>
+<span class="udiff-line-added">+   GrowableArray&lt;SafePointNode*&gt; temp;</span>
+<span class="udiff-line-added">+   Dict* safepoint_map = new Dict(cmpkey, hashkey);</span>
+<span class="udiff-line-added">+   bool found_non_direct_safepoint = false;</span>
+<span class="udiff-line-added">+   Node *res = alloc-&gt;result_cast();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   assert(res != NULL, &quot;result node must not be null&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   node_worklist.push(res);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   while(node_worklist.length() != 0) {</span>
+<span class="udiff-line-added">+     Node* n = node_worklist.pop();</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     if (visited.test_set(n-&gt;_idx)) {</span>
+<span class="udiff-line-added">+       continue;  // already processed</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = n-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *use = n-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       if (use-&gt;is_SafePoint()) {</span>
+<span class="udiff-line-added">+         SafePointNode* sfpt = use-&gt;as_SafePoint();</span>
+<span class="udiff-line-added">+         if (sfpt-&gt;jvms() != NULL) {</span>
+<span class="udiff-line-added">+           temp.push(sfpt);</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_Phi() ||</span>
+<span class="udiff-line-added">+           use-&gt;is_CheckCastPP() ||</span>
+<span class="udiff-line-added">+           use-&gt;is_EncodeP() ||</span>
+<span class="udiff-line-added">+           use-&gt;is_DecodeN() ||</span>
+<span class="udiff-line-added">+           use-&gt;is_Proj() ||</span>
+<span class="udiff-line-added">+           (use-&gt;Opcode() == Op_CastP2X) ||</span>
+<span class="udiff-line-added">+           use-&gt;is_MergeMem() ||</span>
+<span class="udiff-line-added">+           use-&gt;is_MemBar() ||</span>
+<span class="udiff-line-added">+           (use-&gt;is_ConstraintCast() &amp;&amp; use-&gt;Opcode() == Op_CastPP)) {</span>
+<span class="udiff-line-added">+         // Find safepoints beyond our current result</span>
+<span class="udiff-line-added">+         node_worklist.push(use);</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_Store() &amp;&amp; use-&gt;Opcode() == Op_StoreP) {</span>
+<span class="udiff-line-added">+         node_worklist.push(use);</span>
+<span class="udiff-line-added">+         if (n != use-&gt;in(MemNode::ValueIn)) {</span>
+<span class="udiff-line-added">+           continue;</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+         // TODO code copied from escape.cpp::ConnectionGraph::get_addp_base.</span>
+<span class="udiff-line-added">+         // Common up this code into a helper</span>
+<span class="udiff-line-added">+         Node *memory = use-&gt;in(MemNode::Address);</span>
+<span class="udiff-line-added">+         if (memory-&gt;is_AddP()) {</span>
+<span class="udiff-line-added">+           Node *base = memory-&gt;in(AddPNode::Base);</span>
+<span class="udiff-line-added">+           if (base-&gt;uncast()-&gt;is_top()) { // The AddP case #3 and #6 and #9.</span>
+<span class="udiff-line-added">+             base = memory-&gt;in(AddPNode::Address);</span>
+<span class="udiff-line-added">+             while (base-&gt;is_AddP()) {</span>
+<span class="udiff-line-added">+               // Case #6 (unsafe access) may have several chained AddP nodes.</span>
+<span class="udiff-line-added">+               assert(base-&gt;in(AddPNode::Base)-&gt;uncast()-&gt;is_top(), &quot;expected unsafe access address only&quot;);</span>
+<span class="udiff-line-added">+               base = base-&gt;in(AddPNode::Address);</span>
+<span class="udiff-line-added">+             }</span>
+<span class="udiff-line-added">+             if (base-&gt;Opcode() == Op_CheckCastPP &amp;&amp;</span>
+<span class="udiff-line-added">+                 base-&gt;bottom_type()-&gt;isa_rawptr() &amp;&amp;</span>
+<span class="udiff-line-added">+                 _igvn.type(base-&gt;in(1))-&gt;isa_oopptr()) {</span>
+<span class="udiff-line-added">+               base = base-&gt;in(1); // Case #9</span>
+<span class="udiff-line-added">+             }</span>
+<span class="udiff-line-added">+           }</span>
+<span class="udiff-line-added">+           node_worklist.push(base);</span>
+<span class="udiff-line-added">+         }</span>
+<span class="udiff-line-added">+       } else if (use-&gt;is_AddP() ||</span>
+<span class="udiff-line-added">+         (use-&gt;is_Load() &amp;&amp; use-&gt;Opcode() == Op_LoadP)) {</span>
+<span class="udiff-line-added">+         // Find safepoints for arrays</span>
+<span class="udiff-line-added">+         node_worklist.push(use);</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     while (temp.length() != 0) {</span>
+<span class="udiff-line-added">+       SafePointNode* sfpt = temp.pop();</span>
+<span class="udiff-line-added">+       if (res != n) {</span>
+<span class="udiff-line-added">+         found_non_direct_safepoint = true;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+       handle_safepoint_for_stack_allocation(safepoint_map, alloc, stack_oop, n, sfpt);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   return found_non_direct_safepoint;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void PhaseMacroExpand::handle_safepoint_for_stack_allocation(Dict* safepoint_map, AllocateNode* alloc, Node* oop_node, Node* parent, SafePointNode* sfpt) {</span>
+<span class="udiff-line-added">+   Node* res = alloc-&gt;result_cast();</span>
+<span class="udiff-line-added">+   assert(res-&gt;is_CheckCastPP(), &quot;unexpected AllocateNode result&quot;);</span>
+<span class="udiff-line-added">+   const TypeOopPtr* res_type = _igvn.type(res)-&gt;isa_oopptr();</span>
+<span class="udiff-line-added">+   ciKlass* klass = res_type-&gt;klass();</span>
+<span class="udiff-line-added">+   int nfields = 0;</span>
+<span class="udiff-line-added">+   if (res_type-&gt;isa_instptr()) {</span>
+<span class="udiff-line-added">+     // find the fields of the class which will be needed for safepoint debug information</span>
+<span class="udiff-line-added">+     assert(klass-&gt;is_instance_klass(), &quot;must be an instance klass.&quot;);</span>
+<span class="udiff-line-added">+     ciInstanceKlass* iklass = klass-&gt;as_instance_klass();</span>
+<span class="udiff-line-added">+     nfields = iklass-&gt;nof_nonstatic_fields();</span>
+<span class="udiff-line-added">+   } else {</span>
+<span class="udiff-line-added">+     // find the array&#39;s elements which will be needed for safepoint debug information</span>
+<span class="udiff-line-added">+     nfields = alloc-&gt;in(AllocateNode::ALength)-&gt;find_int_con(-1);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   assert(nfields &gt;= 0, &quot;Sanity&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   SafePointScalarObjectNode* sobj = NULL;</span>
+<span class="udiff-line-added">+   Node *result = (Node *)(*safepoint_map)[sfpt];</span>
+<span class="udiff-line-added">+   if (result != NULL) {</span>
+<span class="udiff-line-added">+     assert(result-&gt;is_SafePointScalarObject(), &quot;Has to be a safepointscalarobject&quot;);</span>
+<span class="udiff-line-added">+     sobj = result-&gt;as_SafePointScalarObject();</span>
+<span class="udiff-line-added">+   } else {</span>
+<span class="udiff-line-added">+     //</span>
+<span class="udiff-line-added">+     // Process the safepoint uses</span>
+<span class="udiff-line-added">+     //</span>
+<span class="udiff-line-added">+     Node* mem = sfpt-&gt;memory();</span>
+<span class="udiff-line-added">+     Node* ctl = sfpt-&gt;control();</span>
+<span class="udiff-line-added">+     assert(sfpt-&gt;jvms() != NULL, &quot;missed JVMS&quot;);</span>
+<span class="udiff-line-added">+     // Fields of scalar objs are referenced only at the end</span>
+<span class="udiff-line-added">+     // of regular debuginfo at the last (youngest) JVMS.</span>
+<span class="udiff-line-added">+     // Record relative start index.</span>
+<span class="udiff-line-added">+     uint first_ind = (sfpt-&gt;req() - sfpt-&gt;jvms()-&gt;scloff());</span>
+<span class="udiff-line-added">+     sobj = new SafePointScalarObjectNode(res_type,</span>
+<span class="udiff-line-added">+ #ifdef ASSERT</span>
+<span class="udiff-line-added">+                                                 alloc,</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+                                                 first_ind, nfields);</span>
+<span class="udiff-line-added">+     sobj-&gt;init_req(0, C-&gt;root());</span>
+<span class="udiff-line-added">+     sobj-&gt;add_req(oop_node);</span>
+<span class="udiff-line-added">+     transform_later(sobj);</span>
+<span class="udiff-line-added">+     sobj-&gt;set_stack_allocated(true);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     JVMState *jvms = sfpt-&gt;jvms();</span>
+<span class="udiff-line-added">+     sfpt-&gt;add_req(sobj);</span>
+<span class="udiff-line-added">+     jvms-&gt;set_endoff(sfpt-&gt;req());</span>
+<span class="udiff-line-added">+     _igvn._worklist.push(sfpt);</span>
+<span class="udiff-line-added">+     safepoint_map-&gt;Insert(sfpt, sobj);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (parent == res) {</span>
+<span class="udiff-line-added">+     adjust_safepoint_jvms(sfpt, parent, sobj);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ bool PhaseMacroExpand::can_stack_allocate(AllocateNode* alloc, Node* res, intptr_t size_of_object) {</span>
+<span class="udiff-line-added">+   return ((res != NULL) &amp;&amp; alloc-&gt;_is_stack_allocateable &amp;&amp; (size_of_object != -1) &amp;&amp; should_stack_allocate());</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ void PhaseMacroExpand::estimate_stack_allocation_size(AllocateNode* alloc) {</span>
+<span class="udiff-line-added">+   Node* res                  = alloc-&gt;result_cast();</span>
+<span class="udiff-line-added">+   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="udiff-line-added">+   intptr_t size_of_object    = _igvn.find_intptr_t_con(size_in_bytes, -1);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (alloc-&gt;_is_scalar_replaceable &amp;&amp; !alloc-&gt;_is_stack_allocateable) {</span>
+<span class="udiff-line-added">+     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="udiff-line-added">+     return;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool can_sa = can_stack_allocate(alloc, res, size_of_object);</span>
+<span class="udiff-line-added">+   if (alloc-&gt;_is_stack_allocateable &amp;&amp; !can_sa) {</span>
+<span class="udiff-line-added">+     // If we marked the object as SA in EA and now we can not fail</span>
+<span class="udiff-line-added">+     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="udiff-line-added">+     return;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (!alloc-&gt;_is_stack_allocateable) {</span>
+<span class="udiff-line-added">+     // If we can not SA because EA said no then no need to count the size</span>
+<span class="udiff-line-added">+     return;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   int current = C-&gt;stack_allocated_slots();</span>
+<span class="udiff-line-added">+   C-&gt;set_stack_allocated_slots(current + (size_of_object &gt;&gt; LogBytesPerInt));</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ // Do stack allocation</span>
+<span class="udiff-line-added">+ bool PhaseMacroExpand::stack_allocation(AllocateNode* alloc) {</span>
+<span class="udiff-line-added">+   Node* klass                = alloc-&gt;in(AllocateNode::KlassNode);</span>
+<span class="udiff-line-added">+   const TypeKlassPtr* tklass = _igvn.type(klass)-&gt;is_klassptr();</span>
+<span class="udiff-line-added">+   Node *length               = (alloc-&gt;is_AllocateArray()) ? alloc-&gt;in(AllocateNode::ALength) : NULL;</span>
+<span class="udiff-line-added">+   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="udiff-line-added">+   Node* res                  = alloc-&gt;result_cast();</span>
+<span class="udiff-line-added">+   Node* ctrl                 = alloc-&gt;in(TypeFunc::Control);</span>
+<span class="udiff-line-added">+   Node* mem                  = alloc-&gt;in(TypeFunc::Memory);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   intptr_t size_of_object = _igvn.find_intptr_t_con(size_in_bytes, -1);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (!can_stack_allocate(alloc, res, size_of_object)) {</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (C-&gt;fail_stack_allocation_with_references()) {</span>
+<span class="udiff-line-added">+     if (alloc-&gt;_is_referenced_stack_allocation) {</span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+       if (print_stack_allocation()) {</span>
+<span class="udiff-line-added">+         tty-&gt;print_cr(&quot;---- Avoiding stack allocation on node %d because it is referenced by another alloc and SCR/SA failed in method %s&quot;, alloc-&gt;_idx, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   int next_stack_allocation_slot = next_stack_allocated_object(size_of_object &gt;&gt; LogBytesPerInt);</span>
+<span class="udiff-line-added">+   if (next_stack_allocation_slot &lt; 0) {</span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+     if (print_stack_allocation()) {</span>
+<span class="udiff-line-added">+       tty-&gt;print_cr(&quot;---- Avoiding stack allocation on node %d with size %ld for method %s because of insufficient stack space&quot;, alloc-&gt;_idx, size_of_object, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+     return false;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (mem-&gt;is_MergeMem()) {</span>
+<span class="udiff-line-added">+     mem = mem-&gt;as_MergeMem()-&gt;memory_at(Compile::AliasIdxRaw);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   extract_call_projections(alloc);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Process barriers as this may result in result_cast() becoming NULL</span>
+<span class="udiff-line-added">+   if (process_write_barriers_on_stack_allocated_objects(alloc)) {</span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+     if (print_stack_allocation()) {</span>
+<span class="udiff-line-added">+       tty-&gt;print_cr(&quot;---- Allocation %d result_cast is no longer used so yank the alloc instead&quot;, alloc-&gt;_idx);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+     InitializeNode* init = alloc-&gt;initialization();</span>
+<span class="udiff-line-added">+     if (init != NULL) {</span>
+<span class="udiff-line-added">+       init-&gt;remove(&amp;_igvn);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+     yank_alloc_node(alloc);</span>
+<span class="udiff-line-added">+     return true;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   assert(res == alloc-&gt;result_cast(), &quot;values much match&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   Node* stack_oop = transform_later(new BoxLockNode(next_stack_allocation_slot));</span>
+<span class="udiff-line-added">+   Node* new_raw_mem = initialize_object(alloc, ctrl, mem, stack_oop, klass, length, size_in_bytes);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   bool non_direct_safepoints = register_stack_allocated_object_with_safepoints(alloc, stack_oop);</span>
+<span class="udiff-line-added">+   if (non_direct_safepoints) {</span>
+<span class="udiff-line-added">+     if (length != NULL) {</span>
+<span class="udiff-line-added">+       stack_allocation_init_array_length_on_entry(alloc, length, stack_oop);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+     stack_allocation_clear_object_data(alloc, stack_oop);</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   _igvn.replace_node(_resproj, stack_oop);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   for (DUIterator_Fast imax, i = _memproj_fallthrough-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+     Node *use = _memproj_fallthrough-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+     _igvn.rehash_node_delayed(use);</span>
+<span class="udiff-line-added">+     imax -= replace_input(use, _memproj_fallthrough, new_raw_mem);</span>
+<span class="udiff-line-added">+     // back up iterator</span>
+<span class="udiff-line-added">+     --i;</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   eliminate_unused_allocation_edges(alloc);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   assert(_resproj-&gt;outcnt() == 0, &quot;all uses of the original allocate result projection must be deleted&quot;);</span>
+<span class="udiff-line-added">+   _igvn.remove_dead_node(_resproj);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+   if (print_stack_allocation()) {</span>
+<span class="udiff-line-added">+     tty-&gt;print_cr(&quot;++++ Performing stack allocation on node %d with size %ld for method %s&quot;, alloc-&gt;_idx, size_of_object, _igvn.C-&gt;method()-&gt;get_Method()-&gt;name_and_sig_as_C_string());</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   return true;</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ /*</span>
+<span class="udiff-line-added">+   Initialize stack allocated array length on entry to the method.</span>
+<span class="udiff-line-added">+   This is required for de-opt so it can verify array lengths and so</span>
+<span class="udiff-line-added">+   that GCs that happen after deopt will not crash for uninitialized</span>
+<span class="udiff-line-added">+   arrays.</span>
+<span class="udiff-line-added">+ */</span>
+<span class="udiff-line-added">+ void PhaseMacroExpand::stack_allocation_init_array_length_on_entry(AllocateNode *alloc, Node *length, Node *stack_oop) {</span>
+<span class="udiff-line-added">+   Node* start_mem = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="udiff-line-added">+   assert(length != NULL, &quot;Length can not be NULL&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (C-&gt;is_osr_compilation()) {</span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *child = start_mem-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       if (child-&gt;is_CallLeaf() &amp;&amp; child-&gt;as_CallLeaf()-&gt;is_call_to_osr_migration_end()) {</span>
+<span class="udiff-line-added">+         CallLeafNode* call_leaf = child-&gt;as_CallLeaf();</span>
+<span class="udiff-line-added">+         start_mem = call_leaf-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="udiff-line-added">+         break;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   assert(start_mem != NULL, &quot;Must find start mem&quot;);</span>
+<span class="udiff-line-added">+   Node* init_mem = start_mem;</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // need to set the length field for arrays for deopt</span>
+<span class="udiff-line-added">+   init_mem = make_store(C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Control),</span>
+<span class="udiff-line-added">+                         init_mem, stack_oop, arrayOopDesc::length_offset_in_bytes(),</span>
+<span class="udiff-line-added">+                         length, T_INT);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   if (init_mem != start_mem) {</span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *use = start_mem-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       // Compressed refs can make a new store which adjusts the start</span>
+<span class="udiff-line-added">+       // offet and it&#39;s sourced by start_mem. Make sure we don&#39;t make cycle.</span>
+<span class="udiff-line-added">+       if (use == init_mem || (init_mem-&gt;find_edge(use) &gt;= 0)) {</span>
+<span class="udiff-line-added">+         continue;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+       _igvn.rehash_node_delayed(use);</span>
+<span class="udiff-line-added">+       imax -= replace_input(use, start_mem, init_mem);</span>
+<span class="udiff-line-added">+       // back up iterator</span>
+<span class="udiff-line-added">+       --i;</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ #ifndef PRODUCT</span>
+<span class="udiff-line-added">+ /*</span>
+<span class="udiff-line-added">+   Initialize SA object on entry to the method to ensure it is initialized</span>
+<span class="udiff-line-added">+   before safepoints which may only be reachable through phis and the object</span>
+<span class="udiff-line-added">+   may not actually have been initialized.</span>
+<span class="udiff-line-added">+ */</span>
+<span class="udiff-line-added">+ void PhaseMacroExpand::stack_allocation_clear_object_data(AllocateNode *alloc, Node *stack_oop) {</span>
+<span class="udiff-line-added">+   Node* klass                = alloc-&gt;in(AllocateNode::KlassNode);</span>
+<span class="udiff-line-added">+   Node *length               = (alloc-&gt;is_AllocateArray()) ? alloc-&gt;in(AllocateNode::ALength) : NULL;</span>
+<span class="udiff-line-added">+   Node* size_in_bytes        = alloc-&gt;in(AllocateNode::AllocSize);</span>
+<span class="udiff-line-added">+   Node* start_mem            = C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="udiff-line-added">+   if (C-&gt;is_osr_compilation()) {</span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *child = start_mem-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       if (child-&gt;is_CallLeaf() &amp;&amp; child-&gt;as_CallLeaf()-&gt;is_call_to_osr_migration_end()) {</span>
+<span class="udiff-line-added">+         CallLeafNode* call_leaf = child-&gt;as_CallLeaf();</span>
+<span class="udiff-line-added">+         start_mem = call_leaf-&gt;proj_out_or_null(TypeFunc::Memory);</span>
+<span class="udiff-line-added">+         break;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   assert(start_mem != NULL, &quot;Must find start mem&quot;);</span>
+<span class="udiff-line-added">+   int header_size = alloc-&gt;minimum_header_size();</span>
+<span class="udiff-line-added">+   Node* init_mem = start_mem;</span>
+<span class="udiff-line-added">+   if (length != NULL) {</span>
+<span class="udiff-line-added">+     // conservatively small header size:</span>
+<span class="udiff-line-added">+     header_size = arrayOopDesc::base_offset_in_bytes(T_BYTE);</span>
+<span class="udiff-line-added">+     ciKlass* k = _igvn.type(klass)-&gt;is_klassptr()-&gt;klass();</span>
+<span class="udiff-line-added">+     if (k-&gt;is_array_klass()) {   // we know the exact header size in most cases:</span>
+<span class="udiff-line-added">+       header_size = Klass::layout_helper_header_size(k-&gt;layout_helper());</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+   init_mem = ClearArrayNode::clear_memory(C-&gt;start()-&gt;proj_out_or_null(TypeFunc::Control),</span>
+<span class="udiff-line-added">+                                           init_mem, stack_oop, header_size, size_in_bytes,</span>
+<span class="udiff-line-added">+                                           &amp;_igvn);</span>
+<span class="udiff-line-added">+   if (init_mem != start_mem) {</span>
+<span class="udiff-line-added">+     for (DUIterator_Fast imax, i = start_mem-&gt;fast_outs(imax); i &lt; imax; i++) {</span>
+<span class="udiff-line-added">+       Node *use = start_mem-&gt;fast_out(i);</span>
+<span class="udiff-line-added">+       // Compressed refs can make a new store which adjusts the start</span>
+<span class="udiff-line-added">+       // offet and it&#39;s sourced by start_mem. Make sure we don&#39;t make cycle.</span>
+<span class="udiff-line-added">+       if (use == init_mem || (init_mem-&gt;find_edge(use) &gt;= 0)) {</span>
+<span class="udiff-line-added">+         continue;</span>
+<span class="udiff-line-added">+       }</span>
+<span class="udiff-line-added">+       _igvn.rehash_node_delayed(use);</span>
+<span class="udiff-line-added">+       imax -= replace_input(use, start_mem, init_mem);</span>
+<span class="udiff-line-added">+       // back up iterator</span>
+<span class="udiff-line-added">+       --i;</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ }</span>
+<span class="udiff-line-added">+ #endif</span>
+<span class="udiff-line-added">+ </span>
+  bool PhaseMacroExpand::eliminate_allocate_node(AllocateNode *alloc) {
+    // Don&#39;t do scalar replacement if the frame can be popped by JVMTI:
+    // if reallocation fails during deoptimization we&#39;ll pop all
+    // interpreter frames for this compiled frame and that won&#39;t play
+    // nice with JVMTI popframe.
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1140,11 +1638,11 @@</span>
+    }
+  
+    process_users_of_allocation(alloc);
+  
+  #ifndef PRODUCT
+<span class="udiff-line-modified-removed">-   if (PrintEliminateAllocations) {</span>
+<span class="udiff-line-modified-added">+   if (print_eliminate_allocations()) {</span>
+      if (alloc-&gt;is_AllocateArray())
+        tty-&gt;print_cr(&quot;++++ Eliminated: %d AllocateArray&quot;, alloc-&gt;_idx);
+      else
+        tty-&gt;print_cr(&quot;++++ Eliminated: %d Allocate&quot;, alloc-&gt;_idx);
+    }
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -1181,11 +1679,11 @@</span>
+    }
+  
+    process_users_of_allocation(boxing);
+  
+  #ifndef PRODUCT
+<span class="udiff-line-modified-removed">-   if (PrintEliminateAllocations) {</span>
+<span class="udiff-line-modified-added">+   if (print_eliminate_allocations()) {</span>
+      tty-&gt;print(&quot;++++ Eliminated: %d &quot;, boxing-&gt;_idx);
+      boxing-&gt;method()-&gt;print_short_name(tty);
+      tty-&gt;cr();
+    }
+  #endif
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -2777,10 +3275,30 @@</span>
+      _igvn.optimize();
+      if (C-&gt;failing())  return true;
+      _igvn.set_delay_transform(true);
+    }
+  
+<span class="udiff-line-added">+   for (int i = C-&gt;macro_count(); i &gt; 0; i --) {</span>
+<span class="udiff-line-added">+     Node * n = C-&gt;macro_node(i-1);</span>
+<span class="udiff-line-added">+     assert(n-&gt;is_macro(), &quot;only macro nodes expected here&quot;);</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+     switch (n-&gt;class_id()) {</span>
+<span class="udiff-line-added">+     case Node::Class_Allocate:</span>
+<span class="udiff-line-added">+     case Node::Class_AllocateArray:</span>
+<span class="udiff-line-added">+       estimate_stack_allocation_size(n-&gt;as_Allocate());</span>
+<span class="udiff-line-added">+       break;</span>
+<span class="udiff-line-added">+     default:</span>
+<span class="udiff-line-added">+       assert(false, &quot;unknown node type in macro list&quot;);</span>
+<span class="udiff-line-added">+     }</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+   // Check to see if stack allocation size is too large before macro expansion</span>
+<span class="udiff-line-added">+   // so we can reject required stack allocations</span>
+<span class="udiff-line-added">+   if (!stack_allocation_location_representable(C-&gt;fixed_slots() + C-&gt;stack_allocated_slots())) {</span>
+<span class="udiff-line-added">+     C-&gt;set_fail_stack_allocation_with_references(true);</span>
+<span class="udiff-line-added">+   }</span>
+<span class="udiff-line-added">+ </span>
+    // All nodes except Allocate nodes are expanded now. There could be
+    // new optimization opportunities (such as folding newly created
+    // load from a just allocated object). Run IGVN.
+  
+    // expand &quot;macro&quot; nodes
+</pre>
+<hr />
+<pre>
+<span class="line-new-header">@@ -2800,14 +3318,18 @@</span>
+      if (C-&gt;check_node_count(300, &quot;out of nodes before macro expansion&quot;)) {
+        return true;
+      }
+      switch (n-&gt;class_id()) {
+      case Node::Class_Allocate:
+<span class="udiff-line-modified-removed">-       expand_allocate(n-&gt;as_Allocate());</span>
+<span class="udiff-line-modified-added">+       if (!stack_allocation(n-&gt;as_Allocate())) {</span>
+<span class="udiff-line-added">+         expand_allocate(n-&gt;as_Allocate());</span>
+<span class="udiff-line-added">+       }</span>
+        break;
+      case Node::Class_AllocateArray:
+<span class="udiff-line-modified-removed">-       expand_allocate_array(n-&gt;as_AllocateArray());</span>
+<span class="udiff-line-modified-added">+       if (!stack_allocation(n-&gt;as_AllocateArray())) {</span>
+<span class="udiff-line-added">+         expand_allocate_array(n-&gt;as_AllocateArray());</span>
+<span class="udiff-line-added">+       }</span>
+        break;
+      default:
+        assert(false, &quot;unknown node type in macro list&quot;);
+      }
+      assert(C-&gt;macro_count() &lt; macro_count, &quot;must have deleted a node from macro list&quot;);
+</pre>
+<center><a href="machnode.hpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="macro.hpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

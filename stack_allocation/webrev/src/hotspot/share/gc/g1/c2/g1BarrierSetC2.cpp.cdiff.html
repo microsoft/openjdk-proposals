@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp</title>
+    <link rel="stylesheet" href="../../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../../../compiler/oopMap.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="g1BarrierSetC2.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/g1/c2/g1BarrierSetC2.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 410,10 ***</span>
+<span class="line-new-header">--- 410,14 ---</span>
+  
+    IdealKit ideal(kit, true);
+  
+    Node* tls = __ thread(); // ThreadLocalStorage
+  
+<span class="line-added">+   BarrierSet* bs = BarrierSet::barrier_set();</span>
+<span class="line-added">+   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(bs);</span>
+<span class="line-added">+   CardTable* ct = ctbs-&gt;card_table();</span>
+<span class="line-added">+ </span>
+    Node* no_base = __ top();
+    float likely = PROB_LIKELY_MAG(3);
+    float unlikely = PROB_UNLIKELY_MAG(3);
+    Node* young_card = __ ConI((jint)G1CardTable::g1_young_card_val());
+    Node* dirty_card = __ ConI((jint)G1CardTable::dirty_card_val());
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 457,40 ***</span>
+      Node* xor_res =  __ URShiftX ( __ XorX( cast,  __ CastPX(__ ctrl(), val)), __ ConI(HeapRegion::LogOfHRGrainBytes));
+  
+      // if (xor_res == 0) same region so skip
+      __ if_then(xor_res, BoolTest::ne, zeroX, likely); {
+  
+<span class="line-modified">!       // No barrier if we are storing a NULL</span>
+<span class="line-modified">!       __ if_then(val, BoolTest::ne, kit-&gt;null(), likely); {</span>
+  
+<span class="line-modified">!         // Ok must mark the card if not already dirty</span>
+  
+<span class="line-modified">!         // load the original value of the card</span>
+<span class="line-modified">!         Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+  
+<span class="line-modified">!         __ if_then(card_val, BoolTest::ne, young_card, unlikely); {</span>
+<span class="line-modified">!           kit-&gt;sync_kit(ideal);</span>
+<span class="line-modified">!           kit-&gt;insert_mem_bar(Op_MemBarVolatile, oop_store);</span>
+<span class="line-modified">!           __ sync_kit(kit);</span>
+  
+<span class="line-modified">!           Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+<span class="line-modified">!           __ if_then(card_val_reload, BoolTest::ne, dirty_card); {</span>
+<span class="line-modified">!             g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);</span>
+            } __ end_if();
+<span class="line-modified">!         } __ end_if();</span>
+<span class="line-modified">!       } __ end_if();</span>
+      } __ end_if();
+    } else {
+      // The Object.clone() intrinsic uses this path if !ReduceInitialCardMarks.
+      // We don&#39;t need a barrier here if the destination is a newly allocated object
+      // in Eden. Otherwise, GC verification breaks because we assume that cards in Eden
+      // are set to &#39;g1_young_gen&#39; (see G1CardTable::verify_g1_young_region()).
+      assert(!use_ReduceInitialCardMarks(), &quot;can only happen with card marking&quot;);
+<span class="line-modified">!     Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+<span class="line-modified">!     __ if_then(card_val, BoolTest::ne, young_card); {</span>
+<span class="line-modified">!       g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);</span>
+<span class="line-modified">!     } __ end_if();</span>
+    }
+  
+    // Final sync IdealKit and GraphKit.
+    kit-&gt;final_sync(ideal);
+  }
+<span class="line-new-header">--- 461,66 ---</span>
+      Node* xor_res =  __ URShiftX ( __ XorX( cast,  __ CastPX(__ ctrl(), val)), __ ConI(HeapRegion::LogOfHRGrainBytes));
+  
+      // if (xor_res == 0) same region so skip
+      __ if_then(xor_res, BoolTest::ne, zeroX, likely); {
+  
+<span class="line-modified">!       // if ((unsigned)(card_offset - low_map_offset) &gt;= (high_map_offset - low_map_offset)) stack allocated object, so skip</span>
+<span class="line-modified">!       if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="line-added">+         state()-&gt;add_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(cast));</span>
+<span class="line-added">+         Node* low_off = kit-&gt;longcon(ct-&gt;byte_map_bottom_offset());</span>
+<span class="line-added">+         Node* delta_off = kit-&gt;longcon(ct-&gt;byte_map_top_offset() - ct-&gt;byte_map_bottom_offset());</span>
+<span class="line-added">+         Node* sub_off = __ SubL(cast, low_off);</span>
+  
+<span class="line-modified">!         __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {</span>
+  
+<span class="line-modified">!           // No barrier if we are storing a NULL</span>
+<span class="line-modified">!           __ if_then(val, BoolTest::ne, kit-&gt;null(), likely); {</span>
+<span class="line-added">+ </span>
+<span class="line-added">+             // Ok must mark the card if not already dirty</span>
+<span class="line-added">+ </span>
+<span class="line-added">+             // load the original value of the card</span>
+<span class="line-added">+             Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+  
+<span class="line-modified">!             __ if_then(card_val, BoolTest::ne, young_card, unlikely); {</span>
+<span class="line-modified">!               kit-&gt;sync_kit(ideal);</span>
+<span class="line-modified">!               kit-&gt;insert_mem_bar(Op_MemBarVolatile, oop_store);</span>
+<span class="line-modified">!               __ sync_kit(kit);</span>
+  
+<span class="line-modified">!               Node* card_val_reload = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+<span class="line-modified">!               __ if_then(card_val_reload, BoolTest::ne, dirty_card); {</span>
+<span class="line-modified">!                 g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);</span>
+<span class="line-added">+               } __ end_if();</span>
+<span class="line-added">+             } __ end_if();</span>
+            } __ end_if();
+<span class="line-modified">!       } if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="line-modified">!         __ end_if();</span>
+<span class="line-added">+       }</span>
+      } __ end_if();
+    } else {
+      // The Object.clone() intrinsic uses this path if !ReduceInitialCardMarks.
+      // We don&#39;t need a barrier here if the destination is a newly allocated object
+      // in Eden. Otherwise, GC verification breaks because we assume that cards in Eden
+      // are set to &#39;g1_young_gen&#39; (see G1CardTable::verify_g1_young_region()).
+      assert(!use_ReduceInitialCardMarks(), &quot;can only happen with card marking&quot;);
+<span class="line-modified">! </span>
+<span class="line-modified">!     // if ((unsigned)(card_offset - low_map_offset) &gt;= (high_map_offset - low_map_offset)) stack allocated object, so skip</span>
+<span class="line-modified">!     if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="line-modified">!       state()-&gt;add_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(cast));</span>
+<span class="line-added">+       Node* low_off = kit-&gt;longcon(ct-&gt;byte_map_bottom_offset());</span>
+<span class="line-added">+       Node* delta_off = kit-&gt;longcon(ct-&gt;byte_map_top_offset() - ct-&gt;byte_map_bottom_offset());</span>
+<span class="line-added">+       Node* sub_off = __ SubL(cast, low_off);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+       __ uif_then(sub_off, BoolTest::le, delta_off, likely); } {</span>
+<span class="line-added">+ </span>
+<span class="line-added">+         Node* card_val = __ load(__ ctrl(), card_adr, TypeInt::INT, T_BYTE, Compile::AliasIdxRaw);</span>
+<span class="line-added">+         __ if_then(card_val, BoolTest::ne, young_card); {</span>
+<span class="line-added">+           g1_mark_card(kit, ideal, card_adr, oop_store, alias_idx, index, index_adr, buffer, tf);</span>
+<span class="line-added">+         } __ end_if();</span>
+<span class="line-added">+ </span>
+<span class="line-added">+       } if (kit-&gt;C-&gt;do_stack_allocation()) {</span>
+<span class="line-added">+         __ end_if();</span>
+<span class="line-added">+       }</span>
+    }
+  
+    // Final sync IdealKit and GraphKit.
+    kit-&gt;final_sync(ideal);
+  }
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 659,17 ***</span>
+    }
+  
+    return strcmp(call-&gt;_name, &quot;write_ref_field_pre_entry&quot;) == 0 || strcmp(call-&gt;_name, &quot;write_ref_field_post_entry&quot;) == 0;
+  }
+  
+  void G1BarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+    assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);
+<span class="line-modified">!   assert(node-&gt;outcnt() &lt;= 2, &quot;expects 1 or 2 users: Xor and URShift nodes&quot;);</span>
+    // It could be only one user, URShift node, in Object.clone() intrinsic
+    // but the new allocation is passed to arraycopy stub and it could not
+    // be scalar replaced. So we don&#39;t check the case.
+  
+    // An other case of only one user (Xor) is when the value check for NULL
+    // in G1 post barrier is folded after CCP so the code which used URShift
+    // is removed.
+  
+    // Take Region node before eliminating post barrier since it also
+<span class="line-new-header">--- 689,125 ---</span>
+    }
+  
+    return strcmp(call-&gt;_name, &quot;write_ref_field_pre_entry&quot;) == 0 || strcmp(call-&gt;_name, &quot;write_ref_field_post_entry&quot;) == 0;
+  }
+  
+<span class="line-added">+ bool G1BarrierSetC2::process_barrier_node(Node* node, PhaseIterGVN&amp; igvn) const {</span>
+<span class="line-added">+   assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // Must have a control node</span>
+<span class="line-added">+   if (node-&gt;in(0) == NULL) {</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // Search for CastP2X-&gt;Xor-&gt;URShift-&gt;Cmp path which</span>
+<span class="line-added">+   // checks if the store done to a different from the value&#39;s region.</span>
+<span class="line-added">+   Node* xorx = node-&gt;find_out_with(Op_XorX);</span>
+<span class="line-added">+   BoolNode* bool_node = NULL;</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   if (xorx != NULL) {</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     Node* shift = shift = xorx-&gt;unique_out();</span>
+<span class="line-added">+     Node* cmpx = shift-&gt;unique_out();</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     assert(cmpx-&gt;is_Cmp() &amp;&amp; cmpx-&gt;unique_out()-&gt;is_Bool() &amp;&amp;</span>
+<span class="line-added">+             cmpx-&gt;unique_out()-&gt;as_Bool()-&gt;_test._test == BoolTest::ne,</span>
+<span class="line-added">+             &quot;missing region check in G1 post barrier&quot;);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     Node* bol = cmpx-&gt;unique_out();</span>
+<span class="line-added">+     assert(bol-&gt;unique_out()-&gt;is_If(), &quot;should find if after the bool node&quot;);</span>
+<span class="line-added">+     Node* if_node = bol-&gt;unique_out();</span>
+<span class="line-added">+     Node* if_true = if_node-&gt;find_out_with(Op_IfTrue);</span>
+<span class="line-added">+     assert(if_true != NULL, &quot;there should be false projection&quot;);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     Node* iff_check = if_true-&gt;find_out_with(Op_If);</span>
+<span class="line-added">+     // Not a barrier with bound check</span>
+<span class="line-added">+     if (iff_check == NULL) {</span>
+<span class="line-added">+       return false;</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     Node* iff_check_in_1_node = iff_check-&gt;in(1);</span>
+<span class="line-added">+     if (!iff_check_in_1_node-&gt;is_Bool()) {</span>
+<span class="line-added">+       return false;</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+     bool_node = iff_check_in_1_node-&gt;as_Bool();</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   } else {</span>
+<span class="line-added">+     // this &quot;could&quot; be the the path followed when !use_ReduceInitialCardMarks() is</span>
+<span class="line-added">+     // used or when the two sides of the barrier are scalar replaced</span>
+<span class="line-added">+     //assert(false, &quot;we managed to get here!!! process_barrier_node&quot;);</span>
+<span class="line-added">+     Node *addl_node = node-&gt;find_out_with(Op_AddL);</span>
+<span class="line-added">+     if (addl_node == NULL) {</span>
+<span class="line-added">+       return false;</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     Node* cmpx = addl_node-&gt;unique_out();</span>
+<span class="line-added">+     assert(cmpx-&gt;is_Cmp() &amp;&amp; cmpx-&gt;unique_out()-&gt;is_Bool() &amp;&amp;</span>
+<span class="line-added">+           cmpx-&gt;unique_out()-&gt;as_Bool()-&gt;_test._test == BoolTest::le,</span>
+<span class="line-added">+           &quot;missing region check in G1 post barrier&quot;);</span>
+<span class="line-added">+ </span>
+<span class="line-added">+     bool_node = cmpx-&gt;unique_out()-&gt;as_Bool();</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   if (bool_node-&gt;_test._test != BoolTest::le) {</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // the input to the bool is the CMPX</span>
+<span class="line-added">+   Node* bool_node_in_1_node = bool_node-&gt;in(1);</span>
+<span class="line-added">+   if (!bool_node_in_1_node-&gt;is_Cmp()) {</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+   CmpNode* cmp_node = bool_node_in_1_node-&gt;as_Cmp();</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // the input to the CMPX is the card_table_top_offset constant</span>
+<span class="line-added">+   Node* cmp_node_in_2_node = cmp_node-&gt;in(2);</span>
+<span class="line-added">+   if (!cmp_node_in_2_node-&gt;is_Con()) {</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   BarrierSet* bs = BarrierSet::barrier_set();</span>
+<span class="line-added">+   CardTableBarrierSet* ctbs = barrier_set_cast&lt;CardTableBarrierSet&gt;(bs);</span>
+<span class="line-added">+   CardTable* ct = ctbs-&gt;card_table();</span>
+<span class="line-added">+   size_t constant = ct-&gt;byte_map_top_offset() - ct-&gt;byte_map_bottom_offset();</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // Check that the input to this CMP node is the expected constant</span>
+<span class="line-added">+   const TypeX* otype = cmp_node_in_2_node-&gt;find_intptr_t_type();</span>
+<span class="line-added">+   if (otype != NULL &amp;&amp; otype-&gt;is_con() &amp;&amp;</span>
+<span class="line-added">+       size_t(otype-&gt;get_con()) != constant) {</span>
+<span class="line-added">+     // Constant offset but not the card table size constant so just return</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   // we can&#39;t change the compare or the constant so create a new constant(0) and replace the variable</span>
+<span class="line-added">+   Node* cmp_node_in_1_node = cmp_node-&gt;in(1);</span>
+<span class="line-added">+   ConNode* zeroConstant_node = igvn.makecon(TypeX_ZERO);</span>
+<span class="line-added">+   if (cmp_node_in_1_node-&gt;_idx == zeroConstant_node-&gt;_idx) {</span>
+<span class="line-added">+     // we can get here via different nodes - but we only want to change the input once</span>
+<span class="line-added">+     return false;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   igvn.rehash_node_delayed(cmp_node);</span>
+<span class="line-added">+   int numReplaced = cmp_node-&gt;replace_edge(cmp_node_in_1_node, zeroConstant_node);</span>
+<span class="line-added">+   assert(numReplaced == 1, &quot;Failed to replace the card_offset with Conx(0)&quot;);</span>
+<span class="line-added">+   return true;</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+  void G1BarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+    assert(node-&gt;Opcode() == Op_CastP2X, &quot;ConvP2XNode required&quot;);
+<span class="line-modified">!   assert(node-&gt;outcnt() &lt;= 3, &quot;expects 1, 2 or 3 users: Xor, URShift and SubL nodes&quot;);</span>
+    // It could be only one user, URShift node, in Object.clone() intrinsic
+    // but the new allocation is passed to arraycopy stub and it could not
+    // be scalar replaced. So we don&#39;t check the case.
+  
+<span class="line-added">+   // Certain loop optimisations may introduce a CastP2X node with</span>
+<span class="line-added">+   // ConvL2I in case of an AllocateArray op. Check for that case</span>
+<span class="line-added">+   // here and do not attempt to eliminate it as write barrier.</span>
+<span class="line-added">+   if (macro-&gt;C-&gt;do_stack_allocation() &amp;&amp; !state()-&gt;is_a_barrier(static_cast&lt;CastP2XNode*&gt;(node))) {</span>
+<span class="line-added">+     return;</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+    // An other case of only one user (Xor) is when the value check for NULL
+    // in G1 post barrier is folded after CCP so the code which used URShift
+    // is removed.
+  
+    // Take Region node before eliminating post barrier since it also
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 718,11 ***</span>
+            }
+          }
+        }
+      }
+    } else {
+<span class="line-modified">!     assert(!use_ReduceInitialCardMarks(), &quot;can only happen with card marking&quot;);</span>
+      // This is a G1 post barrier emitted by the Object.clone() intrinsic.
+      // Search for the CastP2X-&gt;URShiftX-&gt;AddP-&gt;LoadB-&gt;Cmp path which checks if the card
+      // is marked as young_gen and replace the Cmp with 0 (false) to collapse the barrier.
+      Node* shift = node-&gt;find_out_with(Op_URShiftX);
+      assert(shift != NULL, &quot;missing G1 post barrier&quot;);
+<span class="line-new-header">--- 856,18 ---</span>
+            }
+          }
+        }
+      }
+    } else {
+<span class="line-modified">!     // In a scenario where the two sides of the barrier are scalar replaced</span>
+<span class="line-added">+     // or stack allocated, the XorX node will be visited more than once, because</span>
+<span class="line-added">+     // both edges will be CastP2X nodes from two distinct allocates. In certain</span>
+<span class="line-added">+     // instances, the removal of the CastP2X node will result in removal of the</span>
+<span class="line-added">+     // XorX node, causing the assert below to be hit when eliminate_gc_barrier is</span>
+<span class="line-added">+     // called for the second node.</span>
+<span class="line-added">+     // assert(!use_ReduceInitialCardMarks(), &quot;can only happen with card marking&quot;);</span>
+<span class="line-added">+ </span>
+      // This is a G1 post barrier emitted by the Object.clone() intrinsic.
+      // Search for the CastP2X-&gt;URShiftX-&gt;AddP-&gt;LoadB-&gt;Cmp path which checks if the card
+      // is marked as young_gen and replace the Cmp with 0 (false) to collapse the barrier.
+      Node* shift = node-&gt;find_out_with(Op_URShiftX);
+      assert(shift != NULL, &quot;missing G1 post barrier&quot;);
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 736,12 ***</span>
+      macro-&gt;replace_node(cmpx, macro-&gt;makecon(TypeInt::CC_EQ));
+      // There is no G1 pre barrier in this case
+    }
+    // Now CastP2X can be removed since it is used only on dead path
+    // which currently still alive until igvn optimize it.
+<span class="line-modified">!   assert(node-&gt;outcnt() == 0 || node-&gt;unique_out()-&gt;Opcode() == Op_URShiftX, &quot;&quot;);</span>
+    macro-&gt;replace_node(node, macro-&gt;top());
+  }
+  
+  Node* G1BarrierSetC2::step_over_gc_barrier(Node* c) const {
+    if (!use_ReduceInitialCardMarks() &amp;&amp;
+        c != NULL &amp;&amp; c-&gt;is_Region() &amp;&amp; c-&gt;req() == 3) {
+<span class="line-new-header">--- 881,16 ---</span>
+      macro-&gt;replace_node(cmpx, macro-&gt;makecon(TypeInt::CC_EQ));
+      // There is no G1 pre barrier in this case
+    }
+    // Now CastP2X can be removed since it is used only on dead path
+    // which currently still alive until igvn optimize it.
+<span class="line-modified">!   // TODO: fix this following assert becuase of SUBL</span>
+<span class="line-added">+   // assert(node-&gt;outcnt() == 0 || node-&gt;unique_out()-&gt;Opcode() == Op_URShiftX, &quot;&quot;);</span>
+    macro-&gt;replace_node(node, macro-&gt;top());
+<span class="line-added">+ </span>
+<span class="line-added">+   // Remove this node from our state</span>
+<span class="line-added">+   state()-&gt;remove_enqueue_barrier(static_cast&lt;CastP2XNode*&gt;(node));</span>
+  }
+  
+  Node* G1BarrierSetC2::step_over_gc_barrier(Node* c) const {
+    if (!use_ReduceInitialCardMarks() &amp;&amp;
+        c != NULL &amp;&amp; c-&gt;is_Region() &amp;&amp; c-&gt;req() == 3) {
+</pre>
+<center><a href="../../../compiler/oopMap.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../../../index.html" target="_top">index</a> <a href="g1BarrierSetC2.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

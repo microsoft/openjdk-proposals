@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff src/hotspot/share/compiler/compilerDirectives.hpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compilerDefinitions.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.cpp.udiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/compilerDirectives.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -67,11 +67,15 @@</span>
+  NOT_PRODUCT(cflags(IGVPrintLevel,       intx, PrintIdealGraphLevel, IGVPrintLevel)) \
+      cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
+      cflags(Vectorize,               bool, false, Vectorize) \
+      cflags(VectorizeDebug,          uintx, 0, VectorizeDebug) \
+      cflags(CloneMapDebug,           bool, false, CloneMapDebug) \
+<span class="udiff-line-modified-removed">-     cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit)</span>
+<span class="udiff-line-modified-added">+     cflags(MaxNodeLimit,            intx, MaxNodeLimit, MaxNodeLimit) \</span>
+<span class="udiff-line-added">+ NOT_PRODUCT(cflags(PrintEscapeAnalysis,       bool, PrintEscapeAnalysis, PrintEscapeAnalysis)) \</span>
+<span class="udiff-line-added">+ NOT_PRODUCT(cflags(PrintEliminateAllocations, bool, PrintEliminateAllocations, PrintEliminateAllocations)) \</span>
+<span class="udiff-line-added">+     cflags(UseStackAllocation,                bool, UseStackAllocation, UseStackAllocation) \</span>
+<span class="udiff-line-added">+ NOT_PRODUCT(cflags(PrintStackAllocation,      bool, PrintStackAllocation, PrintStackAllocation))</span>
+  #else
+    #define compilerdirectives_c2_flags(cflags)
+  #endif
+  
+  class CompilerDirectives;
+</pre>
+<center><a href="compilerDefinitions.cpp.udiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.cpp.udiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

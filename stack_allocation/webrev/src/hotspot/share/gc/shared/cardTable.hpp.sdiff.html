@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/gc/shared/cardTable.hpp</title>
+    <link rel="stylesheet" href="../../../../../style.css" />
+  </head>
+<body>
+<center><a href="c2/cardTableBarrierSetC2.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../../memory/iterator.cpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/shared/cardTable.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+231                                          int reset_val);
+232 
+233   // Constants
+234   enum SomePublicConstants {
+235     card_shift                  = 9,
+236     card_size                   = 1 &lt;&lt; card_shift,
+237     card_size_in_words          = card_size / sizeof(HeapWord)
+238   };
+239 
+240   static CardValue clean_card_val()          { return clean_card; }
+241   static CardValue dirty_card_val()          { return dirty_card; }
+242   static CardValue precleaned_card_val()     { return precleaned_card; }
+243   static intptr_t clean_card_row_val()   { return clean_card_row; }
+244 
+245   // Card marking array base (adjusted for heap low boundary)
+246   // This would be the 0th element of _byte_map, if the heap started at 0x0.
+247   // But since the heap starts at some higher address, this points to somewhere
+248   // before the beginning of the actual _byte_map.
+249   CardValue* byte_map_base() const { return _byte_map_base; }
+250   bool scanned_concurrently() const { return _scanned_concurrently; }
+
+
+251 
+252   virtual bool is_in_young(oop obj) const = 0;
+253 
+254   // Print a description of the memory for the card table
+255   virtual void print_on(outputStream* st) const;
+256 
+257   void verify();
+258   void verify_guard();
+259 
+260   // val_equals -&gt; it will check that all cards covered by mr equal val
+261   // !val_equals -&gt; it will check that all cards covered by mr do not equal val
+262   void verify_region(MemRegion mr, CardValue val, bool val_equals) PRODUCT_RETURN;
+263   void verify_not_dirty_region(MemRegion mr) PRODUCT_RETURN;
+264   void verify_dirty_region(MemRegion mr) PRODUCT_RETURN;
+265 };
+266 
+267 #endif // SHARE_GC_SHARED_CARDTABLE_HPP
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+231                                          int reset_val);
+232 
+233   // Constants
+234   enum SomePublicConstants {
+235     card_shift                  = 9,
+236     card_size                   = 1 &lt;&lt; card_shift,
+237     card_size_in_words          = card_size / sizeof(HeapWord)
+238   };
+239 
+240   static CardValue clean_card_val()          { return clean_card; }
+241   static CardValue dirty_card_val()          { return dirty_card; }
+242   static CardValue precleaned_card_val()     { return precleaned_card; }
+243   static intptr_t clean_card_row_val()   { return clean_card_row; }
+244 
+245   // Card marking array base (adjusted for heap low boundary)
+246   // This would be the 0th element of _byte_map, if the heap started at 0x0.
+247   // But since the heap starts at some higher address, this points to somewhere
+248   // before the beginning of the actual _byte_map.
+249   CardValue* byte_map_base() const { return _byte_map_base; }
+250   bool scanned_concurrently() const { return _scanned_concurrently; }
+<span class="line-added">251   size_t byte_map_top_offset() const { return uintptr_t(_whole_heap.end()); }</span>
+<span class="line-added">252   size_t byte_map_bottom_offset() const { return uintptr_t(_whole_heap.start()); }</span>
+253 
+254   virtual bool is_in_young(oop obj) const = 0;
+255 
+256   // Print a description of the memory for the card table
+257   virtual void print_on(outputStream* st) const;
+258 
+259   void verify();
+260   void verify_guard();
+261 
+262   // val_equals -&gt; it will check that all cards covered by mr equal val
+263   // !val_equals -&gt; it will check that all cards covered by mr do not equal val
+264   void verify_region(MemRegion mr, CardValue val, bool val_equals) PRODUCT_RETURN;
+265   void verify_not_dirty_region(MemRegion mr) PRODUCT_RETURN;
+266   void verify_dirty_region(MemRegion mr) PRODUCT_RETURN;
+267 };
+268 
+269 #endif // SHARE_GC_SHARED_CARDTABLE_HPP
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="c2/cardTableBarrierSetC2.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../../memory/iterator.cpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

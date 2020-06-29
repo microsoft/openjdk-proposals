@@ -1,0 +1,68 @@
+diff a/src/hotspot/share/opto/callnode.hpp b/src/hotspot/share/opto/callnode.hpp
+--- a/src/hotspot/share/opto/callnode.hpp
++++ b/src/hotspot/share/opto/callnode.hpp
+@@ -492,10 +492,11 @@
+ class SafePointScalarObjectNode: public TypeNode {
+   uint _first_index; // First input edge relative index of a SafePoint node where
+                      // states of the scalarized object fields are collected.
+                      // It is relative to the last (youngest) jvms->_scloff.
+   uint _n_fields;    // Number of non-static fields of the scalarized object.
++  bool _is_stack_allocated;
+   DEBUG_ONLY(AllocateNode* _alloc;)
+ 
+   virtual uint hash() const ; // { return NO_HASH; }
+   virtual bool cmp( const Node &n ) const;
+ 
+@@ -517,10 +518,13 @@
+     assert(jvms != NULL, "missed JVMS");
+     return jvms->scloff() + _first_index;
+   }
+   uint n_fields()    const { return _n_fields; }
+ 
++  void set_stack_allocated(bool v) { _is_stack_allocated = true; }
++  bool stack_allocated() { return _is_stack_allocated; }
++
+ #ifdef ASSERT
+   AllocateNode* alloc() const { return _alloc; }
+ #endif
+ 
+   virtual uint size_of() const { return sizeof(*this); }
+@@ -637,10 +641,11 @@
+   void extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts = true);
+ 
+   virtual uint match_edge(uint idx) const;
+ 
+   bool is_call_to_arraycopystub() const;
++  bool is_call_to_osr_migration_end() const;
+ 
+ #ifndef PRODUCT
+   virtual void        dump_req(outputStream *st = tty) const;
+   virtual void        dump_spec(outputStream *st) const;
+ #endif
+@@ -839,10 +844,13 @@
+     InitialTest,                      // slow-path test (may be constant)
+     ALength,                          // array length (or TOP if none)
+     ParmLimit
+   };
+ 
++  // Maximum object size considered for stack allocation
++  static const int StackAllocSizeLimit = 0x100;
++
+   static const TypeFunc* alloc_type(const Type* t) {
+     const Type** fields = TypeTuple::fields(ParmLimit - TypeFunc::Parms);
+     fields[AllocSize]   = TypeInt::POS;
+     fields[KlassNode]   = TypeInstPtr::NOTNULL;
+     fields[InitialTest] = TypeInt::BOOL;
+@@ -860,10 +868,12 @@
+   }
+ 
+   // Result of Escape Analysis
+   bool _is_scalar_replaceable;
+   bool _is_non_escaping;
++  bool _is_stack_allocateable;
++  bool _is_referenced_stack_allocation;
+   // True when MemBar for new is redundant with MemBar at initialzer exit
+   bool _is_allocation_MemBar_redundant;
+ 
+   virtual uint size_of() const; // Size is bigger
+   AllocateNode(Compile* C, const TypeFunc *atype, Node *ctrl, Node *mem, Node *abio,

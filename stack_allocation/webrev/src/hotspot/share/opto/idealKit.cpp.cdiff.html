@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff src/hotspot/share/opto/idealKit.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="escape.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.hpp.cdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/opto/idealKit.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 62,10 ***</span>
+<span class="line-new-header">--- 62,34 ---</span>
+    set_all_memory(gkit-&gt;merged_memory());
+    set_i_o(gkit-&gt;i_o());
+    set_ctrl(gkit-&gt;control());
+  }
+  
+<span class="line-added">+ //-------------------------------uif_then-------------------------------------</span>
+<span class="line-added">+ // Create: unsigned if(left relop right)</span>
+<span class="line-added">+ //          /  \</span>
+<span class="line-added">+ //   iffalse    iftrue</span>
+<span class="line-added">+ // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.</span>
+<span class="line-added">+ void IdealKit::uif_then(Node* left, BoolTest::mask relop,</span>
+<span class="line-added">+                        Node* right, float prob, float cnt, bool push_new_state) {</span>
+<span class="line-added">+   assert((state() &amp; (BlockS|LoopS|IfThenS|ElseS)), &quot;bad state for new If&quot;);</span>
+<span class="line-added">+   Node* bol;</span>
+<span class="line-added">+   if (left-&gt;bottom_type()-&gt;isa_ptr() == NULL) {</span>
+<span class="line-added">+     if (left-&gt;bottom_type()-&gt;isa_int() != NULL) {</span>
+<span class="line-added">+       bol = Bool(CmpU(left, right), relop);</span>
+<span class="line-added">+     } else {</span>
+<span class="line-added">+       assert(left-&gt;bottom_type()-&gt;isa_long() != NULL, &quot;what else?&quot;);</span>
+<span class="line-added">+       bol = Bool(CmpUL(left, right), relop);</span>
+<span class="line-added">+     }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   } else {</span>
+<span class="line-added">+     bol = Bool(CmpP(left, right), relop);</span>
+<span class="line-added">+   }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+   if_then_common(bol, prob, cnt, push_new_state);</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+  //-------------------------------if_then-------------------------------------
+  // Create:  if(left relop right)
+  //          /  \
+  //   iffalse    iftrue
+  // Push the iffalse cvstate onto the stack. The iftrue becomes the current cvstate.
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 82,10 ***</span>
+<span class="line-new-header">--- 106,17 ---</span>
+      }
+  
+    } else {
+      bol = Bool(CmpP(left, right), relop);
+    }
+<span class="line-added">+ </span>
+<span class="line-added">+   if_then_common(bol, prob, cnt, push_new_state);</span>
+<span class="line-added">+ }</span>
+<span class="line-added">+ </span>
+<span class="line-added">+ // Common helper to create the If nodes for if_then and uif_then</span>
+<span class="line-added">+ void IdealKit::if_then_common(Node* bol, float prob, float cnt,</span>
+<span class="line-added">+                               bool push_new_state) {</span>
+    // Delay gvn.tranform on if-nodes until construction is finished
+    // to prevent a constant bool input from discarding a control output.
+    IfNode* iff = delay_transform(new IfNode(ctrl(), bol, prob, cnt))-&gt;as_If();
+    Node* then  = IfTrue(iff);
+    Node* elsen = IfFalse(iff);
+</pre>
+<center><a href="escape.hpp.cdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="idealKit.hpp.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</title>
+    <link rel="stylesheet" href="../../../../../style.css" />
+  </head>
+<body>
+<center><a href="../g1/c2/g1BarrierSetC2.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../shared/c2/barrierSetC2.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/gc/parallel/psParallelCompact.inline.hpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 97 
+ 98 inline bool PSParallelCompact::mark_obj(oop obj) {
+ 99   const int obj_size = obj-&gt;size();
+100   if (mark_bitmap()-&gt;mark_obj(obj, obj_size)) {
+101     _summary_data.add_obj(obj, obj_size);
+102     return true;
+103   } else {
+104     return false;
+105   }
+106 }
+107 
+108 template &lt;class T&gt;
+109 inline void PSParallelCompact::adjust_pointer(T* p, ParCompactionManager* cm) {
+110   T heap_oop = RawAccess&lt;&gt;::oop_load(p);
+111   if (!CompressedOops::is_null(heap_oop)) {
+112     oop obj = CompressedOops::decode_not_null(heap_oop);
+113     assert(ParallelScavengeHeap::heap()-&gt;is_in(obj), &quot;should be in heap&quot;);
+114 
+115     oop new_obj = (oop)summary_data().calc_new_pointer(obj, cm);
+116     assert(new_obj != NULL,                    // is forwarding ptr?
+<span class="line-modified">117            &quot;should be forwarded&quot;);</span>
+118     // Just always do the update unconditionally?
+119     if (new_obj != NULL) {
+120       assert(ParallelScavengeHeap::heap()-&gt;is_in_reserved(new_obj),
+<span class="line-modified">121              &quot;should be in object space&quot;);</span>
+122       RawAccess&lt;IS_NOT_NULL&gt;::oop_store(p, new_obj);
+123     }
+124   }
+125 }
+126 
+127 class PCAdjustPointerClosure: public BasicOopIterateClosure {
+128 public:
+129   PCAdjustPointerClosure(ParCompactionManager* cm) {
+130     assert(cm != NULL, &quot;associate ParCompactionManage should not be NULL&quot;);
+131     _cm = cm;
+132   }
+133   template &lt;typename T&gt; void do_oop_nv(T* p) { PSParallelCompact::adjust_pointer(p, _cm); }
+134   virtual void do_oop(oop* p)                { do_oop_nv(p); }
+135   virtual void do_oop(narrowOop* p)          { do_oop_nv(p); }
+136 
+137   // This closure provides its own oop verification code.
+138   debug_only(virtual bool should_verify_oops() { return false; })
+139   virtual ReferenceIterationMode reference_iteration_mode() { return DO_FIELDS; }
+140 private:
+141   ParCompactionManager* _cm;
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 97 
+ 98 inline bool PSParallelCompact::mark_obj(oop obj) {
+ 99   const int obj_size = obj-&gt;size();
+100   if (mark_bitmap()-&gt;mark_obj(obj, obj_size)) {
+101     _summary_data.add_obj(obj, obj_size);
+102     return true;
+103   } else {
+104     return false;
+105   }
+106 }
+107 
+108 template &lt;class T&gt;
+109 inline void PSParallelCompact::adjust_pointer(T* p, ParCompactionManager* cm) {
+110   T heap_oop = RawAccess&lt;&gt;::oop_load(p);
+111   if (!CompressedOops::is_null(heap_oop)) {
+112     oop obj = CompressedOops::decode_not_null(heap_oop);
+113     assert(ParallelScavengeHeap::heap()-&gt;is_in(obj), &quot;should be in heap&quot;);
+114 
+115     oop new_obj = (oop)summary_data().calc_new_pointer(obj, cm);
+116     assert(new_obj != NULL,                    // is forwarding ptr?
+<span class="line-modified">117           &quot;should be forwarded&quot;);</span>
+118     // Just always do the update unconditionally?
+119     if (new_obj != NULL) {
+120       assert(ParallelScavengeHeap::heap()-&gt;is_in_reserved(new_obj),
+<span class="line-modified">121             &quot;should be in object space&quot;);</span>
+122       RawAccess&lt;IS_NOT_NULL&gt;::oop_store(p, new_obj);
+123     }
+124   }
+125 }
+126 
+127 class PCAdjustPointerClosure: public BasicOopIterateClosure {
+128 public:
+129   PCAdjustPointerClosure(ParCompactionManager* cm) {
+130     assert(cm != NULL, &quot;associate ParCompactionManage should not be NULL&quot;);
+131     _cm = cm;
+132   }
+133   template &lt;typename T&gt; void do_oop_nv(T* p) { PSParallelCompact::adjust_pointer(p, _cm); }
+134   virtual void do_oop(oop* p)                { do_oop_nv(p); }
+135   virtual void do_oop(narrowOop* p)          { do_oop_nv(p); }
+136 
+137   // This closure provides its own oop verification code.
+138   debug_only(virtual bool should_verify_oops() { return false; })
+139   virtual ReferenceIterationMode reference_iteration_mode() { return DO_FIELDS; }
+140 private:
+141   ParCompactionManager* _cm;
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../g1/c2/g1BarrierSetC2.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../../index.html" target="_top">index</a> <a href="../shared/c2/barrierSetC2.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

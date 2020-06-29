@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/compiler/oopMap.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center><a href="compilerDirectives.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/compiler/oopMap.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;code/codeBlob.hpp&quot;
+ 27 #include &quot;code/codeCache.hpp&quot;
+ 28 #include &quot;code/nmethod.hpp&quot;
+ 29 #include &quot;code/scopeDesc.hpp&quot;
+ 30 #include &quot;compiler/oopMap.hpp&quot;
+ 31 #include &quot;gc/shared/collectedHeap.hpp&quot;
+ 32 #include &quot;memory/allocation.inline.hpp&quot;
+<span class="line-modified"> 33 #include &quot;memory/iterator.hpp&quot;</span>
+ 34 #include &quot;memory/resourceArea.hpp&quot;
+ 35 #include &quot;memory/universe.hpp&quot;
+ 36 #include &quot;oops/compressedOops.hpp&quot;
+ 37 #include &quot;runtime/frame.inline.hpp&quot;
+ 38 #include &quot;runtime/handles.inline.hpp&quot;
+ 39 #include &quot;runtime/signature.hpp&quot;
+
+ 40 #include &quot;utilities/align.hpp&quot;
+ 41 #include &quot;utilities/lockFreeStack.hpp&quot;
+ 42 #ifdef COMPILER1
+ 43 #include &quot;c1/c1_Defs.hpp&quot;
+ 44 #endif
+ 45 #ifdef COMPILER2
+ 46 #include &quot;opto/optoreg.hpp&quot;
+ 47 #endif
+ 48 
+ 49 // OopMapStream
+ 50 
+ 51 OopMapStream::OopMapStream(OopMap* oop_map) {
+ 52   _stream = new CompressedReadStream(oop_map-&gt;write_stream()-&gt;buffer());
+ 53   _size = oop_map-&gt;omv_count();
+ 54   _position = 0;
+ 55   _valid_omv = false;
+ 56 }
+ 57 
+ 58 OopMapStream::OopMapStream(const ImmutableOopMap* oop_map) {
+ 59   _stream = new CompressedReadStream(oop_map-&gt;data_addr());
+</pre>
+<hr />
+<pre>
+254       }
+255 
+256 #ifndef TIERED
+257       COMPILER1_PRESENT(ShouldNotReachHere();)
+258 #if INCLUDE_JVMCI
+259       if (UseJVMCICompiler) {
+260         ShouldNotReachHere();
+261       }
+262 #endif
+263 #endif // !TIERED
+264       oop* loc = fr-&gt;oopmapreg_to_location(omv.reg(),reg_map);
+265       guarantee(loc != NULL, &quot;missing saved register&quot;);
+266       oop *derived_loc = loc;
+267       oop *base_loc    = fr-&gt;oopmapreg_to_location(omv.content_reg(), reg_map);
+268       // Ignore NULL oops and decoded NULL narrow oops which
+269       // equal to CompressedOops::base() when a narrow oop
+270       // implicit null check is used in compiled code.
+271       // The narrow_oop_base could be NULL or be the address
+272       // of the page below heap depending on compressed oops mode.
+273       if (base_loc != NULL &amp;&amp; *base_loc != NULL &amp;&amp; !CompressedOops::is_base(*base_loc)) {
+
+
+
+
+
+
+
+
+
+
+
+274         derived_oop_fn(base_loc, derived_loc);
+275       }
+276     }
+277   }
+278 
+279   {
+
+280     // We want coop and oop oop_types
+281     for (OopMapStream oms(map); !oms.is_done(); oms.next()) {
+282       OopMapValue omv = oms.current();
+283       oop* loc = fr-&gt;oopmapreg_to_location(omv.reg(),reg_map);
+284       // It should be an error if no location can be found for a
+285       // register mentioned as contained an oop of some kind.  Maybe
+286       // this was allowed previously because value_value items might
+287       // be missing?
+288       guarantee(loc != NULL, &quot;missing saved register&quot;);
+289       if ( omv.type() == OopMapValue::oop_value ) {
+290         oop val = *loc;
+291         if (val == NULL || CompressedOops::is_base(val)) {
+292           // Ignore NULL oops and decoded NULL narrow oops which
+293           // equal to CompressedOops::base() when a narrow oop
+294           // implicit null check is used in compiled code.
+295           // The narrow_oop_base could be NULL or be the address
+296           // of the page below heap depending on compressed oops mode.
+297           continue;
+298         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+299 #ifdef ASSERT
+300         if ((((uintptr_t)loc &amp; (sizeof(*loc)-1)) != 0) ||
+301             !Universe::heap()-&gt;is_in_or_null(*loc)) {
+302           tty-&gt;print_cr(&quot;# Found non oop pointer.  Dumping state at failure&quot;);
+303           // try to dump out some helpful debugging information
+304           trace_codeblob_maps(fr, reg_map);
+305           omv.print();
+306           tty-&gt;print_cr(&quot;register r&quot;);
+307           omv.reg()-&gt;print();
+308           tty-&gt;print_cr(&quot;loc = %p *loc = %p\n&quot;, loc, cast_from_oop&lt;address&gt;(*loc));
+309           // do the real assert.
+310           assert(Universe::heap()-&gt;is_in_or_null(*loc), &quot;found non oop pointer&quot;);
+311         }
+312 #endif // ASSERT
+313         oop_fn-&gt;do_oop(loc);
+314       } else if ( omv.type() == OopMapValue::narrowoop_value ) {
+315         narrowOop *nl = (narrowOop*)loc;
+316 #ifndef VM_LITTLE_ENDIAN
+317         VMReg vmReg = omv.reg();
+318         if (!vmReg-&gt;is_stack()) {
+319           // compressed oops in registers only take up 4 bytes of an
+320           // 8 byte register but they are in the wrong part of the
+321           // word so adjust loc to point at the right place.
+322           nl = (narrowOop*)((address)nl + 4);
+323         }
+324 #endif
+325         oop_fn-&gt;do_oop(nl);
+326       }
+327     }
+328   }
+329 }
+330 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+331 
+332 // Update callee-saved register info for the following frame
+333 void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
+334   ResourceMark rm;
+335   CodeBlob* cb = fr-&gt;cb();
+336   assert(cb != NULL, &quot;no codeblob&quot;);
+337 
+338   // Any reg might be saved by a safepoint handler (see generate_handler_blob).
+339   assert( reg_map-&gt;_update_for_id == NULL || fr-&gt;is_older(reg_map-&gt;_update_for_id),
+340          &quot;already updated this map; do not &#39;update&#39; it twice!&quot; );
+341   debug_only(reg_map-&gt;_update_for_id = fr-&gt;id());
+342 
+343   // Check if caller must update oop argument
+344   assert((reg_map-&gt;include_argument_oops() ||
+345           !cb-&gt;caller_must_gc_arguments(reg_map-&gt;thread())),
+346          &quot;include_argument_oops should already be set&quot;);
+347 
+348   // Scan through oopmap and find location of all callee-saved registers
+349   // (we do not do update in place, since info could be overwritten)
+350 
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 13  * accompanied this code).
+ 14  *
+ 15  * You should have received a copy of the GNU General Public License version
+ 16  * 2 along with this work; if not, write to the Free Software Foundation,
+ 17  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ 18  *
+ 19  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ 20  * or visit www.oracle.com if you need additional information or have any
+ 21  * questions.
+ 22  *
+ 23  */
+ 24 
+ 25 #include &quot;precompiled.hpp&quot;
+ 26 #include &quot;code/codeBlob.hpp&quot;
+ 27 #include &quot;code/codeCache.hpp&quot;
+ 28 #include &quot;code/nmethod.hpp&quot;
+ 29 #include &quot;code/scopeDesc.hpp&quot;
+ 30 #include &quot;compiler/oopMap.hpp&quot;
+ 31 #include &quot;gc/shared/collectedHeap.hpp&quot;
+ 32 #include &quot;memory/allocation.inline.hpp&quot;
+<span class="line-modified"> 33 #include &quot;memory/iterator.inline.hpp&quot;</span>
+ 34 #include &quot;memory/resourceArea.hpp&quot;
+ 35 #include &quot;memory/universe.hpp&quot;
+ 36 #include &quot;oops/compressedOops.hpp&quot;
+ 37 #include &quot;runtime/frame.inline.hpp&quot;
+ 38 #include &quot;runtime/handles.inline.hpp&quot;
+ 39 #include &quot;runtime/signature.hpp&quot;
+<span class="line-added"> 40 #include &quot;runtime/vframe_hp.hpp&quot;</span>
+ 41 #include &quot;utilities/align.hpp&quot;
+ 42 #include &quot;utilities/lockFreeStack.hpp&quot;
+ 43 #ifdef COMPILER1
+ 44 #include &quot;c1/c1_Defs.hpp&quot;
+ 45 #endif
+ 46 #ifdef COMPILER2
+ 47 #include &quot;opto/optoreg.hpp&quot;
+ 48 #endif
+ 49 
+ 50 // OopMapStream
+ 51 
+ 52 OopMapStream::OopMapStream(OopMap* oop_map) {
+ 53   _stream = new CompressedReadStream(oop_map-&gt;write_stream()-&gt;buffer());
+ 54   _size = oop_map-&gt;omv_count();
+ 55   _position = 0;
+ 56   _valid_omv = false;
+ 57 }
+ 58 
+ 59 OopMapStream::OopMapStream(const ImmutableOopMap* oop_map) {
+ 60   _stream = new CompressedReadStream(oop_map-&gt;data_addr());
+</pre>
+<hr />
+<pre>
+255       }
+256 
+257 #ifndef TIERED
+258       COMPILER1_PRESENT(ShouldNotReachHere();)
+259 #if INCLUDE_JVMCI
+260       if (UseJVMCICompiler) {
+261         ShouldNotReachHere();
+262       }
+263 #endif
+264 #endif // !TIERED
+265       oop* loc = fr-&gt;oopmapreg_to_location(omv.reg(),reg_map);
+266       guarantee(loc != NULL, &quot;missing saved register&quot;);
+267       oop *derived_loc = loc;
+268       oop *base_loc    = fr-&gt;oopmapreg_to_location(omv.content_reg(), reg_map);
+269       // Ignore NULL oops and decoded NULL narrow oops which
+270       // equal to CompressedOops::base() when a narrow oop
+271       // implicit null check is used in compiled code.
+272       // The narrow_oop_base could be NULL or be the address
+273       // of the page below heap depending on compressed oops mode.
+274       if (base_loc != NULL &amp;&amp; *base_loc != NULL &amp;&amp; !CompressedOops::is_base(*base_loc)) {
+<span class="line-added">275 </span>
+<span class="line-added">276         if (UseStackAllocationRuntime) {</span>
+<span class="line-added">277           intptr_t *stack_base = fr-&gt;unextended_sp();</span>
+<span class="line-added">278           intptr_t *stack_top = stack_base + cb-&gt;frame_size();</span>
+<span class="line-added">279           intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(*base_loc);</span>
+<span class="line-added">280           if ((stack_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; stack_top)) {</span>
+<span class="line-added">281             // If the base is a stack oop just continue because stack oops will not move</span>
+<span class="line-added">282             continue;</span>
+<span class="line-added">283           }</span>
+<span class="line-added">284         }</span>
+<span class="line-added">285 </span>
+286         derived_oop_fn(base_loc, derived_loc);
+287       }
+288     }
+289   }
+290 
+291   {
+<span class="line-added">292     GrowableArray&lt;oop&gt; stack_oops;</span>
+293     // We want coop and oop oop_types
+294     for (OopMapStream oms(map); !oms.is_done(); oms.next()) {
+295       OopMapValue omv = oms.current();
+296       oop* loc = fr-&gt;oopmapreg_to_location(omv.reg(),reg_map);
+297       // It should be an error if no location can be found for a
+298       // register mentioned as contained an oop of some kind.  Maybe
+299       // this was allowed previously because value_value items might
+300       // be missing?
+301       guarantee(loc != NULL, &quot;missing saved register&quot;);
+302       if ( omv.type() == OopMapValue::oop_value ) {
+303         oop val = *loc;
+304         if (val == NULL || CompressedOops::is_base(val)) {
+305           // Ignore NULL oops and decoded NULL narrow oops which
+306           // equal to CompressedOops::base() when a narrow oop
+307           // implicit null check is used in compiled code.
+308           // The narrow_oop_base could be NULL or be the address
+309           // of the page below heap depending on compressed oops mode.
+310           continue;
+311         }
+<span class="line-added">312 </span>
+<span class="line-added">313         // TODO can we check if a CodeBlob includes stack allocated objects?</span>
+<span class="line-added">314         // If macro.cpp tags the compilation as including stack allocated objects</span>
+<span class="line-added">315         // then it should be possible to set something on codeblob.</span>
+<span class="line-added">316         if (UseStackAllocationRuntime) {</span>
+<span class="line-added">317           intptr_t *base = fr-&gt;unextended_sp();</span>
+<span class="line-added">318           intptr_t *top = base + cb-&gt;frame_size();</span>
+<span class="line-added">319           intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(val);</span>
+<span class="line-added">320           // If a stack slot points to a stack allocated object handle it</span>
+<span class="line-added">321           if ((base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; top)) {</span>
+<span class="line-added">322             // If we are verifying the stack, do extra checking that this</span>
+<span class="line-added">323             // stack location is indeed one of the stack allocated objects we</span>
+<span class="line-added">324             // have described in the oop maps.</span>
+<span class="line-added">325             if (VerifyStack) {</span>
+<span class="line-added">326               Thread* current_thread = Thread::current();</span>
+<span class="line-added">327               ResourceMark rm(current_thread);</span>
+<span class="line-added">328               HandleMark hm(current_thread);</span>
+<span class="line-added">329 </span>
+<span class="line-added">330               vframe*  vf = vframe::new_vframe(fr, reg_map, reg_map-&gt;thread());</span>
+<span class="line-added">331               if (vf-&gt;is_compiled_frame()) {</span>
+<span class="line-added">332                 compiledVFrame* cvf = compiledVFrame::cast(vf);</span>
+<span class="line-added">333                 GrowableArray&lt;ScopeValue*&gt;* objects = cvf-&gt;scope()-&gt;objects();</span>
+<span class="line-added">334 </span>
+<span class="line-added">335                 // Match the stack location offset to any described</span>
+<span class="line-added">336                 // stack allocated objects.</span>
+<span class="line-added">337                 // In case we didn&#39;t find this location in our described objects</span>
+<span class="line-added">338                 // we just continue, it&#39;s not really a stack oop.</span>
+<span class="line-added">339                 if (cvf-&gt;match_object_to_stack_oop(oop_ptr, base, objects) == NULL) {</span>
+<span class="line-added">340                   continue;</span>
+<span class="line-added">341                 }</span>
+<span class="line-added">342               }</span>
+<span class="line-added">343             }</span>
+<span class="line-added">344 </span>
+<span class="line-added">345             OopMapSet::stack_oop_do(loc, oop_fn, &amp;stack_oops, base, top);</span>
+<span class="line-added">346             continue;</span>
+<span class="line-added">347           }</span>
+<span class="line-added">348         }</span>
+349 #ifdef ASSERT
+350         if ((((uintptr_t)loc &amp; (sizeof(*loc)-1)) != 0) ||
+351             !Universe::heap()-&gt;is_in_or_null(*loc)) {
+352           tty-&gt;print_cr(&quot;# Found non oop pointer.  Dumping state at failure&quot;);
+353           // try to dump out some helpful debugging information
+354           trace_codeblob_maps(fr, reg_map);
+355           omv.print();
+356           tty-&gt;print_cr(&quot;register r&quot;);
+357           omv.reg()-&gt;print();
+358           tty-&gt;print_cr(&quot;loc = %p *loc = %p\n&quot;, loc, cast_from_oop&lt;address&gt;(*loc));
+359           // do the real assert.
+360           assert(Universe::heap()-&gt;is_in_or_null(*loc), &quot;found non oop pointer&quot;);
+361         }
+362 #endif // ASSERT
+363         oop_fn-&gt;do_oop(loc);
+364       } else if ( omv.type() == OopMapValue::narrowoop_value ) {
+365         narrowOop *nl = (narrowOop*)loc;
+366 #ifndef VM_LITTLE_ENDIAN
+367         VMReg vmReg = omv.reg();
+368         if (!vmReg-&gt;is_stack()) {
+369           // compressed oops in registers only take up 4 bytes of an
+370           // 8 byte register but they are in the wrong part of the
+371           // word so adjust loc to point at the right place.
+372           nl = (narrowOop*)((address)nl + 4);
+373         }
+374 #endif
+375         oop_fn-&gt;do_oop(nl);
+376       }
+377     }
+378   }
+379 }
+380 
+<span class="line-added">381 class OopClosureWalker: public BasicOopIterateClosure {</span>
+<span class="line-added">382 protected:</span>
+<span class="line-added">383   OopClosure *_closure;</span>
+<span class="line-added">384   GrowableArray&lt;oop&gt; *_stack_oops;</span>
+<span class="line-added">385   intptr_t *_base;</span>
+<span class="line-added">386   intptr_t *_top;</span>
+<span class="line-added">387 </span>
+<span class="line-added">388 public:</span>
+<span class="line-added">389   OopClosureWalker(OopClosure *closure, GrowableArray&lt;oop&gt; *stack_oops, intptr_t *base, intptr_t *top) :</span>
+<span class="line-added">390     BasicOopIterateClosure(NULL),</span>
+<span class="line-added">391     _closure(closure),</span>
+<span class="line-added">392     _stack_oops(stack_oops),</span>
+<span class="line-added">393     _base(base),</span>
+<span class="line-added">394     _top(top) {}</span>
+<span class="line-added">395 </span>
+<span class="line-added">396   void do_oop(oop *o) {</span>
+<span class="line-added">397     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(*o);</span>
+<span class="line-added">398     if ((_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; _top)) {</span>
+<span class="line-added">399       OopMapSet::stack_oop_do(o, _closure, _stack_oops, _base, _top);</span>
+<span class="line-added">400     } else {</span>
+<span class="line-added">401       _closure-&gt;do_oop(o);</span>
+<span class="line-added">402     }</span>
+<span class="line-added">403   }</span>
+<span class="line-added">404   void do_oop(narrowOop *o) {</span>
+<span class="line-added">405     oop obj = RawAccess&lt;&gt;::oop_load(o);</span>
+<span class="line-added">406     intptr_t *oop_ptr = cast_from_oop&lt;intptr_t *&gt;(obj);</span>
+<span class="line-added">407     if ((_base &lt;= oop_ptr) &amp;&amp; (oop_ptr &lt; _top)) {</span>
+<span class="line-added">408       // no references to stack allocated oops in UseCompressedOops</span>
+<span class="line-added">409       assert(false, &quot;unreachable&quot;);</span>
+<span class="line-added">410     } else {</span>
+<span class="line-added">411       _closure-&gt;do_oop(o);</span>
+<span class="line-added">412     }</span>
+<span class="line-added">413   }</span>
+<span class="line-added">414 </span>
+<span class="line-added">415   debug_only(virtual bool should_verify_oops() { return false; })</span>
+<span class="line-added">416 };</span>
+<span class="line-added">417 </span>
+<span class="line-added">418 void OopMapSet::stack_oop_do(oop *p, OopClosure* oop_fn, GrowableArray&lt;oop&gt; *stack_oops, intptr_t *stack_base, intptr_t *stack_top) {</span>
+<span class="line-added">419   oop o = RawAccess&lt;IS_NOT_NULL&gt;::oop_load(p);</span>
+<span class="line-added">420   Klass *t = o-&gt;klass();</span>
+<span class="line-added">421   assert(t-&gt;is_klass(), &quot;Has to be a class&quot;);</span>
+<span class="line-added">422   if (!t-&gt;is_typeArray_klass()) {</span>
+<span class="line-added">423     if (stack_oops-&gt;append_if_missing(o)) {</span>
+<span class="line-added">424       OopClosureWalker walk_elements(oop_fn, stack_oops, stack_base, stack_top);</span>
+<span class="line-added">425       o-&gt;oop_iterate(&amp;walk_elements);</span>
+<span class="line-added">426     }</span>
+<span class="line-added">427   }</span>
+<span class="line-added">428 }</span>
+<span class="line-added">429 </span>
+430 
+431 // Update callee-saved register info for the following frame
+432 void OopMapSet::update_register_map(const frame *fr, RegisterMap *reg_map) {
+433   ResourceMark rm;
+434   CodeBlob* cb = fr-&gt;cb();
+435   assert(cb != NULL, &quot;no codeblob&quot;);
+436 
+437   // Any reg might be saved by a safepoint handler (see generate_handler_blob).
+438   assert( reg_map-&gt;_update_for_id == NULL || fr-&gt;is_older(reg_map-&gt;_update_for_id),
+439          &quot;already updated this map; do not &#39;update&#39; it twice!&quot; );
+440   debug_only(reg_map-&gt;_update_for_id = fr-&gt;id());
+441 
+442   // Check if caller must update oop argument
+443   assert((reg_map-&gt;include_argument_oops() ||
+444           !cb-&gt;caller_must_gc_arguments(reg_map-&gt;thread())),
+445          &quot;include_argument_oops should already be set&quot;);
+446 
+447   // Scan through oopmap and find location of all callee-saved registers
+448   // (we do not do update in place, since info could be overwritten)
+449 
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="compilerDirectives.hpp.sdiff.html" target="_top">&lt; prev</a> <a href="../../../../index.html" target="_top">index</a> <a href="oopMap.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

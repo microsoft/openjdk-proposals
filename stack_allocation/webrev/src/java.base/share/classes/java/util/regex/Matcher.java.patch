@@ -1,0 +1,21 @@
+diff a/src/java.base/share/classes/java/util/regex/Matcher.java b/src/java.base/share/classes/java/util/regex/Matcher.java
+--- a/src/java.base/share/classes/java/util/regex/Matcher.java
++++ b/src/java.base/share/classes/java/util/regex/Matcher.java
+@@ -242,12 +242,15 @@
+     Matcher(Pattern parent, CharSequence text) {
+         this.parentPattern = parent;
+         this.text = text;
+ 
+         // Allocate state storage
+-        int parentGroupCount = Math.max(parent.capturingGroupCount, 10);
+-        groups = new int[parentGroupCount * 2];
++        if (parent.capturingGroupCount > 10) {
++            groups = new int[parent.capturingGroupCount * 2];
++        } else {
++            groups = new int[20];
++        }
+         locals = new int[parent.localCount];
+         localsPos = new IntHashSet[parent.localTCNCount];
+ 
+         // Put fields into initial states
+         reset();

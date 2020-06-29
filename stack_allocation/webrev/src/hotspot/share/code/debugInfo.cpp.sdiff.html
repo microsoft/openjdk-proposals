@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff src/hotspot/share/code/debugInfo.cpp</title>
+    <link rel="stylesheet" href="../../../../style.css" />
+  </head>
+<body>
+<center>&lt; prev <a href="../../../../index.html" target="_top">index</a> <a href="debugInfo.hpp.sdiff.html" target="_top">next &gt;</a></center>    <h2>src/hotspot/share/code/debugInfo.cpp</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 47 }
+ 48 
+ 49 void DebugInfoWriteStream::write_metadata(Metadata* h) {
+ 50   write_int(recorder()-&gt;oop_recorder()-&gt;find_index(h));
+ 51 }
+ 52 
+ 53 oop DebugInfoReadStream::read_oop() {
+ 54   nmethod* nm = const_cast&lt;CompiledMethod*&gt;(code())-&gt;as_nmethod_or_null();
+ 55   oop o;
+ 56   if (nm != NULL) {
+ 57     // Despite these oops being found inside nmethods that are on-stack,
+ 58     // they are not kept alive by all GCs (e.g. G1 and Shenandoah).
+ 59     o = nm-&gt;oop_at_phantom(read_int());
+ 60   } else {
+ 61     o = code()-&gt;oop_at(read_int());
+ 62   }
+ 63   assert(oopDesc::is_oop_or_null(o), &quot;oop only&quot;);
+ 64   return o;
+ 65 }
+ 66 
+<span class="line-modified"> 67 ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {</span>
+
+
+
+
+
+
+ 68   int id = read_int();
+ 69 #ifdef ASSERT
+ 70   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 71   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+ 72     assert(_obj_pool-&gt;at(i)-&gt;as_ObjectValue()-&gt;id() != id, &quot;should not be read twice&quot;);
+ 73   }
+ 74 #endif
+<span class="line-modified"> 75   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);</span>
+
+
+
+
+
+
+
+
+ 76   // Cache the object since an object field could reference it.
+ 77   _obj_pool-&gt;push(result);
+ 78   result-&gt;read_object(this);
+ 79   return result;
+ 80 }
+ 81 
+ 82 ScopeValue* DebugInfoReadStream::get_cached_object() {
+ 83   int id = read_int();
+ 84   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 85   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+ 86     ObjectValue* ov = _obj_pool-&gt;at(i)-&gt;as_ObjectValue();
+ 87     if (ov-&gt;id() == id) {
+ 88       return ov;
+ 89     }
+ 90   }
+ 91   ShouldNotReachHere();
+ 92   return NULL;
+ 93 }
+ 94 
+ 95 // Serializing scope values
+ 96 
+<span class="line-removed"> 97 enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,</span>
+<span class="line-removed"> 98                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,</span>
+<span class="line-removed"> 99                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,</span>
+<span class="line-removed">100                           AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8 };</span>
+<span class="line-removed">101 </span>
+102 ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+103   ScopeValue* result = NULL;
+104   switch(stream-&gt;read_int()) {
+105    case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+106    case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+107    case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+108    case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+109    case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+<span class="line-modified">110    case OBJECT_CODE:          result = stream-&gt;read_object_value(false /*is_auto_box*/); break;</span>
+<span class="line-modified">111    case AUTO_BOX_OBJECT_CODE: result = stream-&gt;read_object_value(true /*is_auto_box*/);  break;</span>
+
+112    case OBJECT_ID_CODE:       result = stream-&gt;get_cached_object();                      break;
+113    case MARKER_CODE:          result = new MarkerValue();                                break;
+114    default: ShouldNotReachHere();
+115   }
+116   return result;
+117 }
+118 
+119 // LocationValue
+120 
+121 LocationValue::LocationValue(DebugInfoReadStream* stream) {
+122   _location = Location(stream);
+123 }
+124 
+125 void LocationValue::write_on(DebugInfoWriteStream* stream) {
+126   stream-&gt;write_int(LOCATION_CODE);
+127   location().write_on(stream);
+128 }
+129 
+130 void LocationValue::print_on(outputStream* st) const {
+131   location().print_on(st);
+</pre>
+<hr />
+<pre>
+173     }
+174   }
+175 }
+176 
+177 void ObjectValue::print_on(outputStream* st) const {
+178   st-&gt;print(&quot;%s[%d]&quot;, is_auto_box() ? &quot;box_obj&quot; : &quot;obj&quot;, _id);
+179 }
+180 
+181 void ObjectValue::print_fields_on(outputStream* st) const {
+182 #ifndef PRODUCT
+183   if (_field_values.length() &gt; 0) {
+184     _field_values.at(0)-&gt;print_on(st);
+185   }
+186   for (int i = 1; i &lt; _field_values.length(); i++) {
+187     st-&gt;print(&quot;, &quot;);
+188     _field_values.at(i)-&gt;print_on(st);
+189   }
+190 #endif
+191 }
+192 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+193 // ConstantIntValue
+194 
+195 ConstantIntValue::ConstantIntValue(DebugInfoReadStream* stream) {
+196   _value = stream-&gt;read_signed_int();
+197 }
+198 
+199 void ConstantIntValue::write_on(DebugInfoWriteStream* stream) {
+200   stream-&gt;write_int(CONSTANT_INT_CODE);
+201   stream-&gt;write_signed_int(value());
+202 }
+203 
+204 void ConstantIntValue::print_on(outputStream* st) const {
+205   st-&gt;print(&quot;%d&quot;, value());
+206 }
+207 
+208 // ConstantLongValue
+209 
+210 ConstantLongValue::ConstantLongValue(DebugInfoReadStream* stream) {
+211   _value = stream-&gt;read_long();
+212 }
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 47 }
+ 48 
+ 49 void DebugInfoWriteStream::write_metadata(Metadata* h) {
+ 50   write_int(recorder()-&gt;oop_recorder()-&gt;find_index(h));
+ 51 }
+ 52 
+ 53 oop DebugInfoReadStream::read_oop() {
+ 54   nmethod* nm = const_cast&lt;CompiledMethod*&gt;(code())-&gt;as_nmethod_or_null();
+ 55   oop o;
+ 56   if (nm != NULL) {
+ 57     // Despite these oops being found inside nmethods that are on-stack,
+ 58     // they are not kept alive by all GCs (e.g. G1 and Shenandoah).
+ 59     o = nm-&gt;oop_at_phantom(read_int());
+ 60   } else {
+ 61     o = code()-&gt;oop_at(read_int());
+ 62   }
+ 63   assert(oopDesc::is_oop_or_null(o), &quot;oop only&quot;);
+ 64   return o;
+ 65 }
+ 66 
+<span class="line-modified"> 67 enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,</span>
+<span class="line-added"> 68                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,</span>
+<span class="line-added"> 69                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,</span>
+<span class="line-added"> 70                           AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8,</span>
+<span class="line-added"> 71                           STACK_OBJECT_CODE = 9 };</span>
+<span class="line-added"> 72 </span>
+<span class="line-added"> 73 ScopeValue* DebugInfoReadStream::read_object_value(int type) {</span>
+ 74   int id = read_int();
+ 75 #ifdef ASSERT
+ 76   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 77   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+ 78     assert(_obj_pool-&gt;at(i)-&gt;as_ObjectValue()-&gt;id() != id, &quot;should not be read twice&quot;);
+ 79   }
+ 80 #endif
+<span class="line-modified"> 81   ObjectValue* result;</span>
+<span class="line-added"> 82   if (type == AUTO_BOX_OBJECT_CODE) {</span>
+<span class="line-added"> 83     result = new AutoBoxObjectValue(id);</span>
+<span class="line-added"> 84   } else if (type == STACK_OBJECT_CODE) {</span>
+<span class="line-added"> 85     result = new StackObjectValue(id);</span>
+<span class="line-added"> 86   } else {</span>
+<span class="line-added"> 87     assert(type == OBJECT_CODE, &quot;has to be an object&quot;);</span>
+<span class="line-added"> 88     result = new ObjectValue(id);</span>
+<span class="line-added"> 89   }</span>
+ 90   // Cache the object since an object field could reference it.
+ 91   _obj_pool-&gt;push(result);
+ 92   result-&gt;read_object(this);
+ 93   return result;
+ 94 }
+ 95 
+ 96 ScopeValue* DebugInfoReadStream::get_cached_object() {
+ 97   int id = read_int();
+ 98   assert(_obj_pool != NULL, &quot;object pool does not exist&quot;);
+ 99   for (int i = _obj_pool-&gt;length() - 1; i &gt;= 0; i--) {
+100     ObjectValue* ov = _obj_pool-&gt;at(i)-&gt;as_ObjectValue();
+101     if (ov-&gt;id() == id) {
+102       return ov;
+103     }
+104   }
+105   ShouldNotReachHere();
+106   return NULL;
+107 }
+108 
+109 // Serializing scope values
+110 
+
+
+
+
+
+111 ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
+112   ScopeValue* result = NULL;
+113   switch(stream-&gt;read_int()) {
+114    case LOCATION_CODE:        result = new LocationValue(stream);                        break;
+115    case CONSTANT_INT_CODE:    result = new ConstantIntValue(stream);                     break;
+116    case CONSTANT_OOP_CODE:    result = new ConstantOopReadValue(stream);                 break;
+117    case CONSTANT_LONG_CODE:   result = new ConstantLongValue(stream);                    break;
+118    case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
+<span class="line-modified">119    case OBJECT_CODE:          result = stream-&gt;read_object_value(OBJECT_CODE);           break;</span>
+<span class="line-modified">120    case AUTO_BOX_OBJECT_CODE: result = stream-&gt;read_object_value(AUTO_BOX_OBJECT_CODE);  break;</span>
+<span class="line-added">121    case STACK_OBJECT_CODE:    result = stream-&gt;read_object_value(STACK_OBJECT_CODE);     break;</span>
+122    case OBJECT_ID_CODE:       result = stream-&gt;get_cached_object();                      break;
+123    case MARKER_CODE:          result = new MarkerValue();                                break;
+124    default: ShouldNotReachHere();
+125   }
+126   return result;
+127 }
+128 
+129 // LocationValue
+130 
+131 LocationValue::LocationValue(DebugInfoReadStream* stream) {
+132   _location = Location(stream);
+133 }
+134 
+135 void LocationValue::write_on(DebugInfoWriteStream* stream) {
+136   stream-&gt;write_int(LOCATION_CODE);
+137   location().write_on(stream);
+138 }
+139 
+140 void LocationValue::print_on(outputStream* st) const {
+141   location().print_on(st);
+</pre>
+<hr />
+<pre>
+183     }
+184   }
+185 }
+186 
+187 void ObjectValue::print_on(outputStream* st) const {
+188   st-&gt;print(&quot;%s[%d]&quot;, is_auto_box() ? &quot;box_obj&quot; : &quot;obj&quot;, _id);
+189 }
+190 
+191 void ObjectValue::print_fields_on(outputStream* st) const {
+192 #ifndef PRODUCT
+193   if (_field_values.length() &gt; 0) {
+194     _field_values.at(0)-&gt;print_on(st);
+195   }
+196   for (int i = 1; i &lt; _field_values.length(); i++) {
+197     st-&gt;print(&quot;, &quot;);
+198     _field_values.at(i)-&gt;print_on(st);
+199   }
+200 #endif
+201 }
+202 
+<span class="line-added">203 // StackObjectValue</span>
+<span class="line-added">204 </span>
+<span class="line-added">205 StackObjectValue::StackObjectValue(int id, ScopeValue* klass, Location location, ConstantIntValue *field_length)</span>
+<span class="line-added">206 : ObjectValue(id, klass)</span>
+<span class="line-added">207 , _location(location)</span>
+<span class="line-added">208 , _field_length(field_length)</span>
+<span class="line-added">209 {</span>
+<span class="line-added">210 }</span>
+<span class="line-added">211 </span>
+<span class="line-added">212 void StackObjectValue::read_object(DebugInfoReadStream* stream) {</span>
+<span class="line-added">213   ObjectValue::read_object(stream);</span>
+<span class="line-added">214   _location = Location(stream);</span>
+<span class="line-added">215   _field_length = (ConstantIntValue *)read_from(stream);</span>
+<span class="line-added">216 }</span>
+<span class="line-added">217 </span>
+<span class="line-added">218 void StackObjectValue::write_on(DebugInfoWriteStream* stream) {</span>
+<span class="line-added">219   if (_visited) {</span>
+<span class="line-added">220     stream-&gt;write_int(OBJECT_ID_CODE);</span>
+<span class="line-added">221     stream-&gt;write_int(_id);</span>
+<span class="line-added">222   } else {</span>
+<span class="line-added">223     _visited = true;</span>
+<span class="line-added">224     stream-&gt;write_int(STACK_OBJECT_CODE);</span>
+<span class="line-added">225     stream-&gt;write_int(_id);</span>
+<span class="line-added">226     _klass-&gt;write_on(stream);</span>
+<span class="line-added">227     int length = _field_values.length();</span>
+<span class="line-added">228     stream-&gt;write_int(length);</span>
+<span class="line-added">229     for (int i = 0; i &lt; length; i++) {</span>
+<span class="line-added">230       _field_values.at(i)-&gt;write_on(stream);</span>
+<span class="line-added">231     }</span>
+<span class="line-added">232     _location.write_on(stream);</span>
+<span class="line-added">233     _field_length-&gt;write_on(stream);</span>
+<span class="line-added">234   }</span>
+<span class="line-added">235 }</span>
+<span class="line-added">236 </span>
+237 // ConstantIntValue
+238 
+239 ConstantIntValue::ConstantIntValue(DebugInfoReadStream* stream) {
+240   _value = stream-&gt;read_signed_int();
+241 }
+242 
+243 void ConstantIntValue::write_on(DebugInfoWriteStream* stream) {
+244   stream-&gt;write_int(CONSTANT_INT_CODE);
+245   stream-&gt;write_signed_int(value());
+246 }
+247 
+248 void ConstantIntValue::print_on(outputStream* st) const {
+249   st-&gt;print(&quot;%d&quot;, value());
+250 }
+251 
+252 // ConstantLongValue
+253 
+254 ConstantLongValue::ConstantLongValue(DebugInfoReadStream* stream) {
+255   _value = stream-&gt;read_long();
+256 }
+</pre>
+</td>
+</tr>
+</table>
+<center>&lt; prev <a href="../../../../index.html" target="_top">index</a> <a href="debugInfo.hpp.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>
