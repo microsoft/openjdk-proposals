@@ -337,9 +337,12 @@ Test Machine:
 | ---------------- | ------------------:| ---------------------:| ------------------:| ---------------:|
 | als              |             2577.6 |                2480.0 |               72.4 |            59.6 |
 | naïve-bayes      |              463.6 |                 380.8 |               59.4 |            54.4 |
-| neo4j-analytics  |             6519.8 |                1933.0 |              135.9 |            15.3 |
+| ~~neo4j-analytics~~ * |             ~~6519.8~~ |                ~~1933.0~~ |              ~~135.9~~ |            ~~15.3~~ |
 | page-rank        |             5477.4 |                5194.2 |               46.7 |            42.0 |
 | scala-stm-bench7 |             1350.4 |                1253.6 |               92.9 |            88.0 |
+ *Some recent revalidation of the performance numbers showed large variation of 
+  scores in Neo4J, therefore we are temporarily removing the improvement scores 
+  for this benchmark until we fully understand the impact.
 
 The benchmark performance varies a lot sometimes, therefore some of the numbers 
 above are not easily reproducible without a lot of runs to produce averages. 
