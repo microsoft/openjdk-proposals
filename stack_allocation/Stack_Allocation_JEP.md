@@ -340,6 +340,7 @@ Test Machine:
 | ~~neo4j-analytics~~ * |             ~~6519.8~~ |                ~~1933.0~~ |              ~~135.9~~ |            ~~15.3~~ |
 | page-rank        |             5477.4 |                5194.2 |               46.7 |            42.0 |
 | scala-stm-bench7 |             1350.4 |                1253.6 |               92.9 |            88.0 |
+ 
  *Some recent revalidation of the performance numbers showed large variation of 
   scores in Neo4J, therefore we are temporarily removing the improvement scores 
   for this benchmark until we fully understand the impact.
@@ -410,5 +411,4 @@ Test Machine:
 | kiami          |              257.6 |                 257.1 |               28.6 |            28.1 |
 | sunflow        |              941.3 |                 932.7 |               65.0 |            63.0 |
 | tmt            |             4178.3 |                3747.2 |              151.6 |            66.2 |
-
 
