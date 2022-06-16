@@ -1,27 +1,27 @@
-JEP X: JDBC Authentication Plugin API
+- JEP X: JDBC Authentication Plugin API
 
-Authors     TBD
-Owner		    TBD
-Type		    Feature
-Scope		    SE
-Status		  Draft 
-Release     TBD
-Component   core-libs
-Discussion	jdbc-spec-discuss at openjdk dot java dot net 
-Effort      TBD
-Duration    TBD
-Endorsed by TBD
-Created		  2022/06/20 20:00 
-Updated		  2022/06/20 20:00 
-Issue		    N/A
+- Authors     TBD
+- Owner		    TBD
+- Type		    Feature
+- Scope		    SE
+- Status		  Draft 
+- Release     TBD
+- Component   core-libs
+- Discussion	jdbc-spec-discuss at openjdk dot java dot net 
+- Effort      TBD
+- Duration    TBD
+- Endorsed by TBD
+- Created		  2022/06/20 20:00 
+- Updated		  2022/06/20 20:00 
+- Issue		    N/A
 
 Summary
 -------
 
 Define a standard Authentication Plugin interface in the JDBC Specification API,
-to allow JDBC drivers to consume from a provided plugin, the required
-authentication data other than username and password, such as but not limited to
-authentication tokens and certificates, to securely connect with databases.
+to allow JDBC drivers to consume from a provided plugin the required
+authentication data, such as but not limited to username, password,
+authentication tokens, and certificates, to securely connect with databases.
 
 Goals
 -----
