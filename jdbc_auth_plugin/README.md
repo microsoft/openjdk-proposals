@@ -2,19 +2,19 @@
 
 ```
 Authors     TBD
-Owner		  TBD
-Type		   Feature
-Scope		    SE
-Status		  Draft 
+Owner       TBD
+Type        Feature
+Scope       SE
+Status      Draft 
 Release     TBD
 Component   core-libs
-Discussion	jdbc-spec-discuss at openjdk dot java dot net 
+Discussion  jdbc-spec-discuss at openjdk dot java dot net 
 Effort      TBD
 Duration    TBD
 Endorsed by TBD
-Created		  2022/06/20 20:00 
-Updated		  2022/06/20 20:00 
-Issue		    N/A
+Created     2022/06/20 20:00 
+Updated     2022/06/20 20:00 
+Issue       N/A
 ```
 
 Summary
