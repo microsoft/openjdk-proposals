@@ -68,6 +68,10 @@ SaaS vendors themselves end up having to implement database driver specific APIs
 ("proprietary", but not necessarily closed-source) and maintain these
 implementations on a per-database, per-version basis.
 
+This JEP aims at standardizing an API to give JDBC drivers a pluggable mechanism
+for credention-free connections between applications and database services using
+managed identities and RBAC.
+
 Description
 -----------
 
@@ -160,21 +164,7 @@ envrionment variable, and read by the authentication plugin.
 Risks and Assumptions
 ---------------------
 
-JDBC specification has its own versioning, but still associated with, and
-released as part of a major Java SE specification version. For example, Java SE
-8 specification includes JDBC 4.2, while Java SE 9 and later versions include
-JDBC 4.3. Therefore, there is a risk of adding this feature on a future version
-of Java SE, ultimately with the release of a hypothetical JDBC 4.4, which would
-only be available for developers using this future release of Java SE.
-
-The risk being that applications that rely on existing versions of Java SE,
-won't be able to leverage this API. Unless there is a possibility of backporting
-JDBC 4.4 into older versions of Java SE, such as Java SE 11. This could
-fundamentally change how Java specifications may evolve in the future, as this
-has never happened before, but given how JDBC specification is defined, it is a
-possibility given the possible simplicity of this JEP.
-
-Also, JDBC drivers that cannot support authentication plugin architecture, must
+JDBC drivers that cannot support authentication plugin architecture, must
 explicitly document such limitation, to prevent assumptions by end-users. This
 may be done by the JDBC driver vendor simply indicating that the driver does not
 support the version of the JDBC API Specification that contains this interface.
