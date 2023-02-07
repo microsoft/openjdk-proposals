@@ -1,7 +1,7 @@
 Summary
 -------
  
-Deprecate the Windows x86-32 port, with the intent to remove them in a future release.
+Deprecate the Windows x86-32 port, with the intent to remove it in a future release.
 
 Goals
 -----
