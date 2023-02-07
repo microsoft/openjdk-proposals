@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cdiff doc/building.md</title>
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+<body>
+<center><a href="building.html.cdiff.html" target="_top">&lt; prev</a> <a href="../index.html" target="_top">index</a> <a href="../make/autoconf/platform.m4.cdiff.html" target="_top">next &gt;</a></center>    <h2>doc/building.md</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-old-header">*** 124,10 ***</span>
+<span class="line-new-header">--- 124,12 ---</span>
+  space is required.
+  
+  Even for 32-bit builds, it is recommended to use a 64-bit build machine, and
+  instead create a 32-bit target using `--with-target-bits=32`.
+  
+<span class="line-added">+ Note: The Widows x86 port is deprecated.</span>
+<span class="line-added">+ </span>
+  ### Building on aarch64
+  
+  At a minimum, a machine with 8 cores is advisable, as well as 8 GB of RAM.
+  (The more cores to use, the more memory you need.) At least 6 GB of free disk
+  space is required.
+</pre>
+<hr />
+<pre>
+<span class="line-old-header">*** 197,10 ***</span>
+<span class="line-new-header">--- 199,12 ---</span>
+  rule also applies to input to the build system, e.g. in arguments to
+  `configure`. So, use `--with-msvcr-dll=/cygdrive/c/msvcr100.dll` rather than
+  `--with-msvcr-dll=c:\msvcr100.dll`. For details on this conversion, see the section
+  on [Fixpath](#fixpath).
+  
+<span class="line-added">+ Note: The Widows x86 port is deprecated.</span>
+<span class="line-added">+ </span>
+  #### Cygwin
+  
+  A functioning [Cygwin](http://www.cygwin.com/) environment is required for
+  building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
+  using the 64-bit version of Cygwin.
+</pre>
+<center><a href="building.html.cdiff.html" target="_top">&lt; prev</a> <a href="../index.html" target="_top">index</a> <a href="../make/autoconf/platform.m4.cdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

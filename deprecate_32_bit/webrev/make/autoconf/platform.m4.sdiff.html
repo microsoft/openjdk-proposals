@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff make/autoconf/platform.m4</title>
+    <link rel="stylesheet" href="../../style.css" />
+  </head>
+<body>
+<center><a href="../../doc/building.md.sdiff.html" target="_top">&lt; prev</a> <a href="../../index.html" target="_top">index</a> next &gt;</center>    <h2>make/autoconf/platform.m4</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+639   AC_SUBST(OPENJDK_MODULE_TARGET_PLATFORM)
+640 ])
+641 
+642 #%%% Build and target systems %%%
+643 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_AND_TARGET],
+644 [
+645   # Figure out the build and target systems. # Note that in autoconf terminology, &quot;build&quot; is obvious, but &quot;target&quot;
+646   # is confusing; it assumes you are cross-compiling a cross-compiler (!)  and &quot;target&quot; is thus the target of the
+647   # product you&#39;re building. The target of this build is called &quot;host&quot;. Since this is confusing to most people, we
+648   # have not adopted that system, but use &quot;target&quot; as the platform we are building for. In some places though we need
+649   # to use the configure naming style.
+650   AC_CANONICAL_BUILD
+651   AC_CANONICAL_HOST
+652   AC_CANONICAL_TARGET
+653 
+654   PLATFORM_EXTRACT_TARGET_AND_BUILD
+655   PLATFORM_SETUP_TARGET_CPU_BITS
+656   PLATFORM_SET_MODULE_TARGET_OS_VALUES
+657   PLATFORM_SET_RELEASE_FILE_OS_VALUES
+658   PLATFORM_SETUP_LEGACY_VARS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+659 ])
+660 
+661 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_OS_VERSION],
+662 [
+663   ###############################################################################
+664 
+665   # Note that this is the build platform OS version!
+666 
+667   OS_VERSION=&quot;`uname -r | ${SED} &#39;s!\.! !g&#39; | ${SED} &#39;s!-! !g&#39;`&quot;
+668   OS_VERSION_MAJOR=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 1 -d &#39; &#39;`&quot;
+669   OS_VERSION_MINOR=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 2 -d &#39; &#39;`&quot;
+670   OS_VERSION_MICRO=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 3 -d &#39; &#39;`&quot;
+671   AC_SUBST(OS_VERSION_MAJOR)
+672   AC_SUBST(OS_VERSION_MINOR)
+673   AC_SUBST(OS_VERSION_MICRO)
+674 ])
+675 
+676 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_TARGET_BITS],
+677 [
+678   ###############################################################################
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+639   AC_SUBST(OPENJDK_MODULE_TARGET_PLATFORM)
+640 ])
+641 
+642 #%%% Build and target systems %%%
+643 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_AND_TARGET],
+644 [
+645   # Figure out the build and target systems. # Note that in autoconf terminology, &quot;build&quot; is obvious, but &quot;target&quot;
+646   # is confusing; it assumes you are cross-compiling a cross-compiler (!)  and &quot;target&quot; is thus the target of the
+647   # product you&#39;re building. The target of this build is called &quot;host&quot;. Since this is confusing to most people, we
+648   # have not adopted that system, but use &quot;target&quot; as the platform we are building for. In some places though we need
+649   # to use the configure naming style.
+650   AC_CANONICAL_BUILD
+651   AC_CANONICAL_HOST
+652   AC_CANONICAL_TARGET
+653 
+654   PLATFORM_EXTRACT_TARGET_AND_BUILD
+655   PLATFORM_SETUP_TARGET_CPU_BITS
+656   PLATFORM_SET_MODULE_TARGET_OS_VALUES
+657   PLATFORM_SET_RELEASE_FILE_OS_VALUES
+658   PLATFORM_SETUP_LEGACY_VARS
+<span class="line-added">659   PLATFORM_CHECK_DEPRECATION</span>
+<span class="line-added">660 ])</span>
+<span class="line-added">661 </span>
+<span class="line-added">662 AC_DEFUN_ONCE([PLATFORM_CHECK_DEPRECATION],</span>
+<span class="line-added">663 [</span>
+<span class="line-added">664   AC_ARG_ENABLE(deprecated-ports, [AS_HELP_STRING([--enable-deprecated-ports@&lt;:@=yes/no@:&gt;@],</span>
+<span class="line-added">665        [Suppress the error when configuring for a deprecated port @&lt;:@no@:&gt;@])])</span>
+<span class="line-added">666   AC_REQUIRE([PLATFORM_EXTRACT_TARGET_AND_BUILD])</span>
+<span class="line-added">667   if test &quot;x$OPENJDK_TARGET_OS&quot; = xwindows &amp;&amp; test &quot;x$OPENJDK_TARGET_CPU_ARCH&quot; = xx86; then</span>
+<span class="line-added">668     if test &quot;x$enable_deprecated_ports&quot; = &quot;xyes&quot;; then</span>
+<span class="line-added">669       AC_MSG_WARN([The Windows x86-32 port is deprecated and may be removed in a future release.])</span>
+<span class="line-added">670     else</span>
+<span class="line-added">671       AC_MSG_ERROR(m4_normalize([The Windows x86-32 port is deprecated and may be removed in a future release.</span>
+<span class="line-added">672         Use --enable-deprecated-ports=yes to suppress this error.]))</span>
+<span class="line-added">673     fi</span>
+<span class="line-added">674   fi</span>
+675 ])
+676 
+677 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_OS_VERSION],
+678 [
+679   ###############################################################################
+680 
+681   # Note that this is the build platform OS version!
+682 
+683   OS_VERSION=&quot;`uname -r | ${SED} &#39;s!\.! !g&#39; | ${SED} &#39;s!-! !g&#39;`&quot;
+684   OS_VERSION_MAJOR=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 1 -d &#39; &#39;`&quot;
+685   OS_VERSION_MINOR=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 2 -d &#39; &#39;`&quot;
+686   OS_VERSION_MICRO=&quot;`${ECHO} ${OS_VERSION} | ${CUT} -f 3 -d &#39; &#39;`&quot;
+687   AC_SUBST(OS_VERSION_MAJOR)
+688   AC_SUBST(OS_VERSION_MINOR)
+689   AC_SUBST(OS_VERSION_MICRO)
+690 ])
+691 
+692 AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_TARGET_BITS],
+693 [
+694   ###############################################################################
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="../../doc/building.md.sdiff.html" target="_top">&lt; prev</a> <a href="../../index.html" target="_top">index</a> next &gt;</center>  </body>
+</html>

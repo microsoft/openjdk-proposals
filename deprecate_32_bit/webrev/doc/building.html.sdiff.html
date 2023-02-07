@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff doc/building.html</title>
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+<body>
+<center>&lt; prev <a href="../index.html" target="_top">index</a> <a href="building.md.sdiff.html" target="_top">next &gt;</a></center>    <h2>doc/building.html</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 304 &lt;code&gt;false&lt;/code&gt; (this is asked during installation).&lt;/p&gt;&lt;/li&gt;
+ 305 &lt;/ul&gt;&lt;/li&gt;
+ 306 &lt;/ul&gt;
+ 307 &lt;p&gt;Failure to follow this procedure might result in hard-to-debug build
+ 308 problems.&lt;/p&gt;&lt;/li&gt;
+ 309 &lt;/ul&gt;
+ 310 &lt;h2 id=&quot;build-hardware-requirements&quot;&gt;Build Hardware Requirements&lt;/h2&gt;
+ 311 &lt;p&gt;The JDK is a massive project, and require machines ranging from
+ 312 decent to powerful to be able to build in a reasonable amount of time,
+ 313 or to be able to complete a build at all.&lt;/p&gt;
+ 314 &lt;p&gt;We &lt;em&gt;strongly&lt;/em&gt; recommend usage of an SSD disk for the build,
+ 315 since disk speed is one of the limiting factors for build
+ 316 performance.&lt;/p&gt;
+ 317 &lt;h3 id=&quot;building-on-x86&quot;&gt;Building on x86&lt;/h3&gt;
+ 318 &lt;p&gt;At a minimum, a machine with 2-4 cores is advisable, as well as 2-4
+ 319 GB of RAM. (The more cores to use, the more memory you need.) At least 6
+ 320 GB of free disk space is required.&lt;/p&gt;
+ 321 &lt;p&gt;Even for 32-bit builds, it is recommended to use a 64-bit build
+ 322 machine, and instead create a 32-bit target using
+ 323 &lt;code&gt;--with-target-bits=32&lt;/code&gt;.&lt;/p&gt;
+
+ 324 &lt;h3 id=&quot;building-on-aarch64&quot;&gt;Building on aarch64&lt;/h3&gt;
+ 325 &lt;p&gt;At a minimum, a machine with 8 cores is advisable, as well as 8 GB of
+ 326 RAM. (The more cores to use, the more memory you need.) At least 6 GB of
+ 327 free disk space is required.&lt;/p&gt;
+ 328 &lt;p&gt;If you do not have access to sufficiently powerful hardware, it is
+ 329 also possible to use &lt;a href=&quot;#cross-compiling&quot;&gt;cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 330 &lt;h4 id=&quot;branch-protection&quot;&gt;Branch Protection&lt;/h4&gt;
+ 331 &lt;p&gt;In order to use Branch Protection features in the VM,
+ 332 &lt;code&gt;--enable-branch-protection&lt;/code&gt; must be used. This option
+ 333 requires C++ compiler support (GCC 9.1.0+ or Clang 10+). The resulting
+ 334 build can be run on both machines with and without support for branch
+ 335 protection in hardware. Branch Protection is only supported for Linux
+ 336 targets.&lt;/p&gt;
+ 337 &lt;h3 id=&quot;building-on-32-bit-arm&quot;&gt;Building on 32-bit arm&lt;/h3&gt;
+ 338 &lt;p&gt;This is not recommended. Instead, see the section on &lt;a
+ 339 href=&quot;#cross-compiling&quot;&gt;Cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 340 &lt;h2 id=&quot;operating-system-requirements&quot;&gt;Operating System
+ 341 Requirements&lt;/h2&gt;
+ 342 &lt;p&gt;The mainline JDK project supports Linux, macOS, AIX and Windows.
+ 343 Support for other operating system, e.g. BSD, exists in separate &quot;port&quot;
+</pre>
+<hr />
+<pre>
+ 380 &lt;h3 id=&quot;windows&quot;&gt;Windows&lt;/h3&gt;
+ 381 &lt;p&gt;Windows XP is not a supported platform, but all newer Windows should
+ 382 be able to build the JDK.&lt;/p&gt;
+ 383 &lt;p&gt;On Windows, it is important that you pay attention to the
+ 384 instructions in the &lt;a href=&quot;#special-considerations&quot;&gt;Special
+ 385 Considerations&lt;/a&gt;.&lt;/p&gt;
+ 386 &lt;p&gt;Windows is the only non-POSIX OS supported by the JDK, and as such,
+ 387 requires some extra care. A POSIX support layer is required to build on
+ 388 Windows. Currently, the only supported such layers are Cygwin, Windows
+ 389 Subsystem for Linux (WSL), and MSYS2. (MSYS is no longer supported due
+ 390 to an outdated bash; While OpenJDK can be built with MSYS2, support for
+ 391 it is still experimental, so build failures and unusual errors are not
+ 392 uncommon.)&lt;/p&gt;
+ 393 &lt;p&gt;Internally in the build system, all paths are represented as
+ 394 Unix-style paths, e.g. &lt;code&gt;/cygdrive/c/git/jdk/Makefile&lt;/code&gt; rather
+ 395 than &lt;code&gt;C:\git\jdk\Makefile&lt;/code&gt;. This rule also applies to input
+ 396 to the build system, e.g. in arguments to &lt;code&gt;configure&lt;/code&gt;. So,
+ 397 use &lt;code&gt;--with-msvcr-dll=/cygdrive/c/msvcr100.dll&lt;/code&gt; rather than
+ 398 &lt;code&gt;--with-msvcr-dll=c:\msvcr100.dll&lt;/code&gt;. For details on this
+ 399 conversion, see the section on &lt;a href=&quot;#fixpath&quot;&gt;Fixpath&lt;/a&gt;.&lt;/p&gt;
+
+ 400 &lt;h4 id=&quot;cygwin&quot;&gt;Cygwin&lt;/h4&gt;
+ 401 &lt;p&gt;A functioning &lt;a href=&quot;http://www.cygwin.com/&quot;&gt;Cygwin&lt;/a&gt; environment
+ 402 is required for building the JDK on Windows. If you have a 64-bit OS, we
+ 403 strongly recommend using the 64-bit version of Cygwin.&lt;/p&gt;
+ 404 &lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; Cygwin has a model of continuously updating
+ 405 all packages without any easy way to install or revert to a specific
+ 406 version of a package. This means that whenever you add or update a
+ 407 package in Cygwin, you might (inadvertently) update tools that are used
+ 408 by the JDK build process, and that can cause unexpected build
+ 409 problems.&lt;/p&gt;
+ 410 &lt;p&gt;The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually
+ 411 not a problem, since Cygwin currently only distributes GNU Make at a
+ 412 version above 4.0.&lt;/p&gt;
+ 413 &lt;p&gt;Apart from the basic Cygwin installation, the following packages must
+ 414 also be installed:&lt;/p&gt;
+ 415 &lt;ul&gt;
+ 416 &lt;li&gt;&lt;code&gt;autoconf&lt;/code&gt;&lt;/li&gt;
+ 417 &lt;li&gt;&lt;code&gt;make&lt;/code&gt;&lt;/li&gt;
+ 418 &lt;li&gt;&lt;code&gt;zip&lt;/code&gt;&lt;/li&gt;
+ 419 &lt;li&gt;&lt;code&gt;unzip&lt;/code&gt;&lt;/li&gt;
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 304 &lt;code&gt;false&lt;/code&gt; (this is asked during installation).&lt;/p&gt;&lt;/li&gt;
+ 305 &lt;/ul&gt;&lt;/li&gt;
+ 306 &lt;/ul&gt;
+ 307 &lt;p&gt;Failure to follow this procedure might result in hard-to-debug build
+ 308 problems.&lt;/p&gt;&lt;/li&gt;
+ 309 &lt;/ul&gt;
+ 310 &lt;h2 id=&quot;build-hardware-requirements&quot;&gt;Build Hardware Requirements&lt;/h2&gt;
+ 311 &lt;p&gt;The JDK is a massive project, and require machines ranging from
+ 312 decent to powerful to be able to build in a reasonable amount of time,
+ 313 or to be able to complete a build at all.&lt;/p&gt;
+ 314 &lt;p&gt;We &lt;em&gt;strongly&lt;/em&gt; recommend usage of an SSD disk for the build,
+ 315 since disk speed is one of the limiting factors for build
+ 316 performance.&lt;/p&gt;
+ 317 &lt;h3 id=&quot;building-on-x86&quot;&gt;Building on x86&lt;/h3&gt;
+ 318 &lt;p&gt;At a minimum, a machine with 2-4 cores is advisable, as well as 2-4
+ 319 GB of RAM. (The more cores to use, the more memory you need.) At least 6
+ 320 GB of free disk space is required.&lt;/p&gt;
+ 321 &lt;p&gt;Even for 32-bit builds, it is recommended to use a 64-bit build
+ 322 machine, and instead create a 32-bit target using
+ 323 &lt;code&gt;--with-target-bits=32&lt;/code&gt;.&lt;/p&gt;
+<span class="line-added"> 324 &lt;p&gt;Note: The Windows x86 port is deprecated.&lt;/p&gt;</span>
+ 325 &lt;h3 id=&quot;building-on-aarch64&quot;&gt;Building on aarch64&lt;/h3&gt;
+ 326 &lt;p&gt;At a minimum, a machine with 8 cores is advisable, as well as 8 GB of
+ 327 RAM. (The more cores to use, the more memory you need.) At least 6 GB of
+ 328 free disk space is required.&lt;/p&gt;
+ 329 &lt;p&gt;If you do not have access to sufficiently powerful hardware, it is
+ 330 also possible to use &lt;a href=&quot;#cross-compiling&quot;&gt;cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 331 &lt;h4 id=&quot;branch-protection&quot;&gt;Branch Protection&lt;/h4&gt;
+ 332 &lt;p&gt;In order to use Branch Protection features in the VM,
+ 333 &lt;code&gt;--enable-branch-protection&lt;/code&gt; must be used. This option
+ 334 requires C++ compiler support (GCC 9.1.0+ or Clang 10+). The resulting
+ 335 build can be run on both machines with and without support for branch
+ 336 protection in hardware. Branch Protection is only supported for Linux
+ 337 targets.&lt;/p&gt;
+ 338 &lt;h3 id=&quot;building-on-32-bit-arm&quot;&gt;Building on 32-bit arm&lt;/h3&gt;
+ 339 &lt;p&gt;This is not recommended. Instead, see the section on &lt;a
+ 340 href=&quot;#cross-compiling&quot;&gt;Cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 341 &lt;h2 id=&quot;operating-system-requirements&quot;&gt;Operating System
+ 342 Requirements&lt;/h2&gt;
+ 343 &lt;p&gt;The mainline JDK project supports Linux, macOS, AIX and Windows.
+ 344 Support for other operating system, e.g. BSD, exists in separate &quot;port&quot;
+</pre>
+<hr />
+<pre>
+ 381 &lt;h3 id=&quot;windows&quot;&gt;Windows&lt;/h3&gt;
+ 382 &lt;p&gt;Windows XP is not a supported platform, but all newer Windows should
+ 383 be able to build the JDK.&lt;/p&gt;
+ 384 &lt;p&gt;On Windows, it is important that you pay attention to the
+ 385 instructions in the &lt;a href=&quot;#special-considerations&quot;&gt;Special
+ 386 Considerations&lt;/a&gt;.&lt;/p&gt;
+ 387 &lt;p&gt;Windows is the only non-POSIX OS supported by the JDK, and as such,
+ 388 requires some extra care. A POSIX support layer is required to build on
+ 389 Windows. Currently, the only supported such layers are Cygwin, Windows
+ 390 Subsystem for Linux (WSL), and MSYS2. (MSYS is no longer supported due
+ 391 to an outdated bash; While OpenJDK can be built with MSYS2, support for
+ 392 it is still experimental, so build failures and unusual errors are not
+ 393 uncommon.)&lt;/p&gt;
+ 394 &lt;p&gt;Internally in the build system, all paths are represented as
+ 395 Unix-style paths, e.g. &lt;code&gt;/cygdrive/c/git/jdk/Makefile&lt;/code&gt; rather
+ 396 than &lt;code&gt;C:\git\jdk\Makefile&lt;/code&gt;. This rule also applies to input
+ 397 to the build system, e.g. in arguments to &lt;code&gt;configure&lt;/code&gt;. So,
+ 398 use &lt;code&gt;--with-msvcr-dll=/cygdrive/c/msvcr100.dll&lt;/code&gt; rather than
+ 399 &lt;code&gt;--with-msvcr-dll=c:\msvcr100.dll&lt;/code&gt;. For details on this
+ 400 conversion, see the section on &lt;a href=&quot;#fixpath&quot;&gt;Fixpath&lt;/a&gt;.&lt;/p&gt;
+<span class="line-added"> 401 &lt;p&gt;Note: The Windows x86 port is deprecated.&lt;/p&gt;</span>
+ 402 &lt;h4 id=&quot;cygwin&quot;&gt;Cygwin&lt;/h4&gt;
+ 403 &lt;p&gt;A functioning &lt;a href=&quot;http://www.cygwin.com/&quot;&gt;Cygwin&lt;/a&gt; environment
+ 404 is required for building the JDK on Windows. If you have a 64-bit OS, we
+ 405 strongly recommend using the 64-bit version of Cygwin.&lt;/p&gt;
+ 406 &lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; Cygwin has a model of continuously updating
+ 407 all packages without any easy way to install or revert to a specific
+ 408 version of a package. This means that whenever you add or update a
+ 409 package in Cygwin, you might (inadvertently) update tools that are used
+ 410 by the JDK build process, and that can cause unexpected build
+ 411 problems.&lt;/p&gt;
+ 412 &lt;p&gt;The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually
+ 413 not a problem, since Cygwin currently only distributes GNU Make at a
+ 414 version above 4.0.&lt;/p&gt;
+ 415 &lt;p&gt;Apart from the basic Cygwin installation, the following packages must
+ 416 also be installed:&lt;/p&gt;
+ 417 &lt;ul&gt;
+ 418 &lt;li&gt;&lt;code&gt;autoconf&lt;/code&gt;&lt;/li&gt;
+ 419 &lt;li&gt;&lt;code&gt;make&lt;/code&gt;&lt;/li&gt;
+ 420 &lt;li&gt;&lt;code&gt;zip&lt;/code&gt;&lt;/li&gt;
+ 421 &lt;li&gt;&lt;code&gt;unzip&lt;/code&gt;&lt;/li&gt;
+</pre>
+</td>
+</tr>
+</table>
+<center>&lt; prev <a href="../index.html" target="_top">index</a> <a href="building.md.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

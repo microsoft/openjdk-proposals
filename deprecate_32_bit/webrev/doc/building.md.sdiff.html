@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sdiff doc/building.md</title>
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+<body>
+<center><a href="building.html.sdiff.html" target="_top">&lt; prev</a> <a href="../index.html" target="_top">index</a> <a href="../make/autoconf/platform.m4.sdiff.html" target="_top">next &gt;</a></center>    <h2>doc/building.md</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<table>
+<tr valign="top">
+<td>
+<hr />
+<pre>
+ 109     problems.
+ 110 
+ 111 ## Build Hardware Requirements
+ 112 
+ 113 The JDK is a massive project, and require machines ranging from decent to
+ 114 powerful to be able to build in a reasonable amount of time, or to be able to
+ 115 complete a build at all.
+ 116 
+ 117 We *strongly* recommend usage of an SSD disk for the build, since disk speed is
+ 118 one of the limiting factors for build performance.
+ 119 
+ 120 ### Building on x86
+ 121 
+ 122 At a minimum, a machine with 2-4 cores is advisable, as well as 2-4 GB of RAM.
+ 123 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 124 space is required.
+ 125 
+ 126 Even for 32-bit builds, it is recommended to use a 64-bit build machine, and
+ 127 instead create a 32-bit target using `--with-target-bits=32`.
+ 128 
+
+
+ 129 ### Building on aarch64
+ 130 
+ 131 At a minimum, a machine with 8 cores is advisable, as well as 8 GB of RAM.
+ 132 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 133 space is required.
+ 134 
+ 135 If you do not have access to sufficiently powerful hardware, it is also
+ 136 possible to use [cross-compiling](#cross-compiling).
+ 137 
+ 138 #### Branch Protection
+ 139 
+ 140 In order to use Branch Protection features in the VM, `--enable-branch-protection`
+ 141 must be used. This option requires C++ compiler support (GCC 9.1.0+ or Clang
+ 142 10+). The resulting build can be run on both machines with and without support
+ 143 for branch protection in hardware. Branch Protection is only supported for
+ 144 Linux targets.
+ 145 
+ 146 ### Building on 32-bit arm
+ 147 
+ 148 This is not recommended. Instead, see the section on [Cross-compiling](
+</pre>
+<hr />
+<pre>
+ 182 Windows XP is not a supported platform, but all newer Windows should be able to
+ 183 build the JDK.
+ 184 
+ 185 On Windows, it is important that you pay attention to the instructions in the
+ 186 [Special Considerations](#special-considerations).
+ 187 
+ 188 Windows is the only non-POSIX OS supported by the JDK, and as such, requires
+ 189 some extra care. A POSIX support layer is required to build on Windows.
+ 190 Currently, the only supported such layers are Cygwin, Windows Subsystem for
+ 191 Linux (WSL), and MSYS2. (MSYS is no longer supported due to an outdated bash;
+ 192 While OpenJDK can be built with MSYS2, support for it is still experimental, so
+ 193 build failures and unusual errors are not uncommon.)
+ 194 
+ 195 Internally in the build system, all paths are represented as Unix-style paths,
+ 196 e.g. `/cygdrive/c/git/jdk/Makefile` rather than `C:\git\jdk\Makefile`. This
+ 197 rule also applies to input to the build system, e.g. in arguments to
+ 198 `configure`. So, use `--with-msvcr-dll=/cygdrive/c/msvcr100.dll` rather than
+ 199 `--with-msvcr-dll=c:\msvcr100.dll`. For details on this conversion, see the section
+ 200 on [Fixpath](#fixpath).
+ 201 
+
+
+ 202 #### Cygwin
+ 203 
+ 204 A functioning [Cygwin](http://www.cygwin.com/) environment is required for
+ 205 building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
+ 206 using the 64-bit version of Cygwin.
+ 207 
+ 208 **Note:** Cygwin has a model of continuously updating all packages without any
+ 209 easy way to install or revert to a specific version of a package. This means
+ 210 that whenever you add or update a package in Cygwin, you might (inadvertently)
+ 211 update tools that are used by the JDK build process, and that can cause
+ 212 unexpected build problems.
+ 213 
+ 214 The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually not a
+ 215 problem, since Cygwin currently only distributes GNU Make at a version above
+ 216 4.0.
+ 217 
+ 218 Apart from the basic Cygwin installation, the following packages must also be
+ 219 installed:
+ 220 
+ 221   * `autoconf`
+</pre>
+</td>
+<td>
+<hr />
+<pre>
+ 109     problems.
+ 110 
+ 111 ## Build Hardware Requirements
+ 112 
+ 113 The JDK is a massive project, and require machines ranging from decent to
+ 114 powerful to be able to build in a reasonable amount of time, or to be able to
+ 115 complete a build at all.
+ 116 
+ 117 We *strongly* recommend usage of an SSD disk for the build, since disk speed is
+ 118 one of the limiting factors for build performance.
+ 119 
+ 120 ### Building on x86
+ 121 
+ 122 At a minimum, a machine with 2-4 cores is advisable, as well as 2-4 GB of RAM.
+ 123 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 124 space is required.
+ 125 
+ 126 Even for 32-bit builds, it is recommended to use a 64-bit build machine, and
+ 127 instead create a 32-bit target using `--with-target-bits=32`.
+ 128 
+<span class="line-added"> 129 Note: The Widows x86 port is deprecated.</span>
+<span class="line-added"> 130 </span>
+ 131 ### Building on aarch64
+ 132 
+ 133 At a minimum, a machine with 8 cores is advisable, as well as 8 GB of RAM.
+ 134 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 135 space is required.
+ 136 
+ 137 If you do not have access to sufficiently powerful hardware, it is also
+ 138 possible to use [cross-compiling](#cross-compiling).
+ 139 
+ 140 #### Branch Protection
+ 141 
+ 142 In order to use Branch Protection features in the VM, `--enable-branch-protection`
+ 143 must be used. This option requires C++ compiler support (GCC 9.1.0+ or Clang
+ 144 10+). The resulting build can be run on both machines with and without support
+ 145 for branch protection in hardware. Branch Protection is only supported for
+ 146 Linux targets.
+ 147 
+ 148 ### Building on 32-bit arm
+ 149 
+ 150 This is not recommended. Instead, see the section on [Cross-compiling](
+</pre>
+<hr />
+<pre>
+ 184 Windows XP is not a supported platform, but all newer Windows should be able to
+ 185 build the JDK.
+ 186 
+ 187 On Windows, it is important that you pay attention to the instructions in the
+ 188 [Special Considerations](#special-considerations).
+ 189 
+ 190 Windows is the only non-POSIX OS supported by the JDK, and as such, requires
+ 191 some extra care. A POSIX support layer is required to build on Windows.
+ 192 Currently, the only supported such layers are Cygwin, Windows Subsystem for
+ 193 Linux (WSL), and MSYS2. (MSYS is no longer supported due to an outdated bash;
+ 194 While OpenJDK can be built with MSYS2, support for it is still experimental, so
+ 195 build failures and unusual errors are not uncommon.)
+ 196 
+ 197 Internally in the build system, all paths are represented as Unix-style paths,
+ 198 e.g. `/cygdrive/c/git/jdk/Makefile` rather than `C:\git\jdk\Makefile`. This
+ 199 rule also applies to input to the build system, e.g. in arguments to
+ 200 `configure`. So, use `--with-msvcr-dll=/cygdrive/c/msvcr100.dll` rather than
+ 201 `--with-msvcr-dll=c:\msvcr100.dll`. For details on this conversion, see the section
+ 202 on [Fixpath](#fixpath).
+ 203 
+<span class="line-added"> 204 Note: The Widows x86 port is deprecated.</span>
+<span class="line-added"> 205 </span>
+ 206 #### Cygwin
+ 207 
+ 208 A functioning [Cygwin](http://www.cygwin.com/) environment is required for
+ 209 building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
+ 210 using the 64-bit version of Cygwin.
+ 211 
+ 212 **Note:** Cygwin has a model of continuously updating all packages without any
+ 213 easy way to install or revert to a specific version of a package. This means
+ 214 that whenever you add or update a package in Cygwin, you might (inadvertently)
+ 215 update tools that are used by the JDK build process, and that can cause
+ 216 unexpected build problems.
+ 217 
+ 218 The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually not a
+ 219 problem, since Cygwin currently only distributes GNU Make at a version above
+ 220 4.0.
+ 221 
+ 222 Apart from the basic Cygwin installation, the following packages must also be
+ 223 installed:
+ 224 
+ 225   * `autoconf`
+</pre>
+</td>
+</tr>
+</table>
+<center><a href="building.html.sdiff.html" target="_top">&lt; prev</a> <a href="../index.html" target="_top">index</a> <a href="../make/autoconf/platform.m4.sdiff.html" target="_top">next &gt;</a></center>  </body>
+</html>

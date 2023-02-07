@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Udiff make/autoconf/platform.m4</title>
+    <link rel="stylesheet" href="../../style.css" />
+  </head>
+<body>
+<center><a href="../../doc/building.md.udiff.html" target="_top">&lt; prev</a> <a href="../../index.html" target="_top">index</a> next &gt;</center>    <h2>make/autoconf/platform.m4</h2>
+     <a class="print" href="javascript:print()">Print this page</a>
+<hr />
+<pre>
+<span class="line-new-header">@@ -654,10 +654,26 @@</span>
+    PLATFORM_EXTRACT_TARGET_AND_BUILD
+    PLATFORM_SETUP_TARGET_CPU_BITS
+    PLATFORM_SET_MODULE_TARGET_OS_VALUES
+    PLATFORM_SET_RELEASE_FILE_OS_VALUES
+    PLATFORM_SETUP_LEGACY_VARS
+<span class="udiff-line-added">+   PLATFORM_CHECK_DEPRECATION</span>
+<span class="udiff-line-added">+ ])</span>
+<span class="udiff-line-added">+ </span>
+<span class="udiff-line-added">+ AC_DEFUN_ONCE([PLATFORM_CHECK_DEPRECATION],</span>
+<span class="udiff-line-added">+ [</span>
+<span class="udiff-line-added">+   AC_ARG_ENABLE(deprecated-ports, [AS_HELP_STRING([--enable-deprecated-ports@&lt;:@=yes/no@:&gt;@],</span>
+<span class="udiff-line-added">+        [Suppress the error when configuring for a deprecated port @&lt;:@no@:&gt;@])])</span>
+<span class="udiff-line-added">+   AC_REQUIRE([PLATFORM_EXTRACT_TARGET_AND_BUILD])</span>
+<span class="udiff-line-added">+   if test &quot;x$OPENJDK_TARGET_OS&quot; = xwindows &amp;&amp; test &quot;x$OPENJDK_TARGET_CPU_ARCH&quot; = xx86; then</span>
+<span class="udiff-line-added">+     if test &quot;x$enable_deprecated_ports&quot; = &quot;xyes&quot;; then</span>
+<span class="udiff-line-added">+       AC_MSG_WARN([The Windows x86-32 port is deprecated and may be removed in a future release.])</span>
+<span class="udiff-line-added">+     else</span>
+<span class="udiff-line-added">+       AC_MSG_ERROR(m4_normalize([The Windows x86-32 port is deprecated and may be removed in a future release.</span>
+<span class="udiff-line-added">+         Use --enable-deprecated-ports=yes to suppress this error.]))</span>
+<span class="udiff-line-added">+     fi</span>
+<span class="udiff-line-added">+   fi</span>
+  ])
+  
+  AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_OS_VERSION],
+  [
+    ###############################################################################
+</pre>
+<center><a href="../../doc/building.md.udiff.html" target="_top">&lt; prev</a> <a href="../../index.html" target="_top">index</a> next &gt;</center>  </body>
+</html>
