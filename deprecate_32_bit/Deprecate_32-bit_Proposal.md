@@ -57,4 +57,4 @@ The error/warning will be issued when configuring a build for Windows x86.
 Alternatives
 -----------
 
-TBD
+Just as with [JEP 362 (Deprecate the Solaris and SPARC Ports)](https://openjdk.org/jeps/362), an alternative is for a set of credible developers to express a clear desire to maintain this port going forward including but not limited to creating an implementation of Virtual Threads for x86-32. If that happens before this JEP is integrated then this JEP can be withdrawn. If that happens after this JEP is integrated, but before the ports are removed, then a follow-on JEP can revert the deprecation.
