@@ -17,7 +17,7 @@ Non-Goals
 Motivation
 ----------
 Dropping support for this port will enable contributors in the OpenJDK Community to accelerate the development of new features that will move the platform forward. Windows 10 (the last Windows operating system to support a 32-bit installation) will reach EOL on October 14, 2025, and Microsoft believes that Java workloads on Windows 32-bit are running older versions of Java without any plans for upgrading to modern (OpenJDK 17+) versions.
-Another motivation is that there is currently no implementation of [JEP 436 (Virtual Threads)](https://openjdk.org/jeps/436) for 32-bit platforms and without a vendor stepping forward to implement this it's unlikelty that vendors will be able to continue supporting the platform.
+Another motivation is that there is currently no implementation of [JEP 436 (Virtual Threads)](https://openjdk.org/jeps/436) for 32-bit platforms and without a vendor stepping forward to implement this it's unlikely that OpenJDK will be able to continue supporting the platform.
 The main focus of this JEP is to deprecate the Windows x86 port.
 
 Description
