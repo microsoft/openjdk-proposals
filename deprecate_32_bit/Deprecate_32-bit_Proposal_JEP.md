@@ -17,7 +17,7 @@ Non-Goals
 Motivation
 ----------
 Dropping support for this port will enable contributors in the OpenJDK Community to accelerate the development of new features that will move the platform forward. There is currently no implementation of [JEP 436 (Virtual Threads)](https://openjdk.org/jeps/436) for 32-bit platforms and without a vendor stepping forward to implement this it's unlikely that OpenJDK will be able to continue supporting 32-bit architectures. 
-Another motivation is that Windows 10 (the last Windows operating system to support a 32-bit installation) will reach EOL on October 14, 2025.
+Another motivation is that Windows 10 (the last Windows operating system to support a 32-bit installation) will reach EOL on October 14, 2025[^1].
 The main focus of this JEP is to deprecate the Windows x86 port.
 
 Description
@@ -58,3 +58,5 @@ Alternatives
 -----------
 
 Just as with [JEP 362 (Deprecate the Solaris and SPARC Ports)](https://openjdk.org/jeps/362), an alternative is for a set of credible developers to express a clear desire to maintain this port going forward including but not limited to creating an implementation of Virtual Threads for x86-32. If that happens before this JEP is integrated then this JEP can be withdrawn. If that happens after this JEP is integrated, but before the ports are removed, then a follow-on JEP can revert the deprecation.
+
+[^1]: https://learn.microsoft.com/lifecycle/products/windows-10-home-and-pro
