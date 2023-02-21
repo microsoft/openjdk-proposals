@@ -1,0 +1,86 @@
+diff a/doc/building.html b/doc/building.html
+--- a/doc/building.html
++++ b/doc/building.html
+@@ -319,10 +319,11 @@
+ GB of RAM. (The more cores to use, the more memory you need.) At least 6
+ GB of free disk space is required.</p>
+ <p>Even for 32-bit builds, it is recommended to use a 64-bit build
+ machine, and instead create a 32-bit target using
+ <code>--with-target-bits=32</code>.</p>
++<p>Note: The Windows x86 port is deprecated.</p>
+ <h3 id="building-on-aarch64">Building on aarch64</h3>
+ <p>At a minimum, a machine with 8 cores is advisable, as well as 8 GB of
+ RAM. (The more cores to use, the more memory you need.) At least 6 GB of
+ free disk space is required.</p>
+ <p>If you do not have access to sufficiently powerful hardware, it is
+@@ -395,10 +396,11 @@
+ than <code>C:\git\jdk\Makefile</code>. This rule also applies to input
+ to the build system, e.g. in arguments to <code>configure</code>. So,
+ use <code>--with-msvcr-dll=/cygdrive/c/msvcr100.dll</code> rather than
+ <code>--with-msvcr-dll=c:\msvcr100.dll</code>. For details on this
+ conversion, see the section on <a href="#fixpath">Fixpath</a>.</p>
++<p>Note: The Windows x86 port is deprecated.</p>
+ <h4 id="cygwin">Cygwin</h4>
+ <p>A functioning <a href="http://www.cygwin.com/">Cygwin</a> environment
+ is required for building the JDK on Windows. If you have a 64-bit OS, we
+ strongly recommend using the 64-bit version of Cygwin.</p>
+ <p><strong>Note:</strong> Cygwin has a model of continuously updating
+diff a/doc/building.md b/doc/building.md
+--- a/doc/building.md
++++ b/doc/building.md
+@@ -124,10 +124,12 @@
+ space is required.
+ 
+ Even for 32-bit builds, it is recommended to use a 64-bit build machine, and
+ instead create a 32-bit target using `--with-target-bits=32`.
+ 
++Note: The Widows x86 port is deprecated.
++
+ ### Building on aarch64
+ 
+ At a minimum, a machine with 8 cores is advisable, as well as 8 GB of RAM.
+ (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ space is required.
+@@ -197,10 +199,12 @@
+ rule also applies to input to the build system, e.g. in arguments to
+ `configure`. So, use `--with-msvcr-dll=/cygdrive/c/msvcr100.dll` rather than
+ `--with-msvcr-dll=c:\msvcr100.dll`. For details on this conversion, see the section
+ on [Fixpath](#fixpath).
+ 
++Note: The Widows x86 port is deprecated.
++
+ #### Cygwin
+ 
+ A functioning [Cygwin](http://www.cygwin.com/) environment is required for
+ building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
+ using the 64-bit version of Cygwin.
+diff a/make/autoconf/platform.m4 b/make/autoconf/platform.m4
+--- a/make/autoconf/platform.m4
++++ b/make/autoconf/platform.m4
+@@ -654,10 +654,26 @@
+   PLATFORM_EXTRACT_TARGET_AND_BUILD
+   PLATFORM_SETUP_TARGET_CPU_BITS
+   PLATFORM_SET_MODULE_TARGET_OS_VALUES
+   PLATFORM_SET_RELEASE_FILE_OS_VALUES
+   PLATFORM_SETUP_LEGACY_VARS
++  PLATFORM_CHECK_DEPRECATION
++])
++
++AC_DEFUN_ONCE([PLATFORM_CHECK_DEPRECATION],
++[
++  AC_ARG_ENABLE(deprecated-ports, [AS_HELP_STRING([--enable-deprecated-ports@<:@=yes/no@:>@],
++       [Suppress the error when configuring for a deprecated port @<:@no@:>@])])
++  AC_REQUIRE([PLATFORM_EXTRACT_TARGET_AND_BUILD])
++  if test "x$OPENJDK_TARGET_OS" = xwindows && test "x$OPENJDK_TARGET_CPU_ARCH" = xx86; then
++    if test "x$enable_deprecated_ports" = "xyes"; then
++      AC_MSG_WARN([The Windows x86-32 port is deprecated and may be removed in a future release.])
++    else
++      AC_MSG_ERROR(m4_normalize([The Windows x86-32 port is deprecated and may be removed in a future release.
++        Use --enable-deprecated-ports=yes to suppress this error.]))
++    fi
++  fi
+ ])
+ 
+ AC_DEFUN_ONCE([PLATFORM_SETUP_OPENJDK_BUILD_OS_VERSION],
+ [
+   ###############################################################################

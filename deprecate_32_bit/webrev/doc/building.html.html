@@ -1,0 +1,2243 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New doc/building.html</title>
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <pre>
+   1 &lt;!DOCTYPE html&gt;
+   2 &lt;html xmlns=&quot;http://www.w3.org/1999/xhtml&quot; lang=&quot;&quot; xml:lang=&quot;&quot;&gt;
+   3 &lt;head&gt;
+   4   &lt;meta charset=&quot;utf-8&quot; /&gt;
+   5   &lt;meta name=&quot;generator&quot; content=&quot;pandoc&quot; /&gt;
+   6   &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0, user-scalable=yes&quot; /&gt;
+   7   &lt;title&gt;Building the JDK&lt;/title&gt;
+   8   &lt;style&gt;
+   9     code{white-space: pre-wrap;}
+  10     span.smallcaps{font-variant: small-caps;}
+  11     div.columns{display: flex; gap: min(4vw, 1.5em);}
+  12     div.column{flex: auto; overflow-x: auto;}
+  13     div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+  14     ul.task-list{list-style: none;}
+  15     ul.task-list li input[type=&quot;checkbox&quot;] {
+  16       width: 0.8em;
+  17       margin: 0 0.8em 0.2em -1.6em;
+  18       vertical-align: middle;
+  19     }
+  20     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  21   &lt;/style&gt;
+  22   &lt;link rel=&quot;stylesheet&quot; href=&quot;../make/data/docs-resources/resources/jdk-default.css&quot; /&gt;
+  23   &lt;style type=&quot;text/css&quot;&gt;pre, code, tt { color: #1d6ae5; }&lt;/style&gt;
+  24   &lt;!--[if lt IE 9]&gt;
+  25     &lt;script src=&quot;//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js&quot;&gt;&lt;/script&gt;
+  26   &lt;![endif]--&gt;
+  27 &lt;/head&gt;
+  28 &lt;body&gt;
+  29 &lt;header id=&quot;title-block-header&quot;&gt;
+  30 &lt;h1 class=&quot;title&quot;&gt;Building the JDK&lt;/h1&gt;
+  31 &lt;/header&gt;
+  32 &lt;nav id=&quot;TOC&quot; role=&quot;doc-toc&quot;&gt;
+  33 &lt;ul&gt;
+  34 &lt;li&gt;&lt;a href=&quot;#tldr-instructions-for-the-impatient&quot;
+  35 id=&quot;toc-tldr-instructions-for-the-impatient&quot;&gt;TL;DR (Instructions for the
+  36 Impatient)&lt;/a&gt;&lt;/li&gt;
+  37 &lt;li&gt;&lt;a href=&quot;#introduction&quot; id=&quot;toc-introduction&quot;&gt;Introduction&lt;/a&gt;&lt;/li&gt;
+  38 &lt;li&gt;&lt;a href=&quot;#getting-the-source-code&quot;
+  39 id=&quot;toc-getting-the-source-code&quot;&gt;Getting the Source Code&lt;/a&gt;
+  40 &lt;ul&gt;
+  41 &lt;li&gt;&lt;a href=&quot;#special-considerations&quot;
+  42 id=&quot;toc-special-considerations&quot;&gt;Special Considerations&lt;/a&gt;&lt;/li&gt;
+  43 &lt;/ul&gt;&lt;/li&gt;
+  44 &lt;li&gt;&lt;a href=&quot;#build-hardware-requirements&quot;
+  45 id=&quot;toc-build-hardware-requirements&quot;&gt;Build Hardware Requirements&lt;/a&gt;
+  46 &lt;ul&gt;
+  47 &lt;li&gt;&lt;a href=&quot;#building-on-x86&quot; id=&quot;toc-building-on-x86&quot;&gt;Building on
+  48 x86&lt;/a&gt;&lt;/li&gt;
+  49 &lt;li&gt;&lt;a href=&quot;#building-on-aarch64&quot; id=&quot;toc-building-on-aarch64&quot;&gt;Building
+  50 on aarch64&lt;/a&gt;&lt;/li&gt;
+  51 &lt;li&gt;&lt;a href=&quot;#building-on-32-bit-arm&quot;
+  52 id=&quot;toc-building-on-32-bit-arm&quot;&gt;Building on 32-bit arm&lt;/a&gt;&lt;/li&gt;
+  53 &lt;/ul&gt;&lt;/li&gt;
+  54 &lt;li&gt;&lt;a href=&quot;#operating-system-requirements&quot;
+  55 id=&quot;toc-operating-system-requirements&quot;&gt;Operating System Requirements&lt;/a&gt;
+  56 &lt;ul&gt;
+  57 &lt;li&gt;&lt;a href=&quot;#windows&quot; id=&quot;toc-windows&quot;&gt;Windows&lt;/a&gt;&lt;/li&gt;
+  58 &lt;li&gt;&lt;a href=&quot;#macos&quot; id=&quot;toc-macos&quot;&gt;macOS&lt;/a&gt;&lt;/li&gt;
+  59 &lt;li&gt;&lt;a href=&quot;#linux&quot; id=&quot;toc-linux&quot;&gt;Linux&lt;/a&gt;&lt;/li&gt;
+  60 &lt;li&gt;&lt;a href=&quot;#aix&quot; id=&quot;toc-aix&quot;&gt;AIX&lt;/a&gt;&lt;/li&gt;
+  61 &lt;/ul&gt;&lt;/li&gt;
+  62 &lt;li&gt;&lt;a href=&quot;#native-compiler-toolchain-requirements&quot;
+  63 id=&quot;toc-native-compiler-toolchain-requirements&quot;&gt;Native Compiler
+  64 (Toolchain) Requirements&lt;/a&gt;
+  65 &lt;ul&gt;
+  66 &lt;li&gt;&lt;a href=&quot;#gcc&quot; id=&quot;toc-gcc&quot;&gt;gcc&lt;/a&gt;&lt;/li&gt;
+  67 &lt;li&gt;&lt;a href=&quot;#clang&quot; id=&quot;toc-clang&quot;&gt;clang&lt;/a&gt;&lt;/li&gt;
+  68 &lt;li&gt;&lt;a href=&quot;#apple-xcode&quot; id=&quot;toc-apple-xcode&quot;&gt;Apple Xcode&lt;/a&gt;&lt;/li&gt;
+  69 &lt;li&gt;&lt;a href=&quot;#microsoft-visual-studio&quot;
+  70 id=&quot;toc-microsoft-visual-studio&quot;&gt;Microsoft Visual Studio&lt;/a&gt;&lt;/li&gt;
+  71 &lt;li&gt;&lt;a href=&quot;#ibm-xl-cc&quot; id=&quot;toc-ibm-xl-cc&quot;&gt;IBM XL C/C++&lt;/a&gt;&lt;/li&gt;
+  72 &lt;/ul&gt;&lt;/li&gt;
+  73 &lt;li&gt;&lt;a href=&quot;#boot-jdk-requirements&quot; id=&quot;toc-boot-jdk-requirements&quot;&gt;Boot
+  74 JDK Requirements&lt;/a&gt;
+  75 &lt;ul&gt;
+  76 &lt;li&gt;&lt;a href=&quot;#getting-jdk-binaries&quot;
+  77 id=&quot;toc-getting-jdk-binaries&quot;&gt;Getting JDK binaries&lt;/a&gt;&lt;/li&gt;
+  78 &lt;/ul&gt;&lt;/li&gt;
+  79 &lt;li&gt;&lt;a href=&quot;#external-library-requirements&quot;
+  80 id=&quot;toc-external-library-requirements&quot;&gt;External Library Requirements&lt;/a&gt;
+  81 &lt;ul&gt;
+  82 &lt;li&gt;&lt;a href=&quot;#freetype&quot; id=&quot;toc-freetype&quot;&gt;FreeType&lt;/a&gt;&lt;/li&gt;
+  83 &lt;li&gt;&lt;a href=&quot;#cups&quot; id=&quot;toc-cups&quot;&gt;CUPS&lt;/a&gt;&lt;/li&gt;
+  84 &lt;li&gt;&lt;a href=&quot;#x11&quot; id=&quot;toc-x11&quot;&gt;X11&lt;/a&gt;&lt;/li&gt;
+  85 &lt;li&gt;&lt;a href=&quot;#alsa&quot; id=&quot;toc-alsa&quot;&gt;ALSA&lt;/a&gt;&lt;/li&gt;
+  86 &lt;li&gt;&lt;a href=&quot;#libffi&quot; id=&quot;toc-libffi&quot;&gt;libffi&lt;/a&gt;&lt;/li&gt;
+  87 &lt;/ul&gt;&lt;/li&gt;
+  88 &lt;li&gt;&lt;a href=&quot;#build-tools-requirements&quot;
+  89 id=&quot;toc-build-tools-requirements&quot;&gt;Build Tools Requirements&lt;/a&gt;
+  90 &lt;ul&gt;
+  91 &lt;li&gt;&lt;a href=&quot;#autoconf&quot; id=&quot;toc-autoconf&quot;&gt;Autoconf&lt;/a&gt;&lt;/li&gt;
+  92 &lt;li&gt;&lt;a href=&quot;#gnu-make&quot; id=&quot;toc-gnu-make&quot;&gt;GNU Make&lt;/a&gt;&lt;/li&gt;
+  93 &lt;li&gt;&lt;a href=&quot;#gnu-bash&quot; id=&quot;toc-gnu-bash&quot;&gt;GNU Bash&lt;/a&gt;&lt;/li&gt;
+  94 &lt;/ul&gt;&lt;/li&gt;
+  95 &lt;li&gt;&lt;a href=&quot;#running-configure&quot; id=&quot;toc-running-configure&quot;&gt;Running
+  96 Configure&lt;/a&gt;
+  97 &lt;ul&gt;
+  98 &lt;li&gt;&lt;a href=&quot;#common-configure-arguments&quot;
+  99 id=&quot;toc-common-configure-arguments&quot;&gt;Common Configure Arguments&lt;/a&gt;&lt;/li&gt;
+ 100 &lt;li&gt;&lt;a href=&quot;#configure-control-variables&quot;
+ 101 id=&quot;toc-configure-control-variables&quot;&gt;Configure Control
+ 102 Variables&lt;/a&gt;&lt;/li&gt;
+ 103 &lt;/ul&gt;&lt;/li&gt;
+ 104 &lt;li&gt;&lt;a href=&quot;#running-make&quot; id=&quot;toc-running-make&quot;&gt;Running Make&lt;/a&gt;
+ 105 &lt;ul&gt;
+ 106 &lt;li&gt;&lt;a href=&quot;#common-make-targets&quot; id=&quot;toc-common-make-targets&quot;&gt;Common
+ 107 Make Targets&lt;/a&gt;&lt;/li&gt;
+ 108 &lt;li&gt;&lt;a href=&quot;#make-control-variables&quot;
+ 109 id=&quot;toc-make-control-variables&quot;&gt;Make Control Variables&lt;/a&gt;&lt;/li&gt;
+ 110 &lt;/ul&gt;&lt;/li&gt;
+ 111 &lt;li&gt;&lt;a href=&quot;#running-tests&quot; id=&quot;toc-running-tests&quot;&gt;Running
+ 112 Tests&lt;/a&gt;&lt;/li&gt;
+ 113 &lt;li&gt;&lt;a href=&quot;#signing&quot; id=&quot;toc-signing&quot;&gt;Signing&lt;/a&gt;
+ 114 &lt;ul&gt;
+ 115 &lt;li&gt;&lt;a href=&quot;#macos-1&quot; id=&quot;toc-macos-1&quot;&gt;macOS&lt;/a&gt;&lt;/li&gt;
+ 116 &lt;/ul&gt;&lt;/li&gt;
+ 117 &lt;li&gt;&lt;a href=&quot;#cross-compiling&quot;
+ 118 id=&quot;toc-cross-compiling&quot;&gt;Cross-compiling&lt;/a&gt;
+ 119 &lt;ul&gt;
+ 120 &lt;li&gt;&lt;a href=&quot;#cross-compiling-the-easy-way-with-openjdk-devkits&quot;
+ 121 id=&quot;toc-cross-compiling-the-easy-way-with-openjdk-devkits&quot;&gt;Cross
+ 122 compiling the easy way with OpenJDK devkits&lt;/a&gt;&lt;/li&gt;
+ 123 &lt;li&gt;&lt;a href=&quot;#boot-jdk-and-build-jdk&quot;
+ 124 id=&quot;toc-boot-jdk-and-build-jdk&quot;&gt;Boot JDK and Build JDK&lt;/a&gt;&lt;/li&gt;
+ 125 &lt;li&gt;&lt;a href=&quot;#specifying-the-target-platform&quot;
+ 126 id=&quot;toc-specifying-the-target-platform&quot;&gt;Specifying the Target
+ 127 Platform&lt;/a&gt;&lt;/li&gt;
+ 128 &lt;li&gt;&lt;a href=&quot;#toolchain-considerations&quot;
+ 129 id=&quot;toc-toolchain-considerations&quot;&gt;Toolchain Considerations&lt;/a&gt;&lt;/li&gt;
+ 130 &lt;li&gt;&lt;a href=&quot;#native-libraries&quot; id=&quot;toc-native-libraries&quot;&gt;Native
+ 131 Libraries&lt;/a&gt;&lt;/li&gt;
+ 132 &lt;li&gt;&lt;a href=&quot;#cross-compiling-with-debian-sysroots&quot;
+ 133 id=&quot;toc-cross-compiling-with-debian-sysroots&quot;&gt;Cross compiling with
+ 134 Debian sysroots&lt;/a&gt;&lt;/li&gt;
+ 135 &lt;li&gt;&lt;a href=&quot;#building-for-armaarch64&quot;
+ 136 id=&quot;toc-building-for-armaarch64&quot;&gt;Building for ARM/aarch64&lt;/a&gt;&lt;/li&gt;
+ 137 &lt;li&gt;&lt;a href=&quot;#building-for-musl&quot; id=&quot;toc-building-for-musl&quot;&gt;Building for
+ 138 musl&lt;/a&gt;&lt;/li&gt;
+ 139 &lt;li&gt;&lt;a href=&quot;#verifying-the-build&quot;
+ 140 id=&quot;toc-verifying-the-build&quot;&gt;Verifying the Build&lt;/a&gt;&lt;/li&gt;
+ 141 &lt;/ul&gt;&lt;/li&gt;
+ 142 &lt;li&gt;&lt;a href=&quot;#build-performance&quot; id=&quot;toc-build-performance&quot;&gt;Build
+ 143 Performance&lt;/a&gt;
+ 144 &lt;ul&gt;
+ 145 &lt;li&gt;&lt;a href=&quot;#disk-speed&quot; id=&quot;toc-disk-speed&quot;&gt;Disk Speed&lt;/a&gt;&lt;/li&gt;
+ 146 &lt;li&gt;&lt;a href=&quot;#virus-checking&quot; id=&quot;toc-virus-checking&quot;&gt;Virus
+ 147 Checking&lt;/a&gt;&lt;/li&gt;
+ 148 &lt;li&gt;&lt;a href=&quot;#ccache&quot; id=&quot;toc-ccache&quot;&gt;Ccache&lt;/a&gt;&lt;/li&gt;
+ 149 &lt;li&gt;&lt;a href=&quot;#precompiled-headers&quot;
+ 150 id=&quot;toc-precompiled-headers&quot;&gt;Precompiled Headers&lt;/a&gt;&lt;/li&gt;
+ 151 &lt;li&gt;&lt;a href=&quot;#icecc-icecream&quot; id=&quot;toc-icecc-icecream&quot;&gt;Icecc /
+ 152 icecream&lt;/a&gt;&lt;/li&gt;
+ 153 &lt;li&gt;&lt;a href=&quot;#using-the-javac-server&quot;
+ 154 id=&quot;toc-using-the-javac-server&quot;&gt;Using the javac server&lt;/a&gt;&lt;/li&gt;
+ 155 &lt;li&gt;&lt;a href=&quot;#building-the-right-target&quot;
+ 156 id=&quot;toc-building-the-right-target&quot;&gt;Building the Right Target&lt;/a&gt;&lt;/li&gt;
+ 157 &lt;/ul&gt;&lt;/li&gt;
+ 158 &lt;li&gt;&lt;a href=&quot;#troubleshooting&quot;
+ 159 id=&quot;toc-troubleshooting&quot;&gt;Troubleshooting&lt;/a&gt;
+ 160 &lt;ul&gt;
+ 161 &lt;li&gt;&lt;a href=&quot;#locating-the-source-of-the-error&quot;
+ 162 id=&quot;toc-locating-the-source-of-the-error&quot;&gt;Locating the Source of the
+ 163 Error&lt;/a&gt;&lt;/li&gt;
+ 164 &lt;li&gt;&lt;a href=&quot;#fixing-unexpected-build-failures&quot;
+ 165 id=&quot;toc-fixing-unexpected-build-failures&quot;&gt;Fixing Unexpected Build
+ 166 Failures&lt;/a&gt;&lt;/li&gt;
+ 167 &lt;li&gt;&lt;a href=&quot;#specific-build-issues&quot;
+ 168 id=&quot;toc-specific-build-issues&quot;&gt;Specific Build Issues&lt;/a&gt;&lt;/li&gt;
+ 169 &lt;li&gt;&lt;a href=&quot;#getting-help&quot; id=&quot;toc-getting-help&quot;&gt;Getting Help&lt;/a&gt;&lt;/li&gt;
+ 170 &lt;/ul&gt;&lt;/li&gt;
+ 171 &lt;li&gt;&lt;a href=&quot;#reproducible-builds&quot;
+ 172 id=&quot;toc-reproducible-builds&quot;&gt;Reproducible Builds&lt;/a&gt;&lt;/li&gt;
+ 173 &lt;li&gt;&lt;a href=&quot;#hints-and-suggestions-for-advanced-users&quot;
+ 174 id=&quot;toc-hints-and-suggestions-for-advanced-users&quot;&gt;Hints and Suggestions
+ 175 for Advanced Users&lt;/a&gt;
+ 176 &lt;ul&gt;
+ 177 &lt;li&gt;&lt;a href=&quot;#bash-completion&quot; id=&quot;toc-bash-completion&quot;&gt;Bash
+ 178 Completion&lt;/a&gt;&lt;/li&gt;
+ 179 &lt;li&gt;&lt;a href=&quot;#using-multiple-configurations&quot;
+ 180 id=&quot;toc-using-multiple-configurations&quot;&gt;Using Multiple
+ 181 Configurations&lt;/a&gt;&lt;/li&gt;
+ 182 &lt;li&gt;&lt;a href=&quot;#handling-reconfigurations&quot;
+ 183 id=&quot;toc-handling-reconfigurations&quot;&gt;Handling Reconfigurations&lt;/a&gt;&lt;/li&gt;
+ 184 &lt;li&gt;&lt;a href=&quot;#using-fine-grained-make-targets&quot;
+ 185 id=&quot;toc-using-fine-grained-make-targets&quot;&gt;Using Fine-Grained Make
+ 186 Targets&lt;/a&gt;&lt;/li&gt;
+ 187 &lt;/ul&gt;&lt;/li&gt;
+ 188 &lt;li&gt;&lt;a href=&quot;#understanding-the-build-system&quot;
+ 189 id=&quot;toc-understanding-the-build-system&quot;&gt;Understanding the Build
+ 190 System&lt;/a&gt;
+ 191 &lt;ul&gt;
+ 192 &lt;li&gt;&lt;a href=&quot;#configurations&quot;
+ 193 id=&quot;toc-configurations&quot;&gt;Configurations&lt;/a&gt;&lt;/li&gt;
+ 194 &lt;li&gt;&lt;a href=&quot;#build-output-structure&quot;
+ 195 id=&quot;toc-build-output-structure&quot;&gt;Build Output Structure&lt;/a&gt;&lt;/li&gt;
+ 196 &lt;li&gt;&lt;a href=&quot;#fixpath&quot; id=&quot;toc-fixpath&quot;&gt;Fixpath&lt;/a&gt;&lt;/li&gt;
+ 197 &lt;li&gt;&lt;a href=&quot;#native-debug-symbols&quot; id=&quot;toc-native-debug-symbols&quot;&gt;Native
+ 198 Debug Symbols&lt;/a&gt;&lt;/li&gt;
+ 199 &lt;li&gt;&lt;a href=&quot;#autoconf-details&quot; id=&quot;toc-autoconf-details&quot;&gt;Autoconf
+ 200 Details&lt;/a&gt;&lt;/li&gt;
+ 201 &lt;li&gt;&lt;a href=&quot;#developing-the-build-system-itself&quot;
+ 202 id=&quot;toc-developing-the-build-system-itself&quot;&gt;Developing the Build System
+ 203 Itself&lt;/a&gt;&lt;/li&gt;
+ 204 &lt;/ul&gt;&lt;/li&gt;
+ 205 &lt;li&gt;&lt;a href=&quot;#contributing-to-the-jdk&quot;
+ 206 id=&quot;toc-contributing-to-the-jdk&quot;&gt;Contributing to the JDK&lt;/a&gt;&lt;/li&gt;
+ 207 &lt;li&gt;&lt;a href=&quot;#editing-this-document&quot;
+ 208 id=&quot;toc-editing-this-document&quot;&gt;Editing this document&lt;/a&gt;&lt;/li&gt;
+ 209 &lt;/ul&gt;
+ 210 &lt;/nav&gt;
+ 211 &lt;h2 id=&quot;tldr-instructions-for-the-impatient&quot;&gt;TL;DR (Instructions for the
+ 212 Impatient)&lt;/h2&gt;
+ 213 &lt;p&gt;If you are eager to try out building the JDK, these simple steps
+ 214 works most of the time. They assume that you have installed Git (and
+ 215 Cygwin if running on Windows) and cloned the top-level JDK repository
+ 216 that you want to build.&lt;/p&gt;
+ 217 &lt;ol type=&quot;1&quot;&gt;
+ 218 &lt;li&gt;&lt;p&gt;&lt;a href=&quot;#getting-the-source-code&quot;&gt;Get the complete source
+ 219 code&lt;/a&gt;:&lt;br /&gt;
+ 220 &lt;code&gt;git clone https://git.openjdk.org/jdk/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 221 &lt;li&gt;&lt;p&gt;&lt;a href=&quot;#running-configure&quot;&gt;Run configure&lt;/a&gt;:&lt;br /&gt;
+ 222 &lt;code&gt;bash configure&lt;/code&gt;&lt;/p&gt;
+ 223 &lt;p&gt;If &lt;code&gt;configure&lt;/code&gt; fails due to missing dependencies (to
+ 224 either the &lt;a
+ 225 href=&quot;#native-compiler-toolchain-requirements&quot;&gt;toolchain&lt;/a&gt;, &lt;a
+ 226 href=&quot;#build-tools-requirements&quot;&gt;build tools&lt;/a&gt;, &lt;a
+ 227 href=&quot;#external-library-requirements&quot;&gt;external libraries&lt;/a&gt; or the &lt;a
+ 228 href=&quot;#boot-jdk-requirements&quot;&gt;boot JDK&lt;/a&gt;), most of the time it prints
+ 229 a suggestion on how to resolve the situation on your platform. Follow
+ 230 the instructions, and try running &lt;code&gt;bash configure&lt;/code&gt;
+ 231 again.&lt;/p&gt;&lt;/li&gt;
+ 232 &lt;li&gt;&lt;p&gt;&lt;a href=&quot;#running-make&quot;&gt;Run make&lt;/a&gt;:&lt;br /&gt;
+ 233 &lt;code&gt;make images&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 234 &lt;li&gt;&lt;p&gt;Verify your newly built JDK:&lt;br /&gt;
+ 235 &lt;code&gt;./build/*/images/jdk/bin/java -version&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 236 &lt;li&gt;&lt;p&gt;&lt;a href=&quot;##running-tests&quot;&gt;Run basic tests&lt;/a&gt;:&lt;br /&gt;
+ 237 &lt;code&gt;make run-test-tier1&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 238 &lt;/ol&gt;
+ 239 &lt;p&gt;If any of these steps failed, or if you want to know more about build
+ 240 requirements or build functionality, please continue reading this
+ 241 document.&lt;/p&gt;
+ 242 &lt;h2 id=&quot;introduction&quot;&gt;Introduction&lt;/h2&gt;
+ 243 &lt;p&gt;The JDK is a complex software project. Building it requires a certain
+ 244 amount of technical expertise, a fair number of dependencies on external
+ 245 software, and reasonably powerful hardware.&lt;/p&gt;
+ 246 &lt;p&gt;If you just want to use the JDK and not build it yourself, this
+ 247 document is not for you. See for instance &lt;a
+ 248 href=&quot;http://openjdk.org/install&quot;&gt;OpenJDK installation&lt;/a&gt; for some
+ 249 methods of installing a prebuilt JDK.&lt;/p&gt;
+ 250 &lt;h2 id=&quot;getting-the-source-code&quot;&gt;Getting the Source Code&lt;/h2&gt;
+ 251 &lt;p&gt;Make sure you are getting the correct version. As of JDK 10, the
+ 252 source is no longer split into separate repositories so you only need to
+ 253 clone one single repository. At the &lt;a
+ 254 href=&quot;https://git.openjdk.org/&quot;&gt;OpenJDK Git site&lt;/a&gt; you can see a list
+ 255 of all available repositories. If you want to build an older version,
+ 256 e.g. JDK 11, it is recommended that you get the &lt;code&gt;jdk11u&lt;/code&gt;
+ 257 repo, which contains incremental updates, instead of the
+ 258 &lt;code&gt;jdk11&lt;/code&gt; repo, which was frozen at JDK 11 GA.&lt;/p&gt;
+ 259 &lt;p&gt;If you are new to Git, a good place to start is the book &lt;a
+ 260 href=&quot;https://git-scm.com/book/en/v2&quot;&gt;Pro Git&lt;/a&gt;. The rest of this
+ 261 document assumes a working knowledge of Git.&lt;/p&gt;
+ 262 &lt;h3 id=&quot;special-considerations&quot;&gt;Special Considerations&lt;/h3&gt;
+ 263 &lt;p&gt;For a smooth building experience, it is recommended that you follow
+ 264 these rules on where and how to check out the source code.&lt;/p&gt;
+ 265 &lt;ul&gt;
+ 266 &lt;li&gt;&lt;p&gt;Do not check out the source code in a path which contains spaces.
+ 267 Chances are the build will not work. This is most likely to be an issue
+ 268 on Windows systems.&lt;/p&gt;&lt;/li&gt;
+ 269 &lt;li&gt;&lt;p&gt;Do not check out the source code in a path which has a very long
+ 270 name or is nested many levels deep. Chances are you will hit an OS
+ 271 limitation during the build.&lt;/p&gt;&lt;/li&gt;
+ 272 &lt;li&gt;&lt;p&gt;Put the source code on a local disk, not a network share. If
+ 273 possible, use an SSD. The build process is very disk intensive, and
+ 274 having slow disk access will significantly increase build times. If you
+ 275 need to use a network share for the source code, see below for
+ 276 suggestions on how to keep the build artifacts on a local disk.&lt;/p&gt;&lt;/li&gt;
+ 277 &lt;li&gt;&lt;p&gt;On Windows, if using &lt;a href=&quot;#cygwin&quot;&gt;Cygwin&lt;/a&gt;, extra care
+ 278 must be taken to make sure the environment is consistent. It is
+ 279 recommended that you follow this procedure:&lt;/p&gt;
+ 280 &lt;ul&gt;
+ 281 &lt;li&gt;&lt;p&gt;Create the directory that is going to contain the top directory
+ 282 of the JDK clone by using the &lt;code&gt;mkdir&lt;/code&gt; command in the Cygwin
+ 283 bash shell. That is, do &lt;em&gt;not&lt;/em&gt; create it using Windows Explorer.
+ 284 This will ensure that it will have proper Cygwin attributes, and that
+ 285 it&#39;s children will inherit those attributes.&lt;/p&gt;&lt;/li&gt;
+ 286 &lt;li&gt;&lt;p&gt;Do not put the JDK clone in a path under your Cygwin home
+ 287 directory. This is especially important if your user name contains
+ 288 spaces and/or mixed upper and lower case letters.&lt;/p&gt;&lt;/li&gt;
+ 289 &lt;li&gt;&lt;p&gt;You need to install a git client. You have two choices, Cygwin
+ 290 git or Git for Windows. Unfortunately there are pros and cons with each
+ 291 choice.&lt;/p&gt;
+ 292 &lt;ul&gt;
+ 293 &lt;li&gt;&lt;p&gt;The Cygwin &lt;code&gt;git&lt;/code&gt; client has no line ending issues and
+ 294 understands Cygwin paths (which are used throughout the JDK build
+ 295 system). However, it does not currently work well with the Skara CLI
+ 296 tooling. Please see the &lt;a
+ 297 href=&quot;https://wiki.openjdk.org/display/SKARA/Skara#Skara-Git&quot;&gt;Skara wiki
+ 298 on Git clients&lt;/a&gt; for up-to-date information about the Skara git client
+ 299 support.&lt;/p&gt;&lt;/li&gt;
+ 300 &lt;li&gt;&lt;p&gt;The &lt;a href=&quot;https://gitforwindows.org&quot;&gt;Git for Windows&lt;/a&gt;
+ 301 client has issues with line endings, and do not understand Cygwin paths.
+ 302 It does work well with the Skara CLI tooling, however. To alleviate the
+ 303 line ending problems, make sure you set &lt;code&gt;core.autocrlf&lt;/code&gt; to
+ 304 &lt;code&gt;false&lt;/code&gt; (this is asked during installation).&lt;/p&gt;&lt;/li&gt;
+ 305 &lt;/ul&gt;&lt;/li&gt;
+ 306 &lt;/ul&gt;
+ 307 &lt;p&gt;Failure to follow this procedure might result in hard-to-debug build
+ 308 problems.&lt;/p&gt;&lt;/li&gt;
+ 309 &lt;/ul&gt;
+ 310 &lt;h2 id=&quot;build-hardware-requirements&quot;&gt;Build Hardware Requirements&lt;/h2&gt;
+ 311 &lt;p&gt;The JDK is a massive project, and require machines ranging from
+ 312 decent to powerful to be able to build in a reasonable amount of time,
+ 313 or to be able to complete a build at all.&lt;/p&gt;
+ 314 &lt;p&gt;We &lt;em&gt;strongly&lt;/em&gt; recommend usage of an SSD disk for the build,
+ 315 since disk speed is one of the limiting factors for build
+ 316 performance.&lt;/p&gt;
+ 317 &lt;h3 id=&quot;building-on-x86&quot;&gt;Building on x86&lt;/h3&gt;
+ 318 &lt;p&gt;At a minimum, a machine with 2-4 cores is advisable, as well as 2-4
+ 319 GB of RAM. (The more cores to use, the more memory you need.) At least 6
+ 320 GB of free disk space is required.&lt;/p&gt;
+ 321 &lt;p&gt;Even for 32-bit builds, it is recommended to use a 64-bit build
+ 322 machine, and instead create a 32-bit target using
+ 323 &lt;code&gt;--with-target-bits=32&lt;/code&gt;.&lt;/p&gt;
+ 324 &lt;p&gt;Note: The Windows x86 port is deprecated.&lt;/p&gt;
+ 325 &lt;h3 id=&quot;building-on-aarch64&quot;&gt;Building on aarch64&lt;/h3&gt;
+ 326 &lt;p&gt;At a minimum, a machine with 8 cores is advisable, as well as 8 GB of
+ 327 RAM. (The more cores to use, the more memory you need.) At least 6 GB of
+ 328 free disk space is required.&lt;/p&gt;
+ 329 &lt;p&gt;If you do not have access to sufficiently powerful hardware, it is
+ 330 also possible to use &lt;a href=&quot;#cross-compiling&quot;&gt;cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 331 &lt;h4 id=&quot;branch-protection&quot;&gt;Branch Protection&lt;/h4&gt;
+ 332 &lt;p&gt;In order to use Branch Protection features in the VM,
+ 333 &lt;code&gt;--enable-branch-protection&lt;/code&gt; must be used. This option
+ 334 requires C++ compiler support (GCC 9.1.0+ or Clang 10+). The resulting
+ 335 build can be run on both machines with and without support for branch
+ 336 protection in hardware. Branch Protection is only supported for Linux
+ 337 targets.&lt;/p&gt;
+ 338 &lt;h3 id=&quot;building-on-32-bit-arm&quot;&gt;Building on 32-bit arm&lt;/h3&gt;
+ 339 &lt;p&gt;This is not recommended. Instead, see the section on &lt;a
+ 340 href=&quot;#cross-compiling&quot;&gt;Cross-compiling&lt;/a&gt;.&lt;/p&gt;
+ 341 &lt;h2 id=&quot;operating-system-requirements&quot;&gt;Operating System
+ 342 Requirements&lt;/h2&gt;
+ 343 &lt;p&gt;The mainline JDK project supports Linux, macOS, AIX and Windows.
+ 344 Support for other operating system, e.g. BSD, exists in separate &quot;port&quot;
+ 345 projects.&lt;/p&gt;
+ 346 &lt;p&gt;In general, the JDK can be built on a wide range of versions of these
+ 347 operating systems, but the further you deviate from what is tested on a
+ 348 daily basis, the more likely you are to run into problems.&lt;/p&gt;
+ 349 &lt;p&gt;This table lists the OS versions used by Oracle when building the
+ 350 JDK. Such information is always subject to change, but this table is up
+ 351 to date at the time of writing.&lt;/p&gt;
+ 352 &lt;table&gt;
+ 353 &lt;thead&gt;
+ 354 &lt;tr class=&quot;header&quot;&gt;
+ 355 &lt;th style=&quot;text-align: left;&quot;&gt;Operating system&lt;/th&gt;
+ 356 &lt;th style=&quot;text-align: left;&quot;&gt;Vendor/version used&lt;/th&gt;
+ 357 &lt;/tr&gt;
+ 358 &lt;/thead&gt;
+ 359 &lt;tbody&gt;
+ 360 &lt;tr class=&quot;odd&quot;&gt;
+ 361 &lt;td style=&quot;text-align: left;&quot;&gt;Linux&lt;/td&gt;
+ 362 &lt;td style=&quot;text-align: left;&quot;&gt;Oracle Enterprise Linux 6.4 / 7.6&lt;/td&gt;
+ 363 &lt;/tr&gt;
+ 364 &lt;tr class=&quot;even&quot;&gt;
+ 365 &lt;td style=&quot;text-align: left;&quot;&gt;macOS&lt;/td&gt;
+ 366 &lt;td style=&quot;text-align: left;&quot;&gt;Mac OS X 10.13 (High Sierra)&lt;/td&gt;
+ 367 &lt;/tr&gt;
+ 368 &lt;tr class=&quot;odd&quot;&gt;
+ 369 &lt;td style=&quot;text-align: left;&quot;&gt;Windows&lt;/td&gt;
+ 370 &lt;td style=&quot;text-align: left;&quot;&gt;Windows Server 2012 R2&lt;/td&gt;
+ 371 &lt;/tr&gt;
+ 372 &lt;/tbody&gt;
+ 373 &lt;/table&gt;
+ 374 &lt;p&gt;The double version numbers for Linux are due to the hybrid model used
+ 375 at Oracle, where header files and external libraries from an older
+ 376 version are used when building on a more modern version of the OS.&lt;/p&gt;
+ 377 &lt;p&gt;The Build Group has a wiki page with &lt;a
+ 378 href=&quot;https://wiki.openjdk.org/display/Build/Supported+Build+Platforms&quot;&gt;Supported
+ 379 Build Platforms&lt;/a&gt;. From time to time, this is updated by contributors
+ 380 to list successes or failures of building on different platforms.&lt;/p&gt;
+ 381 &lt;h3 id=&quot;windows&quot;&gt;Windows&lt;/h3&gt;
+ 382 &lt;p&gt;Windows XP is not a supported platform, but all newer Windows should
+ 383 be able to build the JDK.&lt;/p&gt;
+ 384 &lt;p&gt;On Windows, it is important that you pay attention to the
+ 385 instructions in the &lt;a href=&quot;#special-considerations&quot;&gt;Special
+ 386 Considerations&lt;/a&gt;.&lt;/p&gt;
+ 387 &lt;p&gt;Windows is the only non-POSIX OS supported by the JDK, and as such,
+ 388 requires some extra care. A POSIX support layer is required to build on
+ 389 Windows. Currently, the only supported such layers are Cygwin, Windows
+ 390 Subsystem for Linux (WSL), and MSYS2. (MSYS is no longer supported due
+ 391 to an outdated bash; While OpenJDK can be built with MSYS2, support for
+ 392 it is still experimental, so build failures and unusual errors are not
+ 393 uncommon.)&lt;/p&gt;
+ 394 &lt;p&gt;Internally in the build system, all paths are represented as
+ 395 Unix-style paths, e.g. &lt;code&gt;/cygdrive/c/git/jdk/Makefile&lt;/code&gt; rather
+ 396 than &lt;code&gt;C:\git\jdk\Makefile&lt;/code&gt;. This rule also applies to input
+ 397 to the build system, e.g. in arguments to &lt;code&gt;configure&lt;/code&gt;. So,
+ 398 use &lt;code&gt;--with-msvcr-dll=/cygdrive/c/msvcr100.dll&lt;/code&gt; rather than
+ 399 &lt;code&gt;--with-msvcr-dll=c:\msvcr100.dll&lt;/code&gt;. For details on this
+ 400 conversion, see the section on &lt;a href=&quot;#fixpath&quot;&gt;Fixpath&lt;/a&gt;.&lt;/p&gt;
+ 401 &lt;p&gt;Note: The Windows x86 port is deprecated.&lt;/p&gt;
+ 402 &lt;h4 id=&quot;cygwin&quot;&gt;Cygwin&lt;/h4&gt;
+ 403 &lt;p&gt;A functioning &lt;a href=&quot;http://www.cygwin.com/&quot;&gt;Cygwin&lt;/a&gt; environment
+ 404 is required for building the JDK on Windows. If you have a 64-bit OS, we
+ 405 strongly recommend using the 64-bit version of Cygwin.&lt;/p&gt;
+ 406 &lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; Cygwin has a model of continuously updating
+ 407 all packages without any easy way to install or revert to a specific
+ 408 version of a package. This means that whenever you add or update a
+ 409 package in Cygwin, you might (inadvertently) update tools that are used
+ 410 by the JDK build process, and that can cause unexpected build
+ 411 problems.&lt;/p&gt;
+ 412 &lt;p&gt;The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually
+ 413 not a problem, since Cygwin currently only distributes GNU Make at a
+ 414 version above 4.0.&lt;/p&gt;
+ 415 &lt;p&gt;Apart from the basic Cygwin installation, the following packages must
+ 416 also be installed:&lt;/p&gt;
+ 417 &lt;ul&gt;
+ 418 &lt;li&gt;&lt;code&gt;autoconf&lt;/code&gt;&lt;/li&gt;
+ 419 &lt;li&gt;&lt;code&gt;make&lt;/code&gt;&lt;/li&gt;
+ 420 &lt;li&gt;&lt;code&gt;zip&lt;/code&gt;&lt;/li&gt;
+ 421 &lt;li&gt;&lt;code&gt;unzip&lt;/code&gt;&lt;/li&gt;
+ 422 &lt;/ul&gt;
+ 423 &lt;p&gt;Often, you can install these packages using the following command
+ 424 line:&lt;/p&gt;
+ 425 &lt;pre&gt;&lt;code&gt;&amp;lt;path to Cygwin setup&amp;gt;/setup-x86_64 -q -P autoconf -P make -P unzip -P zip&lt;/code&gt;&lt;/pre&gt;
+ 426 &lt;p&gt;Unfortunately, Cygwin can be unreliable in certain circumstances. If
+ 427 you experience build tool crashes or strange issues when building on
+ 428 Windows, please check the Cygwin FAQ on the &lt;a
+ 429 href=&quot;https://cygwin.com/faq/faq.html#faq.using.bloda&quot;&gt;&quot;BLODA&quot; list&lt;/a&gt;
+ 430 and the section on &lt;a
+ 431 href=&quot;https://cygwin.com/faq/faq.html#faq.using.fixing-fork-failures&quot;&gt;fork()
+ 432 failures&lt;/a&gt;.&lt;/p&gt;
+ 433 &lt;h4 id=&quot;windows-subsystem-for-linux-wsl&quot;&gt;Windows Subsystem for Linux
+ 434 (WSL)&lt;/h4&gt;
+ 435 &lt;p&gt;Windows 10 1809 or newer is supported due to a dependency on the
+ 436 wslpath utility and support for environment variable sharing through
+ 437 WSLENV. Version 1803 can work but intermittent build failures have been
+ 438 observed.&lt;/p&gt;
+ 439 &lt;p&gt;It&#39;s possible to build both Windows and Linux binaries from WSL. To
+ 440 build Windows binaries, you must use a Windows boot JDK (located in a
+ 441 Windows-accessible directory). To build Linux binaries, you must use a
+ 442 Linux boot JDK. The default behavior is to build for Windows. To build
+ 443 for Linux, pass
+ 444 &lt;code&gt;--build=x86_64-unknown-linux-gnu --openjdk-target=x86_64-unknown-linux-gnu&lt;/code&gt;
+ 445 to &lt;code&gt;configure&lt;/code&gt;.&lt;/p&gt;
+ 446 &lt;p&gt;If building Windows binaries, the source code must be located in a
+ 447 Windows- accessible directory. This is because Windows executables (such
+ 448 as Visual Studio and the boot JDK) must be able to access the source
+ 449 code. Also, the drive where the source is stored must be mounted as
+ 450 case-insensitive by changing either /etc/fstab or /etc/wsl.conf in WSL.
+ 451 Individual directories may be corrected using the fsutil tool in case
+ 452 the source was cloned before changing the mount options.&lt;/p&gt;
+ 453 &lt;p&gt;Note that while it&#39;s possible to build on WSL, testing is still not
+ 454 fully supported.&lt;/p&gt;
+ 455 &lt;h3 id=&quot;macos&quot;&gt;macOS&lt;/h3&gt;
+ 456 &lt;p&gt;Apple is using a quite aggressive scheme of pushing OS updates, and
+ 457 coupling these updates with required updates of Xcode. Unfortunately,
+ 458 this makes it difficult for a project such as the JDK to keep pace with
+ 459 a continuously updated machine running macOS. See the section on &lt;a
+ 460 href=&quot;#apple-xcode&quot;&gt;Apple Xcode&lt;/a&gt; on some strategies to deal with
+ 461 this.&lt;/p&gt;
+ 462 &lt;p&gt;It is recommended that you use at least Mac OS X 10.13 (High Sierra).
+ 463 At the time of writing, the JDK has been successfully compiled on macOS
+ 464 10.12 (Sierra).&lt;/p&gt;
+ 465 &lt;p&gt;The standard macOS environment contains the basic tooling needed to
+ 466 build, but for external libraries a package manager is recommended. The
+ 467 JDK uses &lt;a href=&quot;https://brew.sh/&quot;&gt;homebrew&lt;/a&gt; in the examples, but
+ 468 feel free to use whatever manager you want (or none).&lt;/p&gt;
+ 469 &lt;h3 id=&quot;linux&quot;&gt;Linux&lt;/h3&gt;
+ 470 &lt;p&gt;It is often not much problem to build the JDK on Linux. The only
+ 471 general advice is to try to use the compilers, external libraries and
+ 472 header files as provided by your distribution.&lt;/p&gt;
+ 473 &lt;p&gt;The basic tooling is provided as part of the core operating system,
+ 474 but you will most likely need to install developer packages.&lt;/p&gt;
+ 475 &lt;p&gt;For apt-based distributions (Debian, Ubuntu, etc), try this:&lt;/p&gt;
+ 476 &lt;pre&gt;&lt;code&gt;sudo apt-get install build-essential&lt;/code&gt;&lt;/pre&gt;
+ 477 &lt;p&gt;For rpm-based distributions (Fedora, Red Hat, etc), try this:&lt;/p&gt;
+ 478 &lt;pre&gt;&lt;code&gt;sudo yum groupinstall &amp;quot;Development Tools&amp;quot;&lt;/code&gt;&lt;/pre&gt;
+ 479 &lt;p&gt;For Alpine Linux, aside from basic tooling, install the GNU versions
+ 480 of some programs:&lt;/p&gt;
+ 481 &lt;pre&gt;&lt;code&gt;sudo apk add build-base bash grep zip&lt;/code&gt;&lt;/pre&gt;
+ 482 &lt;h3 id=&quot;aix&quot;&gt;AIX&lt;/h3&gt;
+ 483 &lt;p&gt;Please consult the AIX section of the &lt;a
+ 484 href=&quot;https://wiki.openjdk.org/display/Build/Supported+Build+Platforms&quot;&gt;Supported
+ 485 Build Platforms&lt;/a&gt; OpenJDK Build Wiki page for details about which
+ 486 versions of AIX are supported.&lt;/p&gt;
+ 487 &lt;h2 id=&quot;native-compiler-toolchain-requirements&quot;&gt;Native Compiler
+ 488 (Toolchain) Requirements&lt;/h2&gt;
+ 489 &lt;p&gt;Large portions of the JDK consists of native code, that needs to be
+ 490 compiled to be able to run on the target platform. In theory, toolchain
+ 491 and operating system should be independent factors, but in practice
+ 492 there&#39;s more or less a one-to-one correlation between target operating
+ 493 system and toolchain. There are ongoing efforts to loosen this strict
+ 494 coupling between compiler and operating system (see &lt;a
+ 495 href=&quot;https://bugs.openjdk.org/browse/JDK-8288293&quot;&gt;JDK-8288293&lt;/a&gt;) but
+ 496 it will likely be a very long time before this goal can be realized.&lt;/p&gt;
+ 497 &lt;table&gt;
+ 498 &lt;thead&gt;
+ 499 &lt;tr class=&quot;header&quot;&gt;
+ 500 &lt;th&gt;Operating system&lt;/th&gt;
+ 501 &lt;th&gt;Supported toolchain&lt;/th&gt;
+ 502 &lt;/tr&gt;
+ 503 &lt;/thead&gt;
+ 504 &lt;tbody&gt;
+ 505 &lt;tr class=&quot;odd&quot;&gt;
+ 506 &lt;td&gt;Linux&lt;/td&gt;
+ 507 &lt;td&gt;gcc, clang&lt;/td&gt;
+ 508 &lt;/tr&gt;
+ 509 &lt;tr class=&quot;even&quot;&gt;
+ 510 &lt;td&gt;macOS&lt;/td&gt;
+ 511 &lt;td&gt;Apple Xcode (using clang)&lt;/td&gt;
+ 512 &lt;/tr&gt;
+ 513 &lt;tr class=&quot;odd&quot;&gt;
+ 514 &lt;td&gt;AIX&lt;/td&gt;
+ 515 &lt;td&gt;IBM XL C/C++&lt;/td&gt;
+ 516 &lt;/tr&gt;
+ 517 &lt;tr class=&quot;even&quot;&gt;
+ 518 &lt;td&gt;Windows&lt;/td&gt;
+ 519 &lt;td&gt;Microsoft Visual Studio&lt;/td&gt;
+ 520 &lt;/tr&gt;
+ 521 &lt;/tbody&gt;
+ 522 &lt;/table&gt;
+ 523 &lt;p&gt;Please see the individual sections on the toolchains for version
+ 524 recommendations. As a reference, these versions of the toolchains are
+ 525 used, at the time of writing, by Oracle for the daily builds of the JDK.
+ 526 It should be possible to compile the JDK with both older and newer
+ 527 versions, but the closer you stay to this list, the more likely you are
+ 528 to compile successfully without issues.&lt;/p&gt;
+ 529 &lt;table&gt;
+ 530 &lt;thead&gt;
+ 531 &lt;tr class=&quot;header&quot;&gt;
+ 532 &lt;th&gt;Operating system&lt;/th&gt;
+ 533 &lt;th&gt;Toolchain version&lt;/th&gt;
+ 534 &lt;/tr&gt;
+ 535 &lt;/thead&gt;
+ 536 &lt;tbody&gt;
+ 537 &lt;tr class=&quot;odd&quot;&gt;
+ 538 &lt;td&gt;Linux&lt;/td&gt;
+ 539 &lt;td&gt;gcc 11.2.0&lt;/td&gt;
+ 540 &lt;/tr&gt;
+ 541 &lt;tr class=&quot;even&quot;&gt;
+ 542 &lt;td&gt;macOS&lt;/td&gt;
+ 543 &lt;td&gt;Apple Xcode 10.1 (using clang 10.0.0)&lt;/td&gt;
+ 544 &lt;/tr&gt;
+ 545 &lt;tr class=&quot;odd&quot;&gt;
+ 546 &lt;td&gt;Windows&lt;/td&gt;
+ 547 &lt;td&gt;Microsoft Visual Studio 2022 update 17.1.0&lt;/td&gt;
+ 548 &lt;/tr&gt;
+ 549 &lt;/tbody&gt;
+ 550 &lt;/table&gt;
+ 551 &lt;p&gt;All compilers are expected to be able to compile to the C99 language
+ 552 standard, as some C99 features are used in the source code. Microsoft
+ 553 Visual Studio doesn&#39;t fully support C99 so in practice shared code is
+ 554 limited to using C99 features that it does support.&lt;/p&gt;
+ 555 &lt;h3 id=&quot;gcc&quot;&gt;gcc&lt;/h3&gt;
+ 556 &lt;p&gt;The minimum accepted version of gcc is 5.0. Older versions will
+ 557 generate a warning by &lt;code&gt;configure&lt;/code&gt; and are unlikely to
+ 558 work.&lt;/p&gt;
+ 559 &lt;p&gt;The JDK is currently known to be able to compile with at least
+ 560 version 11.2 of gcc.&lt;/p&gt;
+ 561 &lt;p&gt;In general, any version between these two should be usable.&lt;/p&gt;
+ 562 &lt;h3 id=&quot;clang&quot;&gt;clang&lt;/h3&gt;
+ 563 &lt;p&gt;The minimum accepted version of clang is 3.5. Older versions will not
+ 564 be accepted by &lt;code&gt;configure&lt;/code&gt;.&lt;/p&gt;
+ 565 &lt;p&gt;To use clang instead of gcc on Linux, use
+ 566 &lt;code&gt;--with-toolchain-type=clang&lt;/code&gt;.&lt;/p&gt;
+ 567 &lt;h3 id=&quot;apple-xcode&quot;&gt;Apple Xcode&lt;/h3&gt;
+ 568 &lt;p&gt;The oldest supported version of Xcode is 8.&lt;/p&gt;
+ 569 &lt;p&gt;You will need the Xcode command line developer tools to be able to
+ 570 build the JDK. (Actually, &lt;em&gt;only&lt;/em&gt; the command line tools are
+ 571 needed, not the IDE.) The simplest way to install these is to run:&lt;/p&gt;
+ 572 &lt;pre&gt;&lt;code&gt;xcode-select --install&lt;/code&gt;&lt;/pre&gt;
+ 573 &lt;p&gt;When updating Xcode, it is advisable to keep an older version for
+ 574 building the JDK. To use a specific version of Xcode you have multiple
+ 575 options:&lt;/p&gt;
+ 576 &lt;ul&gt;
+ 577 &lt;li&gt;Use &lt;code&gt;xcode-select -s&lt;/code&gt; before running
+ 578 &lt;code&gt;configure&lt;/code&gt;, e.g.
+ 579 &lt;code&gt;xcode-select -s /Applications/Xcode13.1.app&lt;/code&gt;. The drawback
+ 580 is that the setting is system wide and you may have to revert it after
+ 581 an OpenJDK build.&lt;/li&gt;
+ 582 &lt;li&gt;Use configure option &lt;code&gt;--with-xcode-path&lt;/code&gt;, e.g.
+ 583 &lt;code&gt;configure --with-xcode-path=/Applications/Xcode13.1.app&lt;/code&gt;
+ 584 This allows using a specific Xcode version for an OpenJDK build,
+ 585 independently of the active Xcode version by
+ 586 &lt;code&gt;xcode-select&lt;/code&gt;.&lt;/li&gt;
+ 587 &lt;/ul&gt;
+ 588 &lt;p&gt;If you have recently (inadvertently) updated your OS and/or Xcode
+ 589 version, and the JDK can no longer be built, please see the section on
+ 590 &lt;a href=&quot;#problems-with-the-build-environment&quot;&gt;Problems with the Build
+ 591 Environment&lt;/a&gt;, and &lt;a href=&quot;#getting-help&quot;&gt;Getting Help&lt;/a&gt; to find
+ 592 out if there are any recent, non-merged patches available for this
+ 593 update.&lt;/p&gt;
+ 594 &lt;h3 id=&quot;microsoft-visual-studio&quot;&gt;Microsoft Visual Studio&lt;/h3&gt;
+ 595 &lt;p&gt;The minimum accepted version is Visual Studio 2019 version 16.8.
+ 596 (Note that this version is often presented as &quot;MSVC 14.28&quot;, and reported
+ 597 by cl.exe as 19.28.) Older versions will not be accepted by
+ 598 &lt;code&gt;configure&lt;/code&gt; and will not work. The maximum accepted version
+ 599 of Visual Studio is 2022.&lt;/p&gt;
+ 600 &lt;p&gt;If you have multiple versions of Visual Studio installed,
+ 601 &lt;code&gt;configure&lt;/code&gt; will by default pick the latest. You can request
+ 602 a specific version to be used by setting
+ 603 &lt;code&gt;--with-toolchain-version&lt;/code&gt;, e.g.
+ 604 &lt;code&gt;--with-toolchain-version=2022&lt;/code&gt;.&lt;/p&gt;
+ 605 &lt;p&gt;If you have Visual Studio installed but &lt;code&gt;configure&lt;/code&gt; fails
+ 606 to detect it, it may be because of &lt;a href=&quot;#spaces-in-path&quot;&gt;spaces in
+ 607 path&lt;/a&gt;.&lt;/p&gt;
+ 608 &lt;h3 id=&quot;ibm-xl-cc&quot;&gt;IBM XL C/C++&lt;/h3&gt;
+ 609 &lt;p&gt;Please consult the AIX section of the &lt;a
+ 610 href=&quot;https://wiki.openjdk.org/display/Build/Supported+Build+Platforms&quot;&gt;Supported
+ 611 Build Platforms&lt;/a&gt; OpenJDK Build Wiki page for details about which
+ 612 versions of XLC are supported.&lt;/p&gt;
+ 613 &lt;h2 id=&quot;boot-jdk-requirements&quot;&gt;Boot JDK Requirements&lt;/h2&gt;
+ 614 &lt;p&gt;Paradoxically, building the JDK requires a pre-existing JDK. This is
+ 615 called the &quot;boot JDK&quot;. The boot JDK does not, however, have to be a JDK
+ 616 built directly from the source code available in the OpenJDK Community.
+ 617 If you are porting the JDK to a new platform, chances are that there
+ 618 already exists another JDK for that platform that is usable as boot
+ 619 JDK.&lt;/p&gt;
+ 620 &lt;p&gt;The rule of thumb is that the boot JDK for building JDK major version
+ 621 &lt;em&gt;N&lt;/em&gt; should be a JDK of major version &lt;em&gt;N-1&lt;/em&gt;, so for
+ 622 building JDK 9 a JDK 8 would be suitable as boot JDK. However, the JDK
+ 623 should be able to &quot;build itself&quot;, so an up-to-date build of the current
+ 624 JDK source is an acceptable alternative. If you are following the
+ 625 &lt;em&gt;N-1&lt;/em&gt; rule, make sure you&#39;ve got the latest update version, since
+ 626 JDK 8 GA might not be able to build JDK 9 on all platforms.&lt;/p&gt;
+ 627 &lt;p&gt;Early in the release cycle, version &lt;em&gt;N-1&lt;/em&gt; may not yet have
+ 628 been released. In that case, the preferred boot JDK will be version
+ 629 &lt;em&gt;N-2&lt;/em&gt; until version &lt;em&gt;N-1&lt;/em&gt; is available.&lt;/p&gt;
+ 630 &lt;p&gt;If the boot JDK is not automatically detected, or the wrong JDK is
+ 631 picked, use &lt;code&gt;--with-boot-jdk&lt;/code&gt; to point to the JDK to use.&lt;/p&gt;
+ 632 &lt;h3 id=&quot;getting-jdk-binaries&quot;&gt;Getting JDK binaries&lt;/h3&gt;
+ 633 &lt;p&gt;JDK binaries for Linux, Windows and macOS can be downloaded from &lt;a
+ 634 href=&quot;http://jdk.java.net&quot;&gt;jdk.java.net&lt;/a&gt;. An alternative is to
+ 635 download the &lt;a
+ 636 href=&quot;http://www.oracle.com/technetwork/java/javase/downloads&quot;&gt;Oracle
+ 637 JDK&lt;/a&gt;. Another is the &lt;a href=&quot;https://adoptopenjdk.net/&quot;&gt;Adopt
+ 638 OpenJDK Project&lt;/a&gt;, which publishes experimental prebuilt binaries for
+ 639 various platforms.&lt;/p&gt;
+ 640 &lt;p&gt;On Linux you can also get a JDK from the Linux distribution. On
+ 641 apt-based distros (like Debian and Ubuntu),
+ 642 &lt;code&gt;sudo apt-get install openjdk-&amp;lt;VERSION&amp;gt;-jdk&lt;/code&gt; is
+ 643 typically enough to install a JDK &amp;lt;VERSION&amp;gt;. On rpm-based distros
+ 644 (like Fedora and Red Hat), try
+ 645 &lt;code&gt;sudo yum install java-&amp;lt;VERSION&amp;gt;-openjdk-devel&lt;/code&gt;.&lt;/p&gt;
+ 646 &lt;h2 id=&quot;external-library-requirements&quot;&gt;External Library
+ 647 Requirements&lt;/h2&gt;
+ 648 &lt;p&gt;Different platforms require different external libraries. In general,
+ 649 libraries are not optional - that is, they are either required or not
+ 650 used.&lt;/p&gt;
+ 651 &lt;p&gt;If a required library is not detected by &lt;code&gt;configure&lt;/code&gt;, you
+ 652 need to provide the path to it. There are two forms of the
+ 653 &lt;code&gt;configure&lt;/code&gt; arguments to point to an external library:
+ 654 &lt;code&gt;--with-&amp;lt;LIB&amp;gt;=&amp;lt;path&amp;gt;&lt;/code&gt; or
+ 655 &lt;code&gt;--with-&amp;lt;LIB&amp;gt;-include=&amp;lt;path to include&amp;gt; --with-&amp;lt;LIB&amp;gt;-lib=&amp;lt;path to lib&amp;gt;&lt;/code&gt;.
+ 656 The first variant is more concise, but require the include files and
+ 657 library files to reside in a default hierarchy under this directory. In
+ 658 most cases, it works fine.&lt;/p&gt;
+ 659 &lt;p&gt;As a fallback, the second version allows you to point to the include
+ 660 directory and the lib directory separately.&lt;/p&gt;
+ 661 &lt;h3 id=&quot;freetype&quot;&gt;FreeType&lt;/h3&gt;
+ 662 &lt;p&gt;FreeType2 from &lt;a href=&quot;http://www.freetype.org/&quot;&gt;The FreeType
+ 663 Project&lt;/a&gt; is not required on any platform. The exception is on
+ 664 Unix-based platforms when configuring such that the build artifacts will
+ 665 reference a system installed library, rather than bundling the JDK&#39;s own
+ 666 copy.&lt;/p&gt;
+ 667 &lt;ul&gt;
+ 668 &lt;li&gt;To install on an apt-based Linux, try running
+ 669 &lt;code&gt;sudo apt-get install     libfreetype6-dev&lt;/code&gt;.&lt;/li&gt;
+ 670 &lt;li&gt;To install on an rpm-based Linux, try running
+ 671 &lt;code&gt;sudo yum install     freetype-devel&lt;/code&gt;.&lt;/li&gt;
+ 672 &lt;li&gt;To install on Alpine Linux, try running
+ 673 &lt;code&gt;sudo apk add freetype-dev&lt;/code&gt;.&lt;/li&gt;
+ 674 &lt;li&gt;To install on macOS, try running
+ 675 &lt;code&gt;brew install freetype&lt;/code&gt;.&lt;/li&gt;
+ 676 &lt;/ul&gt;
+ 677 &lt;p&gt;Use &lt;code&gt;--with-freetype-include=&amp;lt;path&amp;gt;&lt;/code&gt; and
+ 678 &lt;code&gt;--with-freetype-lib=&amp;lt;path&amp;gt;&lt;/code&gt; if &lt;code&gt;configure&lt;/code&gt;
+ 679 does not automatically locate the platform FreeType files.&lt;/p&gt;
+ 680 &lt;h3 id=&quot;cups&quot;&gt;CUPS&lt;/h3&gt;
+ 681 &lt;p&gt;CUPS, &lt;a href=&quot;http://www.cups.org&quot;&gt;Common UNIX Printing System&lt;/a&gt;
+ 682 header files are required on all platforms, except Windows. Often these
+ 683 files are provided by your operating system.&lt;/p&gt;
+ 684 &lt;ul&gt;
+ 685 &lt;li&gt;To install on an apt-based Linux, try running
+ 686 &lt;code&gt;sudo apt-get install     libcups2-dev&lt;/code&gt;.&lt;/li&gt;
+ 687 &lt;li&gt;To install on an rpm-based Linux, try running
+ 688 &lt;code&gt;sudo yum install     cups-devel&lt;/code&gt;.&lt;/li&gt;
+ 689 &lt;li&gt;To install on Alpine Linux, try running
+ 690 &lt;code&gt;sudo apk add cups-dev&lt;/code&gt;.&lt;/li&gt;
+ 691 &lt;/ul&gt;
+ 692 &lt;p&gt;Use &lt;code&gt;--with-cups=&amp;lt;path&amp;gt;&lt;/code&gt; if &lt;code&gt;configure&lt;/code&gt;
+ 693 does not properly locate your CUPS files.&lt;/p&gt;
+ 694 &lt;h3 id=&quot;x11&quot;&gt;X11&lt;/h3&gt;
+ 695 &lt;p&gt;Certain &lt;a href=&quot;http://www.x.org/&quot;&gt;X11&lt;/a&gt; libraries and include
+ 696 files are required on Linux.&lt;/p&gt;
+ 697 &lt;ul&gt;
+ 698 &lt;li&gt;To install on an apt-based Linux, try running
+ 699 &lt;code&gt;sudo apt-get install     libx11-dev libxext-dev libxrender-dev libxrandr-dev libxtst-dev libxt-dev&lt;/code&gt;.&lt;/li&gt;
+ 700 &lt;li&gt;To install on an rpm-based Linux, try running
+ 701 &lt;code&gt;sudo yum install     libXtst-devel libXt-devel libXrender-devel libXrandr-devel libXi-devel&lt;/code&gt;.&lt;/li&gt;
+ 702 &lt;li&gt;To install on Alpine Linux, try running
+ 703 &lt;code&gt;sudo apk add libx11-dev     libxext-dev libxrender-dev libxrandr-dev libxtst-dev libxt-dev&lt;/code&gt;.&lt;/li&gt;
+ 704 &lt;/ul&gt;
+ 705 &lt;p&gt;Use &lt;code&gt;--with-x=&amp;lt;path&amp;gt;&lt;/code&gt; if &lt;code&gt;configure&lt;/code&gt; does
+ 706 not properly locate your X11 files.&lt;/p&gt;
+ 707 &lt;h3 id=&quot;alsa&quot;&gt;ALSA&lt;/h3&gt;
+ 708 &lt;p&gt;ALSA, &lt;a href=&quot;https://www.alsa-project.org/&quot;&gt;Advanced Linux Sound
+ 709 Architecture&lt;/a&gt; is required on Linux. At least version 0.9.1 of ALSA is
+ 710 required.&lt;/p&gt;
+ 711 &lt;ul&gt;
+ 712 &lt;li&gt;To install on an apt-based Linux, try running
+ 713 &lt;code&gt;sudo apt-get install     libasound2-dev&lt;/code&gt;.&lt;/li&gt;
+ 714 &lt;li&gt;To install on an rpm-based Linux, try running
+ 715 &lt;code&gt;sudo yum install     alsa-lib-devel&lt;/code&gt;.&lt;/li&gt;
+ 716 &lt;li&gt;To install on Alpine Linux, try running
+ 717 &lt;code&gt;sudo apk add alsa-lib-dev&lt;/code&gt;.&lt;/li&gt;
+ 718 &lt;/ul&gt;
+ 719 &lt;p&gt;Use &lt;code&gt;--with-alsa=&amp;lt;path&amp;gt;&lt;/code&gt; if &lt;code&gt;configure&lt;/code&gt;
+ 720 does not properly locate your ALSA files.&lt;/p&gt;
+ 721 &lt;h3 id=&quot;libffi&quot;&gt;libffi&lt;/h3&gt;
+ 722 &lt;p&gt;libffi, the &lt;a href=&quot;http://sourceware.org/libffi&quot;&gt;Portable Foreign
+ 723 Function Interface Library&lt;/a&gt; is required when building the Zero
+ 724 version of Hotspot.&lt;/p&gt;
+ 725 &lt;ul&gt;
+ 726 &lt;li&gt;To install on an apt-based Linux, try running
+ 727 &lt;code&gt;sudo apt-get install     libffi-dev&lt;/code&gt;.&lt;/li&gt;
+ 728 &lt;li&gt;To install on an rpm-based Linux, try running
+ 729 &lt;code&gt;sudo yum install     libffi-devel&lt;/code&gt;.&lt;/li&gt;
+ 730 &lt;li&gt;To install on Alpine Linux, try running
+ 731 &lt;code&gt;sudo apk add libffi-dev&lt;/code&gt;.&lt;/li&gt;
+ 732 &lt;/ul&gt;
+ 733 &lt;p&gt;Use &lt;code&gt;--with-libffi=&amp;lt;path&amp;gt;&lt;/code&gt; if &lt;code&gt;configure&lt;/code&gt;
+ 734 does not properly locate your libffi files.&lt;/p&gt;
+ 735 &lt;h2 id=&quot;build-tools-requirements&quot;&gt;Build Tools Requirements&lt;/h2&gt;
+ 736 &lt;h3 id=&quot;autoconf&quot;&gt;Autoconf&lt;/h3&gt;
+ 737 &lt;p&gt;The JDK requires &lt;a
+ 738 href=&quot;http://www.gnu.org/software/autoconf&quot;&gt;Autoconf&lt;/a&gt; on all
+ 739 platforms. At least version 2.69 is required.&lt;/p&gt;
+ 740 &lt;ul&gt;
+ 741 &lt;li&gt;To install on an apt-based Linux, try running
+ 742 &lt;code&gt;sudo apt-get install     autoconf&lt;/code&gt;.&lt;/li&gt;
+ 743 &lt;li&gt;To install on an rpm-based Linux, try running
+ 744 &lt;code&gt;sudo yum install     autoconf&lt;/code&gt;.&lt;/li&gt;
+ 745 &lt;li&gt;To install on Alpine Linux, try running
+ 746 &lt;code&gt;sudo apk add autoconf&lt;/code&gt;.&lt;/li&gt;
+ 747 &lt;li&gt;To install on macOS, try running
+ 748 &lt;code&gt;brew install autoconf&lt;/code&gt;.&lt;/li&gt;
+ 749 &lt;li&gt;To install on Windows, try running
+ 750 &lt;code&gt;&amp;lt;path to Cygwin setup&amp;gt;/setup-x86_64 -q     -P autoconf&lt;/code&gt;.&lt;/li&gt;
+ 751 &lt;/ul&gt;
+ 752 &lt;p&gt;If &lt;code&gt;configure&lt;/code&gt; has problems locating your installation of
+ 753 autoconf, you can specify it using the &lt;code&gt;AUTOCONF&lt;/code&gt; environment
+ 754 variable, like this:&lt;/p&gt;
+ 755 &lt;pre&gt;&lt;code&gt;AUTOCONF=&amp;lt;path to autoconf&amp;gt; configure ...&lt;/code&gt;&lt;/pre&gt;
+ 756 &lt;h3 id=&quot;gnu-make&quot;&gt;GNU Make&lt;/h3&gt;
+ 757 &lt;p&gt;The JDK requires &lt;a href=&quot;http://www.gnu.org/software/make&quot;&gt;GNU
+ 758 Make&lt;/a&gt;. No other flavors of make are supported.&lt;/p&gt;
+ 759 &lt;p&gt;At least version 3.81 of GNU Make must be used. For distributions
+ 760 supporting GNU Make 4.0 or above, we strongly recommend it. GNU Make 4.0
+ 761 contains useful functionality to handle parallel building (supported by
+ 762 &lt;code&gt;--with-output-sync&lt;/code&gt;) and speed and stability
+ 763 improvements.&lt;/p&gt;
+ 764 &lt;p&gt;Note that &lt;code&gt;configure&lt;/code&gt; locates and verifies a properly
+ 765 functioning version of &lt;code&gt;make&lt;/code&gt; and stores the path to this
+ 766 &lt;code&gt;make&lt;/code&gt; binary in the configuration. If you start a build
+ 767 using &lt;code&gt;make&lt;/code&gt; on the command line, you will be using the
+ 768 version of make found first in your &lt;code&gt;PATH&lt;/code&gt;, and not
+ 769 necessarily the one stored in the configuration. This initial make will
+ 770 be used as &quot;bootstrap make&quot;, and in a second stage, the make located by
+ 771 &lt;code&gt;configure&lt;/code&gt; will be called. Normally, this will present no
+ 772 issues, but if you have a very old &lt;code&gt;make&lt;/code&gt;, or a non-GNU Make
+ 773 &lt;code&gt;make&lt;/code&gt; in your path, this might cause issues.&lt;/p&gt;
+ 774 &lt;p&gt;If you want to override the default make found by
+ 775 &lt;code&gt;configure&lt;/code&gt;, use the &lt;code&gt;MAKE&lt;/code&gt; configure variable,
+ 776 e.g. &lt;code&gt;configure MAKE=/opt/gnu/make&lt;/code&gt;.&lt;/p&gt;
+ 777 &lt;h3 id=&quot;gnu-bash&quot;&gt;GNU Bash&lt;/h3&gt;
+ 778 &lt;p&gt;The JDK requires &lt;a href=&quot;http://www.gnu.org/software/bash&quot;&gt;GNU
+ 779 Bash&lt;/a&gt;. No other shells are supported.&lt;/p&gt;
+ 780 &lt;p&gt;At least version 3.2 of GNU Bash must be used.&lt;/p&gt;
+ 781 &lt;h2 id=&quot;running-configure&quot;&gt;Running Configure&lt;/h2&gt;
+ 782 &lt;p&gt;To build the JDK, you need a &quot;configuration&quot;, which consists of a
+ 783 directory where to store the build output, coupled with information
+ 784 about the platform, the specific build machine, and choices that affect
+ 785 how the JDK is built.&lt;/p&gt;
+ 786 &lt;p&gt;The configuration is created by the &lt;code&gt;configure&lt;/code&gt; script.
+ 787 The basic invocation of the &lt;code&gt;configure&lt;/code&gt; script looks like
+ 788 this:&lt;/p&gt;
+ 789 &lt;pre&gt;&lt;code&gt;bash configure [options]&lt;/code&gt;&lt;/pre&gt;
+ 790 &lt;p&gt;This will create an output directory containing the configuration and
+ 791 setup an area for the build result. This directory typically looks like
+ 792 &lt;code&gt;build/linux-x64-server-release&lt;/code&gt;, but the actual name depends
+ 793 on your specific configuration. (It can also be set directly, see &lt;a
+ 794 href=&quot;#using-multiple-configurations&quot;&gt;Using Multiple
+ 795 Configurations&lt;/a&gt;). This directory is referred to as
+ 796 &lt;code&gt;$BUILD&lt;/code&gt; in this documentation.&lt;/p&gt;
+ 797 &lt;p&gt;&lt;code&gt;configure&lt;/code&gt; will try to figure out what system you are
+ 798 running on and where all necessary build components are. If you have all
+ 799 prerequisites for building installed, it should find everything. If it
+ 800 fails to detect any component automatically, it will exit and inform you
+ 801 about the problem.&lt;/p&gt;
+ 802 &lt;p&gt;Some command line examples:&lt;/p&gt;
+ 803 &lt;ul&gt;
+ 804 &lt;li&gt;&lt;p&gt;Create a 32-bit build for Windows with FreeType2 in
+ 805 &lt;code&gt;C:\freetype-i586&lt;/code&gt;:
+ 806 &lt;code&gt;bash configure --with-freetype=/cygdrive/c/freetype-i586 --with-target-bits=32&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 807 &lt;li&gt;&lt;p&gt;Create a debug build with the &lt;code&gt;server&lt;/code&gt; JVM and DTrace
+ 808 enabled:
+ 809 &lt;code&gt;bash configure --enable-debug --with-jvm-variants=server --enable-dtrace&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+ 810 &lt;/ul&gt;
+ 811 &lt;h3 id=&quot;common-configure-arguments&quot;&gt;Common Configure Arguments&lt;/h3&gt;
+ 812 &lt;p&gt;Here follows some of the most common and important
+ 813 &lt;code&gt;configure&lt;/code&gt; argument.&lt;/p&gt;
+ 814 &lt;p&gt;To get up-to-date information on &lt;em&gt;all&lt;/em&gt; available
+ 815 &lt;code&gt;configure&lt;/code&gt; argument, please run:&lt;/p&gt;
+ 816 &lt;pre&gt;&lt;code&gt;bash configure --help&lt;/code&gt;&lt;/pre&gt;
+ 817 &lt;p&gt;(Note that this help text also include general autoconf options, like
+ 818 &lt;code&gt;--dvidir&lt;/code&gt;, that is not relevant to the JDK. To list only
+ 819 JDK-specific features, use &lt;code&gt;bash configure --help=short&lt;/code&gt;
+ 820 instead.)&lt;/p&gt;
+ 821 &lt;h4 id=&quot;configure-arguments-for-tailoring-the-build&quot;&gt;Configure Arguments
+ 822 for Tailoring the Build&lt;/h4&gt;
+ 823 &lt;ul&gt;
+ 824 &lt;li&gt;&lt;code&gt;--enable-debug&lt;/code&gt; - Set the debug level to
+ 825 &lt;code&gt;fastdebug&lt;/code&gt; (this is a shorthand for
+ 826 &lt;code&gt;--with-debug-level=fastdebug&lt;/code&gt;)&lt;/li&gt;
+ 827 &lt;li&gt;&lt;code&gt;--with-debug-level=&amp;lt;level&amp;gt;&lt;/code&gt; - Set the debug level,
+ 828 which can be &lt;code&gt;release&lt;/code&gt;, &lt;code&gt;fastdebug&lt;/code&gt;,
+ 829 &lt;code&gt;slowdebug&lt;/code&gt; or &lt;code&gt;optimized&lt;/code&gt;. Default is
+ 830 &lt;code&gt;release&lt;/code&gt;. &lt;code&gt;optimized&lt;/code&gt; is variant of
+ 831 &lt;code&gt;release&lt;/code&gt; with additional Hotspot debug code.&lt;/li&gt;
+ 832 &lt;li&gt;&lt;code&gt;--with-native-debug-symbols=&amp;lt;method&amp;gt;&lt;/code&gt; - Specify if
+ 833 and how native debug symbols should be built. Available methods are
+ 834 &lt;code&gt;none&lt;/code&gt;, &lt;code&gt;internal&lt;/code&gt;, &lt;code&gt;external&lt;/code&gt;,
+ 835 &lt;code&gt;zipped&lt;/code&gt;. Default behavior depends on platform. See &lt;a
+ 836 href=&quot;#native-debug-symbols&quot;&gt;Native Debug Symbols&lt;/a&gt; for more
+ 837 details.&lt;/li&gt;
+ 838 &lt;li&gt;&lt;code&gt;--with-version-string=&amp;lt;string&amp;gt;&lt;/code&gt; - Specify the
+ 839 version string this build will be identified with.&lt;/li&gt;
+ 840 &lt;li&gt;&lt;code&gt;--with-version-&amp;lt;part&amp;gt;=&amp;lt;value&amp;gt;&lt;/code&gt; - A group of
+ 841 options, where &lt;code&gt;&amp;lt;part&amp;gt;&lt;/code&gt; can be any of &lt;code&gt;pre&lt;/code&gt;,
+ 842 &lt;code&gt;opt&lt;/code&gt;, &lt;code&gt;build&lt;/code&gt;, &lt;code&gt;major&lt;/code&gt;,
+ 843 &lt;code&gt;minor&lt;/code&gt;, &lt;code&gt;security&lt;/code&gt; or &lt;code&gt;patch&lt;/code&gt;. Use
+ 844 these options to modify just the corresponding part of the version
+ 845 string from the default, or the value provided by
+ 846 &lt;code&gt;--with-version-string&lt;/code&gt;.&lt;/li&gt;
+ 847 &lt;li&gt;&lt;code&gt;--with-jvm-variants=&amp;lt;variant&amp;gt;[,&amp;lt;variant&amp;gt;...]&lt;/code&gt;
+ 848 - Build the specified variant (or variants) of Hotspot. Valid variants
+ 849 are: &lt;code&gt;server&lt;/code&gt;, &lt;code&gt;client&lt;/code&gt;, &lt;code&gt;minimal&lt;/code&gt;,
+ 850 &lt;code&gt;core&lt;/code&gt;, &lt;code&gt;zero&lt;/code&gt;, &lt;code&gt;custom&lt;/code&gt;. Note that not
+ 851 all variants are possible to combine in a single build.&lt;/li&gt;
+ 852 &lt;li&gt;&lt;code&gt;--enable-jvm-feature-&amp;lt;feature&amp;gt;&lt;/code&gt; or
+ 853 &lt;code&gt;--disable-jvm-feature-&amp;lt;feature&amp;gt;&lt;/code&gt; - Include (or
+ 854 exclude) &lt;code&gt;&amp;lt;feature&amp;gt;&lt;/code&gt; as a JVM feature in Hotspot. You
+ 855 can also specify a list of features to be enabled, separated by space or
+ 856 comma, as
+ 857 &lt;code&gt;--with-jvm-features=&amp;lt;feature&amp;gt;[,&amp;lt;feature&amp;gt;...]&lt;/code&gt;.
+ 858 If you prefix &lt;code&gt;&amp;lt;feature&amp;gt;&lt;/code&gt; with a &lt;code&gt;-&lt;/code&gt;, it
+ 859 will be disabled. These options will modify the default list of features
+ 860 for the JVM variant(s) you are building. For the &lt;code&gt;custom&lt;/code&gt; JVM
+ 861 variant, the default list is empty. A complete list of valid JVM
+ 862 features can be found using &lt;code&gt;bash configure --help&lt;/code&gt;.&lt;/li&gt;
+ 863 &lt;li&gt;&lt;code&gt;--with-target-bits=&amp;lt;bits&amp;gt;&lt;/code&gt; - Create a target
+ 864 binary suitable for running on a &lt;code&gt;&amp;lt;bits&amp;gt;&lt;/code&gt; platform. Use
+ 865 this to create 32-bit output on a 64-bit build platform, instead of
+ 866 doing a full cross-compile. (This is known as a &lt;em&gt;reduced&lt;/em&gt;
+ 867 build.)&lt;/li&gt;
+ 868 &lt;/ul&gt;
+ 869 &lt;p&gt;On Linux, BSD and AIX, it is possible to override where Java by
+ 870 default searches for runtime/JNI libraries. This can be useful in
+ 871 situations where there is a special shared directory for system JNI
+ 872 libraries. This setting can in turn be overridden at runtime by setting
+ 873 the &lt;code&gt;java.library.path&lt;/code&gt; property.&lt;/p&gt;
+ 874 &lt;ul&gt;
+ 875 &lt;li&gt;&lt;code&gt;--with-jni-libpath=&amp;lt;path&amp;gt;&lt;/code&gt; - Use the specified
+ 876 path as a default when searching for runtime libraries.&lt;/li&gt;
+ 877 &lt;/ul&gt;
+ 878 &lt;h4 id=&quot;configure-arguments-for-native-compilation&quot;&gt;Configure Arguments
+ 879 for Native Compilation&lt;/h4&gt;
+ 880 &lt;ul&gt;
+ 881 &lt;li&gt;&lt;code&gt;--with-devkit=&amp;lt;path&amp;gt;&lt;/code&gt; - Use this devkit for
+ 882 compilers, tools and resources&lt;/li&gt;
+ 883 &lt;li&gt;&lt;code&gt;--with-sysroot=&amp;lt;path&amp;gt;&lt;/code&gt; - Use this directory as
+ 884 sysroot&lt;/li&gt;
+ 885 &lt;li&gt;&lt;code&gt;--with-extra-path=&amp;lt;path&amp;gt;[;&amp;lt;path&amp;gt;]&lt;/code&gt; - Prepend
+ 886 these directories to the default path when searching for all kinds of
+ 887 binaries&lt;/li&gt;
+ 888 &lt;li&gt;&lt;code&gt;--with-toolchain-path=&amp;lt;path&amp;gt;[;&amp;lt;path&amp;gt;]&lt;/code&gt; -
+ 889 Prepend these directories when searching for toolchain binaries
+ 890 (compilers etc)&lt;/li&gt;
+ 891 &lt;li&gt;&lt;code&gt;--with-extra-cflags=&amp;lt;flags&amp;gt;&lt;/code&gt; - Append these flags
+ 892 when compiling JDK C files&lt;/li&gt;
+ 893 &lt;li&gt;&lt;code&gt;--with-extra-cxxflags=&amp;lt;flags&amp;gt;&lt;/code&gt; - Append these
+ 894 flags when compiling JDK C++ files&lt;/li&gt;
+ 895 &lt;li&gt;&lt;code&gt;--with-extra-ldflags=&amp;lt;flags&amp;gt;&lt;/code&gt; - Append these flags
+ 896 when linking JDK libraries&lt;/li&gt;
+ 897 &lt;/ul&gt;
+ 898 &lt;h4 id=&quot;configure-arguments-for-external-dependencies&quot;&gt;Configure
+ 899 Arguments for External Dependencies&lt;/h4&gt;
+ 900 &lt;ul&gt;
+ 901 &lt;li&gt;&lt;code&gt;--with-boot-jdk=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to the &lt;a
+ 902 href=&quot;#boot-jdk-requirements&quot;&gt;Boot JDK&lt;/a&gt;&lt;/li&gt;
+ 903 &lt;li&gt;&lt;code&gt;--with-freetype=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to &lt;a
+ 904 href=&quot;#freetype&quot;&gt;FreeType&lt;/a&gt;&lt;/li&gt;
+ 905 &lt;li&gt;&lt;code&gt;--with-cups=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to &lt;a
+ 906 href=&quot;#cups&quot;&gt;CUPS&lt;/a&gt;&lt;/li&gt;
+ 907 &lt;li&gt;&lt;code&gt;--with-x=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to &lt;a
+ 908 href=&quot;#x11&quot;&gt;X11&lt;/a&gt;&lt;/li&gt;
+ 909 &lt;li&gt;&lt;code&gt;--with-alsa=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to &lt;a
+ 910 href=&quot;#alsa&quot;&gt;ALSA&lt;/a&gt;&lt;/li&gt;
+ 911 &lt;li&gt;&lt;code&gt;--with-libffi=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to &lt;a
+ 912 href=&quot;#libffi&quot;&gt;libffi&lt;/a&gt;&lt;/li&gt;
+ 913 &lt;li&gt;&lt;code&gt;--with-jtreg=&amp;lt;path&amp;gt;&lt;/code&gt; - Set the path to JTReg. See
+ 914 &lt;a href=&quot;#running-tests&quot;&gt;Running Tests&lt;/a&gt;&lt;/li&gt;
+ 915 &lt;/ul&gt;
+ 916 &lt;p&gt;Certain third-party libraries used by the JDK (libjpeg, giflib,
+ 917 libpng, lcms and zlib) are included in the JDK repository. The default
+ 918 behavior of the JDK build is to use the included (&quot;bundled&quot;) versions of
+ 919 libjpeg, giflib, libpng and lcms. For zlib, the system lib (if present)
+ 920 is used except on Windows and AIX. However the bundled libraries may be
+ 921 replaced by an external version. To do so, specify &lt;code&gt;system&lt;/code&gt;
+ 922 as the &lt;code&gt;&amp;lt;source&amp;gt;&lt;/code&gt; option in these arguments. (The
+ 923 default is &lt;code&gt;bundled&lt;/code&gt;).&lt;/p&gt;
+ 924 &lt;ul&gt;
+ 925 &lt;li&gt;&lt;code&gt;--with-libjpeg=&amp;lt;source&amp;gt;&lt;/code&gt; - Use the specified
+ 926 source for libjpeg&lt;/li&gt;
+ 927 &lt;li&gt;&lt;code&gt;--with-giflib=&amp;lt;source&amp;gt;&lt;/code&gt; - Use the specified source
+ 928 for giflib&lt;/li&gt;
+ 929 &lt;li&gt;&lt;code&gt;--with-libpng=&amp;lt;source&amp;gt;&lt;/code&gt; - Use the specified source
+ 930 for libpng&lt;/li&gt;
+ 931 &lt;li&gt;&lt;code&gt;--with-lcms=&amp;lt;source&amp;gt;&lt;/code&gt; - Use the specified source
+ 932 for lcms&lt;/li&gt;
+ 933 &lt;li&gt;&lt;code&gt;--with-zlib=&amp;lt;source&amp;gt;&lt;/code&gt; - Use the specified source
+ 934 for zlib&lt;/li&gt;
+ 935 &lt;/ul&gt;
+ 936 &lt;p&gt;On Linux, it is possible to select either static or dynamic linking
+ 937 of the C++ runtime. The default is static linking, with dynamic linking
+ 938 as fallback if the static library is not found.&lt;/p&gt;
+ 939 &lt;ul&gt;
+ 940 &lt;li&gt;&lt;code&gt;--with-stdc++lib=&amp;lt;method&amp;gt;&lt;/code&gt; - Use the specified
+ 941 method (&lt;code&gt;static&lt;/code&gt;, &lt;code&gt;dynamic&lt;/code&gt; or
+ 942 &lt;code&gt;default&lt;/code&gt;) for linking the C++ runtime.&lt;/li&gt;
+ 943 &lt;/ul&gt;
+ 944 &lt;h3 id=&quot;configure-control-variables&quot;&gt;Configure Control Variables&lt;/h3&gt;
+ 945 &lt;p&gt;It is possible to control certain aspects of &lt;code&gt;configure&lt;/code&gt;
+ 946 by overriding the value of &lt;code&gt;configure&lt;/code&gt; variables, either on
+ 947 the command line or in the environment.&lt;/p&gt;
+ 948 &lt;p&gt;Normally, this is &lt;strong&gt;not recommended&lt;/strong&gt;. If used
+ 949 improperly, it can lead to a broken configuration. Unless you&#39;re well
+ 950 versed in the build system, this is hard to use properly. Therefore,
+ 951 &lt;code&gt;configure&lt;/code&gt; will print a warning if this is detected.&lt;/p&gt;
+ 952 &lt;p&gt;However, there are a few &lt;code&gt;configure&lt;/code&gt; variables, known as
+ 953 &lt;em&gt;control variables&lt;/em&gt; that are supposed to be overridden on the
+ 954 command line. These are variables that describe the location of tools
+ 955 needed by the build, like &lt;code&gt;MAKE&lt;/code&gt; or &lt;code&gt;GREP&lt;/code&gt;. If any
+ 956 such variable is specified, &lt;code&gt;configure&lt;/code&gt; will use that value
+ 957 instead of trying to autodetect the tool. For instance,
+ 958 &lt;code&gt;bash configure MAKE=/opt/gnumake4.0/bin/make&lt;/code&gt;.&lt;/p&gt;
+ 959 &lt;p&gt;If a configure argument exists, use that instead, e.g. use
+ 960 &lt;code&gt;--with-jtreg&lt;/code&gt; instead of setting &lt;code&gt;JTREGEXE&lt;/code&gt;.&lt;/p&gt;
+ 961 &lt;p&gt;Also note that, despite what autoconf claims, setting
+ 962 &lt;code&gt;CFLAGS&lt;/code&gt; will not accomplish anything. Instead use
+ 963 &lt;code&gt;--with-extra-cflags&lt;/code&gt; (and similar for &lt;code&gt;cxxflags&lt;/code&gt;
+ 964 and &lt;code&gt;ldflags&lt;/code&gt;).&lt;/p&gt;
+ 965 &lt;h2 id=&quot;running-make&quot;&gt;Running Make&lt;/h2&gt;
+ 966 &lt;p&gt;When you have a proper configuration, all you need to do to build the
+ 967 JDK is to run &lt;code&gt;make&lt;/code&gt;. (But see the warning at &lt;a
+ 968 href=&quot;#gnu-make&quot;&gt;GNU Make&lt;/a&gt; about running the correct version of
+ 969 make.)&lt;/p&gt;
+ 970 &lt;p&gt;When running &lt;code&gt;make&lt;/code&gt; without any arguments, the default
+ 971 target is used, which is the same as running &lt;code&gt;make default&lt;/code&gt;
+ 972 or &lt;code&gt;make jdk&lt;/code&gt;. This will build a minimal (or roughly minimal)
+ 973 set of compiled output (known as an &quot;exploded image&quot;) needed for a
+ 974 developer to actually execute the newly built JDK. The idea is that in
+ 975 an incremental development fashion, when doing a normal make, you should
+ 976 only spend time recompiling what&#39;s changed (making it purely
+ 977 incremental) and only do the work that&#39;s needed to actually run and test
+ 978 your code.&lt;/p&gt;
+ 979 &lt;p&gt;The output of the exploded image resides in &lt;code&gt;$BUILD/jdk&lt;/code&gt;.
+ 980 You can test the newly built JDK like this:
+ 981 &lt;code&gt;$BUILD/jdk/bin/java -version&lt;/code&gt;.&lt;/p&gt;
+ 982 &lt;h3 id=&quot;common-make-targets&quot;&gt;Common Make Targets&lt;/h3&gt;
+ 983 &lt;p&gt;Apart from the default target, here are some common make targets:&lt;/p&gt;
+ 984 &lt;ul&gt;
+ 985 &lt;li&gt;&lt;code&gt;hotspot&lt;/code&gt; - Build all of hotspot (but only hotspot)&lt;/li&gt;
+ 986 &lt;li&gt;&lt;code&gt;hotspot-&amp;lt;variant&amp;gt;&lt;/code&gt; - Build just the specified jvm
+ 987 variant&lt;/li&gt;
+ 988 &lt;li&gt;&lt;code&gt;images&lt;/code&gt; or &lt;code&gt;product-images&lt;/code&gt; - Build the JDK
+ 989 image&lt;/li&gt;
+ 990 &lt;li&gt;&lt;code&gt;docs&lt;/code&gt; or &lt;code&gt;docs-image&lt;/code&gt; - Build the
+ 991 documentation image&lt;/li&gt;
+ 992 &lt;li&gt;&lt;code&gt;test-image&lt;/code&gt; - Build the test image&lt;/li&gt;
+ 993 &lt;li&gt;&lt;code&gt;all&lt;/code&gt; or &lt;code&gt;all-images&lt;/code&gt; - Build all images
+ 994 (product, docs and test)&lt;/li&gt;
+ 995 &lt;li&gt;&lt;code&gt;bootcycle-images&lt;/code&gt; - Build images twice, second time with
+ 996 newly built JDK (good for testing)&lt;/li&gt;
+ 997 &lt;li&gt;&lt;code&gt;clean&lt;/code&gt; - Remove all files generated by make, but not
+ 998 those generated by configure&lt;/li&gt;
+ 999 &lt;li&gt;&lt;code&gt;dist-clean&lt;/code&gt; - Remove all files, including
+1000 configuration&lt;/li&gt;
+1001 &lt;/ul&gt;
+1002 &lt;p&gt;Run &lt;code&gt;make help&lt;/code&gt; to get an up-to-date list of important
+1003 make targets and make control variables.&lt;/p&gt;
+1004 &lt;p&gt;It is possible to build just a single module, a single phase, or a
+1005 single phase of a single module, by creating make targets according to
+1006 these followin patterns. A phase can be either of &lt;code&gt;gensrc&lt;/code&gt;,
+1007 &lt;code&gt;gendata&lt;/code&gt;, &lt;code&gt;copy&lt;/code&gt;, &lt;code&gt;java&lt;/code&gt;,
+1008 &lt;code&gt;launchers&lt;/code&gt;, or &lt;code&gt;libs&lt;/code&gt;. See &lt;a
+1009 href=&quot;#using-fine-grained-make-targets&quot;&gt;Using Fine-Grained Make
+1010 Targets&lt;/a&gt; for more details about this functionality.&lt;/p&gt;
+1011 &lt;ul&gt;
+1012 &lt;li&gt;&lt;code&gt;&amp;lt;phase&amp;gt;&lt;/code&gt; - Build the specified phase and
+1013 everything it depends on&lt;/li&gt;
+1014 &lt;li&gt;&lt;code&gt;&amp;lt;module&amp;gt;&lt;/code&gt; - Build the specified module and
+1015 everything it depends on&lt;/li&gt;
+1016 &lt;li&gt;&lt;code&gt;&amp;lt;module&amp;gt;-&amp;lt;phase&amp;gt;&lt;/code&gt; - Compile the specified
+1017 phase for the specified module and everything it depends on&lt;/li&gt;
+1018 &lt;/ul&gt;
+1019 &lt;p&gt;Similarly, it is possible to clean just a part of the build by
+1020 creating make targets according to these patterns:&lt;/p&gt;
+1021 &lt;ul&gt;
+1022 &lt;li&gt;&lt;code&gt;clean-&amp;lt;outputdir&amp;gt;&lt;/code&gt; - Remove the subdir in the
+1023 output dir with the name&lt;/li&gt;
+1024 &lt;li&gt;&lt;code&gt;clean-&amp;lt;phase&amp;gt;&lt;/code&gt; - Remove all build results related
+1025 to a certain build phase&lt;/li&gt;
+1026 &lt;li&gt;&lt;code&gt;clean-&amp;lt;module&amp;gt;&lt;/code&gt; - Remove all build results related
+1027 to a certain module&lt;/li&gt;
+1028 &lt;li&gt;&lt;code&gt;clean-&amp;lt;module&amp;gt;-&amp;lt;phase&amp;gt;&lt;/code&gt; - Remove all build
+1029 results related to a certain module and phase&lt;/li&gt;
+1030 &lt;/ul&gt;
+1031 &lt;h3 id=&quot;make-control-variables&quot;&gt;Make Control Variables&lt;/h3&gt;
+1032 &lt;p&gt;It is possible to control &lt;code&gt;make&lt;/code&gt; behavior by overriding
+1033 the value of &lt;code&gt;make&lt;/code&gt; variables, either on the command line or
+1034 in the environment.&lt;/p&gt;
+1035 &lt;p&gt;Normally, this is &lt;strong&gt;not recommended&lt;/strong&gt;. If used
+1036 improperly, it can lead to a broken build. Unless you&#39;re well versed in
+1037 the build system, this is hard to use properly. Therefore,
+1038 &lt;code&gt;make&lt;/code&gt; will print a warning if this is detected.&lt;/p&gt;
+1039 &lt;p&gt;However, there are a few &lt;code&gt;make&lt;/code&gt; variables, known as
+1040 &lt;em&gt;control variables&lt;/em&gt; that are supposed to be overridden on the
+1041 command line. These make up the &quot;make time&quot; configuration, as opposed to
+1042 the &quot;configure time&quot; configuration.&lt;/p&gt;
+1043 &lt;h4 id=&quot;general-make-control-variables&quot;&gt;General Make Control
+1044 Variables&lt;/h4&gt;
+1045 &lt;ul&gt;
+1046 &lt;li&gt;&lt;code&gt;JOBS&lt;/code&gt; - Specify the number of jobs to build with. See &lt;a
+1047 href=&quot;#build-performance&quot;&gt;Build Performance&lt;/a&gt;.&lt;/li&gt;
+1048 &lt;li&gt;&lt;code&gt;LOG&lt;/code&gt; - Specify the logging level and functionality. See
+1049 &lt;a href=&quot;#checking-the-build-log-file&quot;&gt;Checking the Build Log
+1050 File&lt;/a&gt;&lt;/li&gt;
+1051 &lt;li&gt;&lt;code&gt;CONF&lt;/code&gt; and &lt;code&gt;CONF_NAME&lt;/code&gt; - Selecting the
+1052 configuration(s) to use. See &lt;a
+1053 href=&quot;#using-multiple-configurations&quot;&gt;Using Multiple
+1054 Configurations&lt;/a&gt;&lt;/li&gt;
+1055 &lt;/ul&gt;
+1056 &lt;h4 id=&quot;test-make-control-variables&quot;&gt;Test Make Control Variables&lt;/h4&gt;
+1057 &lt;p&gt;These make control variables only make sense when running tests.
+1058 Please see &lt;strong&gt;Testing the JDK&lt;/strong&gt; (&lt;a
+1059 href=&quot;testing.html&quot;&gt;html&lt;/a&gt;, &lt;a href=&quot;testing.md&quot;&gt;markdown&lt;/a&gt;) for
+1060 details.&lt;/p&gt;
+1061 &lt;ul&gt;
+1062 &lt;li&gt;&lt;code&gt;TEST&lt;/code&gt;&lt;/li&gt;
+1063 &lt;li&gt;&lt;code&gt;TEST_JOBS&lt;/code&gt;&lt;/li&gt;
+1064 &lt;li&gt;&lt;code&gt;JTREG&lt;/code&gt;&lt;/li&gt;
+1065 &lt;li&gt;&lt;code&gt;GTEST&lt;/code&gt;&lt;/li&gt;
+1066 &lt;/ul&gt;
+1067 &lt;h4 id=&quot;advanced-make-control-variables&quot;&gt;Advanced Make Control
+1068 Variables&lt;/h4&gt;
+1069 &lt;p&gt;These advanced make control variables can be potentially unsafe. See
+1070 &lt;a href=&quot;#hints-and-suggestions-for-advanced-users&quot;&gt;Hints and
+1071 Suggestions for Advanced Users&lt;/a&gt; and &lt;a
+1072 href=&quot;#understanding-the-build-system&quot;&gt;Understanding the Build
+1073 System&lt;/a&gt; for details.&lt;/p&gt;
+1074 &lt;ul&gt;
+1075 &lt;li&gt;&lt;code&gt;SPEC&lt;/code&gt;&lt;/li&gt;
+1076 &lt;li&gt;&lt;code&gt;CONF_CHECK&lt;/code&gt;&lt;/li&gt;
+1077 &lt;li&gt;&lt;code&gt;COMPARE_BUILD&lt;/code&gt;&lt;/li&gt;
+1078 &lt;li&gt;&lt;code&gt;JDK_FILTER&lt;/code&gt;&lt;/li&gt;
+1079 &lt;li&gt;&lt;code&gt;SPEC_FILTER&lt;/code&gt;&lt;/li&gt;
+1080 &lt;/ul&gt;
+1081 &lt;h2 id=&quot;running-tests&quot;&gt;Running Tests&lt;/h2&gt;
+1082 &lt;p&gt;Most of the JDK tests are using the &lt;a
+1083 href=&quot;http://openjdk.org/jtreg&quot;&gt;JTReg&lt;/a&gt; test framework. Make sure that
+1084 your configuration knows where to find your installation of JTReg. If
+1085 this is not picked up automatically, use the
+1086 &lt;code&gt;--with-jtreg=&amp;lt;path to jtreg home&amp;gt;&lt;/code&gt; option to point to
+1087 the JTReg framework. Note that this option should point to the JTReg
+1088 home, i.e. the top directory, containing &lt;code&gt;lib/jtreg.jar&lt;/code&gt;
+1089 etc.&lt;/p&gt;
+1090 &lt;p&gt;The &lt;a href=&quot;https://wiki.openjdk.org/display/Adoption&quot;&gt;Adoption
+1091 Group&lt;/a&gt; provides recent builds of jtreg &lt;a
+1092 href=&quot;https://ci.adoptopenjdk.net/view/Dependencies/job/dependency_pipeline/lastSuccessfulBuild/artifact/jtreg/&quot;&gt;here&lt;/a&gt;.
+1093 Download the latest &lt;code&gt;.tar.gz&lt;/code&gt; file, unpack it, and point
+1094 &lt;code&gt;--with-jtreg&lt;/code&gt; to the &lt;code&gt;jtreg&lt;/code&gt; directory that you
+1095 just unpacked.&lt;/p&gt;
+1096 &lt;p&gt;Building of Hotspot Gtest suite requires the source code of Google
+1097 Test framework. The top directory, which contains both
+1098 &lt;code&gt;googletest&lt;/code&gt; and &lt;code&gt;googlemock&lt;/code&gt; directories, should
+1099 be specified via &lt;code&gt;--with-gtest&lt;/code&gt;. The minimum supported
+1100 version of Google Test is 1.13.0, whose source code can be obtained:&lt;/p&gt;
+1101 &lt;ul&gt;
+1102 &lt;li&gt;by downloading and unpacking the source bundle from &lt;a
+1103 href=&quot;https://github.com/google/googletest/releases/tag/v1.13.0&quot;&gt;here&lt;/a&gt;&lt;/li&gt;
+1104 &lt;li&gt;or by checking out &lt;code&gt;v1.13.0&lt;/code&gt; tag of
+1105 &lt;code&gt;googletest&lt;/code&gt; project:
+1106 &lt;code&gt;git clone -b v1.13.0 https://github.com/google/googletest&lt;/code&gt;&lt;/li&gt;
+1107 &lt;/ul&gt;
+1108 &lt;p&gt;To execute the most basic tests (tier 1), use:&lt;/p&gt;
+1109 &lt;pre&gt;&lt;code&gt;make run-test-tier1&lt;/code&gt;&lt;/pre&gt;
+1110 &lt;p&gt;For more details on how to run tests, please see &lt;strong&gt;Testing the
+1111 JDK&lt;/strong&gt; (&lt;a href=&quot;testing.html&quot;&gt;html&lt;/a&gt;, &lt;a
+1112 href=&quot;testing.md&quot;&gt;markdown&lt;/a&gt;).&lt;/p&gt;
+1113 &lt;h2 id=&quot;signing&quot;&gt;Signing&lt;/h2&gt;
+1114 &lt;h3 id=&quot;macos-1&quot;&gt;macOS&lt;/h3&gt;
+1115 &lt;p&gt;Modern versions of macOS require applications to be signed and
+1116 notarizied before distribution. See Apple&#39;s documentation for more
+1117 background on what this means and how it works. To help support this,
+1118 the JDK build can be configured to automatically sign all native
+1119 binaries, and the JDK bundle, with all the options needed for successful
+1120 notarization, as well as all the entitlements required by the JDK. To
+1121 enable &lt;code&gt;hardened&lt;/code&gt; signing, use configure parameter
+1122 &lt;code&gt;--with-macosx-codesign=hardened&lt;/code&gt; and configure the signing
+1123 identity you wish to use with
+1124 &lt;code&gt;--with-macosx-codesign-identity=&amp;lt;identity&amp;gt;&lt;/code&gt;. The
+1125 identity refers to a signing identity from Apple that needs to be
+1126 preinstalled on the build host.&lt;/p&gt;
+1127 &lt;p&gt;When not signing for distribution with the hardened option, the JDK
+1128 build will still attempt to perform &lt;code&gt;adhoc&lt;/code&gt; signing to add
+1129 the special entitlement &lt;code&gt;com.apple.security.get-task-allow&lt;/code&gt;
+1130 to each binary. This entitlement is required to be able to dump core
+1131 files from a process. Note that adding this entitlement makes the build
+1132 invalid for notarization, so it is only added when signing in
+1133 &lt;code&gt;debug&lt;/code&gt; mode. To explicitly enable this kind of adhoc
+1134 signing, use configure parameter
+1135 &lt;code&gt;--with-macosx-codesign=debug&lt;/code&gt;. It will be enabled by default
+1136 in most cases.&lt;/p&gt;
+1137 &lt;p&gt;It&#39;s also possible to completely disable any explicit codesign
+1138 operations done by the JDK build using the configure parameter
+1139 &lt;code&gt;--without-macosx-codesign&lt;/code&gt;. The exact behavior then depends
+1140 on the architecture. For macOS on x64, it (at least at the time of this
+1141 writing) results in completely unsigned binaries that should still work
+1142 fine for development and debugging purposes. On aarch64, the Xcode
+1143 linker will apply a default &quot;adhoc&quot; signing, without any entitlements.
+1144 Such a build does not allow dumping core files.&lt;/p&gt;
+1145 &lt;p&gt;The default mode &quot;auto&quot; will try for &lt;code&gt;hardened&lt;/code&gt; signing if
+1146 the debug level is &lt;code&gt;release&lt;/code&gt; and either the default identity
+1147 or the specified identity is valid. If hardened isn&#39;t possible, then
+1148 &lt;code&gt;debug&lt;/code&gt; signing is chosen if it works. If nothing works, the
+1149 codesign build step is disabled.&lt;/p&gt;
+1150 &lt;h2 id=&quot;cross-compiling&quot;&gt;Cross-compiling&lt;/h2&gt;
+1151 &lt;p&gt;Cross-compiling means using one platform (the &lt;em&gt;build&lt;/em&gt;
+1152 platform) to generate output that can ran on another platform (the
+1153 &lt;em&gt;target&lt;/em&gt; platform).&lt;/p&gt;
+1154 &lt;p&gt;The typical reason for cross-compiling is that the build is performed
+1155 on a more powerful desktop computer, but the resulting binaries will be
+1156 able to run on a different, typically low-performing system. Most of the
+1157 complications that arise when building for embedded is due to this
+1158 separation of &lt;em&gt;build&lt;/em&gt; and &lt;em&gt;target&lt;/em&gt; systems.&lt;/p&gt;
+1159 &lt;p&gt;This requires a more complex setup and build procedure. This section
+1160 assumes you are familiar with cross-compiling in general, and will only
+1161 deal with the particularities of cross-compiling the JDK. If you are new
+1162 to cross-compiling, please see the &lt;a
+1163 href=&quot;https://en.wikipedia.org/wiki/Cross_compiler#External_links&quot;&gt;external
+1164 links at Wikipedia&lt;/a&gt; for a good start on reading materials.&lt;/p&gt;
+1165 &lt;p&gt;Cross-compiling the JDK requires you to be able to build both for the
+1166 build platform and for the target platform. The reason for the former is
+1167 that we need to build and execute tools during the build process, both
+1168 native tools and Java tools.&lt;/p&gt;
+1169 &lt;p&gt;If all you want to do is to compile a 32-bit version, for the same
+1170 OS, on a 64-bit machine, consider using
+1171 &lt;code&gt;--with-target-bits=32&lt;/code&gt; instead of doing a full-blown
+1172 cross-compilation. (While this surely is possible, it&#39;s a lot more work
+1173 and will take much longer to build.)&lt;/p&gt;
+1174 &lt;h3 id=&quot;cross-compiling-the-easy-way-with-openjdk-devkits&quot;&gt;Cross
+1175 compiling the easy way with OpenJDK devkits&lt;/h3&gt;
+1176 &lt;p&gt;The OpenJDK build system provides out-of-the box support for creating
+1177 and using so called devkits. A &lt;code&gt;devkit&lt;/code&gt; is basically a
+1178 collection of a cross-compiling toolchain and a sysroot environment
+1179 which can easily be used together with the &lt;code&gt;--with-devkit&lt;/code&gt;
+1180 configure option to cross compile the OpenJDK. On Linux/x86_64, the
+1181 following command:&lt;/p&gt;
+1182 &lt;pre&gt;&lt;code&gt;bash configure --with-devkit=&amp;lt;devkit-path&amp;gt; --openjdk-target=ppc64-linux-gnu &amp;amp;&amp;amp; make&lt;/code&gt;&lt;/pre&gt;
+1183 &lt;p&gt;will configure and build OpenJDK for Linux/ppc64 assuming that
+1184 &lt;code&gt;&amp;lt;devkit-path&amp;gt;&lt;/code&gt; points to a Linux/x86_64 to Linux/ppc64
+1185 devkit.&lt;/p&gt;
+1186 &lt;p&gt;Devkits can be created from the &lt;code&gt;make/devkit&lt;/code&gt; directory by
+1187 executing:&lt;/p&gt;
+1188 &lt;pre&gt;&lt;code&gt;make [ TARGETS=&amp;quot;&amp;lt;TARGET_TRIPLET&amp;gt;+&amp;quot; ] [ BASE_OS=&amp;lt;OS&amp;gt; ] [ BASE_OS_VERSION=&amp;lt;VER&amp;gt; ]&lt;/code&gt;&lt;/pre&gt;
+1189 &lt;p&gt;where &lt;code&gt;TARGETS&lt;/code&gt; contains one or more
+1190 &lt;code&gt;TARGET_TRIPLET&lt;/code&gt;s of the form described in &lt;a
+1191 href=&quot;https://sourceware.org/autobook/autobook/autobook_17.html&quot;&gt;section
+1192 3.4 of the GNU Autobook&lt;/a&gt;. If no targets are given, a native toolchain
+1193 for the current platform will be created. Currently, at least the
+1194 following targets are known to work:&lt;/p&gt;
+1195 &lt;table&gt;
+1196 &lt;thead&gt;
+1197 &lt;tr class=&quot;header&quot;&gt;
+1198 &lt;th style=&quot;text-align: left;&quot;&gt;Supported devkit targets&lt;/th&gt;
+1199 &lt;/tr&gt;
+1200 &lt;/thead&gt;
+1201 &lt;tbody&gt;
+1202 &lt;tr class=&quot;odd&quot;&gt;
+1203 &lt;td style=&quot;text-align: left;&quot;&gt;x86_64-linux-gnu&lt;/td&gt;
+1204 &lt;/tr&gt;
+1205 &lt;tr class=&quot;even&quot;&gt;
+1206 &lt;td style=&quot;text-align: left;&quot;&gt;aarch64-linux-gnu&lt;/td&gt;
+1207 &lt;/tr&gt;
+1208 &lt;tr class=&quot;odd&quot;&gt;
+1209 &lt;td style=&quot;text-align: left;&quot;&gt;arm-linux-gnueabihf&lt;/td&gt;
+1210 &lt;/tr&gt;
+1211 &lt;tr class=&quot;even&quot;&gt;
+1212 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64-linux-gnu&lt;/td&gt;
+1213 &lt;/tr&gt;
+1214 &lt;tr class=&quot;odd&quot;&gt;
+1215 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64le-linux-gnu&lt;/td&gt;
+1216 &lt;/tr&gt;
+1217 &lt;tr class=&quot;even&quot;&gt;
+1218 &lt;td style=&quot;text-align: left;&quot;&gt;s390x-linux-gnu&lt;/td&gt;
+1219 &lt;/tr&gt;
+1220 &lt;/tbody&gt;
+1221 &lt;/table&gt;
+1222 &lt;p&gt;&lt;code&gt;BASE_OS&lt;/code&gt; must be one of &quot;OEL6&quot; for Oracle Enterprise
+1223 Linux 6 or &quot;Fedora&quot; (if not specified &quot;OEL6&quot; will be the default). If
+1224 the base OS is &quot;Fedora&quot; the corresponding Fedora release can be
+1225 specified with the help of the &lt;code&gt;BASE_OS_VERSION&lt;/code&gt; option (with
+1226 &quot;27&quot; as default version). If the build is successful, the new devkits
+1227 can be found in the &lt;code&gt;build/devkit/result&lt;/code&gt; subdirectory:&lt;/p&gt;
+1228 &lt;pre&gt;&lt;code&gt;cd make/devkit
+1229 make TARGETS=&amp;quot;ppc64le-linux-gnu aarch64-linux-gnu&amp;quot; BASE_OS=Fedora BASE_OS_VERSION=21
+1230 ls -1 ../../build/devkit/result/
+1231 x86_64-linux-gnu-to-aarch64-linux-gnu
+1232 x86_64-linux-gnu-to-ppc64le-linux-gnu&lt;/code&gt;&lt;/pre&gt;
+1233 &lt;p&gt;Notice that devkits are not only useful for targeting different build
+1234 platforms. Because they contain the full build dependencies for a system
+1235 (i.e. compiler and root file system), they can easily be used to build
+1236 well-known, reliable and reproducible build environments. You can for
+1237 example create and use a devkit with GCC 7.3 and a Fedora 12 sysroot
+1238 environment (with glibc 2.11) on Ubuntu 14.04 (which doesn&#39;t have GCC
+1239 7.3 by default) to produce OpenJDK binaries which will run on all Linux
+1240 systems with runtime libraries newer than the ones from Fedora 12 (e.g.
+1241 Ubuntu 16.04, SLES 11 or RHEL 6).&lt;/p&gt;
+1242 &lt;h3 id=&quot;boot-jdk-and-build-jdk&quot;&gt;Boot JDK and Build JDK&lt;/h3&gt;
+1243 &lt;p&gt;When cross-compiling, make sure you use a boot JDK that runs on the
+1244 &lt;em&gt;build&lt;/em&gt; system, and not on the &lt;em&gt;target&lt;/em&gt; system.&lt;/p&gt;
+1245 &lt;p&gt;To be able to build, we need a &quot;Build JDK&quot;, which is a JDK built from
+1246 the current sources (that is, the same as the end result of the entire
+1247 build process), but able to run on the &lt;em&gt;build&lt;/em&gt; system, and not
+1248 the &lt;em&gt;target&lt;/em&gt; system. (In contrast, the Boot JDK should be from an
+1249 older release, e.g. JDK 8 when building JDK 9.)&lt;/p&gt;
+1250 &lt;p&gt;The build process will create a minimal Build JDK for you, as part of
+1251 building. To speed up the build, you can use
+1252 &lt;code&gt;--with-build-jdk&lt;/code&gt; to &lt;code&gt;configure&lt;/code&gt; to point to a
+1253 pre-built Build JDK. Please note that the build result is unpredictable,
+1254 and can possibly break in subtle ways, if the Build JDK does not
+1255 &lt;strong&gt;exactly&lt;/strong&gt; match the current sources.&lt;/p&gt;
+1256 &lt;h3 id=&quot;specifying-the-target-platform&quot;&gt;Specifying the Target
+1257 Platform&lt;/h3&gt;
+1258 &lt;p&gt;You &lt;em&gt;must&lt;/em&gt; specify the target platform when cross-compiling.
+1259 Doing so will also automatically turn the build into a cross-compiling
+1260 mode. The simplest way to do this is to use the
+1261 &lt;code&gt;--openjdk-target&lt;/code&gt; argument, e.g.
+1262 &lt;code&gt;--openjdk-target=arm-linux-gnueabihf&lt;/code&gt;. or
+1263 &lt;code&gt;--openjdk-target=aarch64-oe-linux&lt;/code&gt;. This will automatically
+1264 set the &lt;code&gt;--host&lt;/code&gt; and &lt;code&gt;--target&lt;/code&gt; options for
+1265 autoconf, which can otherwise be confusing. (In autoconf terminology,
+1266 the &quot;target&quot; is known as &quot;host&quot;, and &quot;target&quot; is used for building a
+1267 Canadian cross-compiler.)&lt;/p&gt;
+1268 &lt;p&gt;If &lt;code&gt;--build&lt;/code&gt; has not been explicitly passed to configure,
+1269 &lt;code&gt;--openjdk-target&lt;/code&gt; will autodetect the build platform and
+1270 internally set the flag automatically, otherwise the platform that was
+1271 explicitly passed to &lt;code&gt;--build&lt;/code&gt; will be used instead.&lt;/p&gt;
+1272 &lt;h3 id=&quot;toolchain-considerations&quot;&gt;Toolchain Considerations&lt;/h3&gt;
+1273 &lt;p&gt;You will need two copies of your toolchain, one which generates
+1274 output that can run on the target system (the normal, or
+1275 &lt;em&gt;target&lt;/em&gt;, toolchain), and one that generates output that can run
+1276 on the build system (the &lt;em&gt;build&lt;/em&gt; toolchain). Note that
+1277 cross-compiling is only supported for gcc at the time being. The gcc
+1278 standard is to prefix cross-compiling toolchains with the target
+1279 denominator. If you follow this standard, &lt;code&gt;configure&lt;/code&gt; is
+1280 likely to pick up the toolchain correctly.&lt;/p&gt;
+1281 &lt;p&gt;The &lt;em&gt;build&lt;/em&gt; toolchain will be autodetected just the same way
+1282 the normal &lt;em&gt;build&lt;/em&gt;/&lt;em&gt;target&lt;/em&gt; toolchain will be autodetected
+1283 when not cross-compiling. If this is not what you want, or if the
+1284 autodetection fails, you can specify a devkit containing the
+1285 &lt;em&gt;build&lt;/em&gt; toolchain using &lt;code&gt;--with-build-devkit&lt;/code&gt; to
+1286 &lt;code&gt;configure&lt;/code&gt;, or by giving &lt;code&gt;BUILD_CC&lt;/code&gt; and
+1287 &lt;code&gt;BUILD_CXX&lt;/code&gt; arguments.&lt;/p&gt;
+1288 &lt;p&gt;It is often helpful to locate the cross-compilation tools, headers
+1289 and libraries in a separate directory, outside the normal path, and
+1290 point out that directory to &lt;code&gt;configure&lt;/code&gt;. Do this by setting
+1291 the sysroot (&lt;code&gt;--with-sysroot&lt;/code&gt;) and appending the directory
+1292 when searching for cross-compilations tools
+1293 (&lt;code&gt;--with-toolchain-path&lt;/code&gt;). As a compact form, you can also
+1294 use &lt;code&gt;--with-devkit&lt;/code&gt; to point to a single directory, if it is
+1295 correctly setup. (See &lt;code&gt;basics.m4&lt;/code&gt; for details.)&lt;/p&gt;
+1296 &lt;h3 id=&quot;native-libraries&quot;&gt;Native Libraries&lt;/h3&gt;
+1297 &lt;p&gt;You will need copies of external native libraries for the
+1298 &lt;em&gt;target&lt;/em&gt; system, present on the &lt;em&gt;build&lt;/em&gt; machine while
+1299 building.&lt;/p&gt;
+1300 &lt;p&gt;Take care not to replace the &lt;em&gt;build&lt;/em&gt; system&#39;s version of these
+1301 libraries by mistake, since that can render the &lt;em&gt;build&lt;/em&gt; machine
+1302 unusable.&lt;/p&gt;
+1303 &lt;p&gt;Make sure that the libraries you point to (ALSA, X11, etc) are for
+1304 the &lt;em&gt;target&lt;/em&gt;, not the &lt;em&gt;build&lt;/em&gt;, platform.&lt;/p&gt;
+1305 &lt;h4 id=&quot;alsa-1&quot;&gt;ALSA&lt;/h4&gt;
+1306 &lt;p&gt;You will need alsa libraries suitable for your &lt;em&gt;target&lt;/em&gt;
+1307 system. For most cases, using Debian&#39;s pre-built libraries work
+1308 fine.&lt;/p&gt;
+1309 &lt;p&gt;Note that alsa is needed even if you only want to build a headless
+1310 JDK.&lt;/p&gt;
+1311 &lt;ul&gt;
+1312 &lt;li&gt;&lt;p&gt;Go to &lt;a href=&quot;https://www.debian.org/distrib/packages&quot;&gt;Debian
+1313 Package Search&lt;/a&gt; and search for the &lt;code&gt;libasound2&lt;/code&gt; and
+1314 &lt;code&gt;libasound2-dev&lt;/code&gt; packages for your &lt;em&gt;target&lt;/em&gt; system.
+1315 Download them to /tmp.&lt;/p&gt;&lt;/li&gt;
+1316 &lt;li&gt;&lt;p&gt;Install the libraries into the cross-compilation toolchain. For
+1317 instance:&lt;/p&gt;&lt;/li&gt;
+1318 &lt;/ul&gt;
+1319 &lt;pre&gt;&lt;code&gt;cd /tools/gcc-linaro-arm-linux-gnueabihf-raspbian-2012.09-20120921_linux/arm-linux-gnueabihf/libc
+1320 dpkg-deb -x /tmp/libasound2_1.0.25-4_armhf.deb .
+1321 dpkg-deb -x /tmp/libasound2-dev_1.0.25-4_armhf.deb .&lt;/code&gt;&lt;/pre&gt;
+1322 &lt;ul&gt;
+1323 &lt;li&gt;If alsa is not properly detected by &lt;code&gt;configure&lt;/code&gt;, you can
+1324 point it out by &lt;code&gt;--with-alsa&lt;/code&gt;.&lt;/li&gt;
+1325 &lt;/ul&gt;
+1326 &lt;h4 id=&quot;x11-1&quot;&gt;X11&lt;/h4&gt;
+1327 &lt;p&gt;You will need X11 libraries suitable for your &lt;em&gt;target&lt;/em&gt; system.
+1328 For most cases, using Debian&#39;s pre-built libraries work fine.&lt;/p&gt;
+1329 &lt;p&gt;Note that X11 is needed even if you only want to build a headless
+1330 JDK.&lt;/p&gt;
+1331 &lt;ul&gt;
+1332 &lt;li&gt;&lt;p&gt;Go to &lt;a href=&quot;https://www.debian.org/distrib/packages&quot;&gt;Debian
+1333 Package Search&lt;/a&gt;, search for the following packages for your
+1334 &lt;em&gt;target&lt;/em&gt; system, and download them to /tmp/target-x11:&lt;/p&gt;
+1335 &lt;ul&gt;
+1336 &lt;li&gt;libxi&lt;/li&gt;
+1337 &lt;li&gt;libxi-dev&lt;/li&gt;
+1338 &lt;li&gt;x11proto-core-dev&lt;/li&gt;
+1339 &lt;li&gt;x11proto-input-dev&lt;/li&gt;
+1340 &lt;li&gt;x11proto-kb-dev&lt;/li&gt;
+1341 &lt;li&gt;x11proto-render-dev&lt;/li&gt;
+1342 &lt;li&gt;x11proto-xext-dev&lt;/li&gt;
+1343 &lt;li&gt;libice-dev&lt;/li&gt;
+1344 &lt;li&gt;libxrender&lt;/li&gt;
+1345 &lt;li&gt;libxrender-dev&lt;/li&gt;
+1346 &lt;li&gt;libxrandr-dev&lt;/li&gt;
+1347 &lt;li&gt;libsm-dev&lt;/li&gt;
+1348 &lt;li&gt;libxt-dev&lt;/li&gt;
+1349 &lt;li&gt;libx11&lt;/li&gt;
+1350 &lt;li&gt;libx11-dev&lt;/li&gt;
+1351 &lt;li&gt;libxtst&lt;/li&gt;
+1352 &lt;li&gt;libxtst-dev&lt;/li&gt;
+1353 &lt;li&gt;libxext&lt;/li&gt;
+1354 &lt;li&gt;libxext-dev&lt;/li&gt;
+1355 &lt;/ul&gt;&lt;/li&gt;
+1356 &lt;li&gt;&lt;p&gt;Install the libraries into the cross-compilation toolchain. For
+1357 instance:&lt;/p&gt;
+1358 &lt;pre&gt;&lt;code&gt;    cd /tools/gcc-linaro-arm-linux-gnueabihf-raspbian-2012.09-20120921_linux/arm-linux-gnueabihf/libc/usr
+1359     mkdir X11R6
+1360     cd X11R6
+1361     for deb in /tmp/target-x11/*.deb ; do dpkg-deb -x $deb . ; done
+1362     mv usr/* .
+1363     cd lib
+1364     cp arm-linux-gnueabihf/* .
+1365     ```
+1366 
+1367 You can ignore the following messages. These libraries are not needed to
+1368 successfully complete a full JDK build.&lt;/code&gt;&lt;/pre&gt;
+1369 &lt;p&gt;cp: cannot stat
+1370 &lt;code&gt;arm-linux-gnueabihf/libICE.so&#39;: No such file or directory cp: cannot stat&lt;/code&gt;arm-linux-gnueabihf/libSM.so&#39;:
+1371 No such file or directory cp: cannot stat
+1372 `arm-linux-gnueabihf/libXt.so&#39;: No such file or directory ```&lt;/p&gt;&lt;/li&gt;
+1373 &lt;li&gt;&lt;p&gt;If the X11 libraries are not properly detected by
+1374 &lt;code&gt;configure&lt;/code&gt;, you can point them out by
+1375 &lt;code&gt;--with-x&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+1376 &lt;/ul&gt;
+1377 &lt;h3 id=&quot;cross-compiling-with-debian-sysroots&quot;&gt;Cross compiling with
+1378 Debian sysroots&lt;/h3&gt;
+1379 &lt;p&gt;Fortunately, you can create sysroots for foreign architectures with
+1380 tools provided by your OS. On Debian/Ubuntu systems, one could use
+1381 &lt;code&gt;qemu-deboostrap&lt;/code&gt; to create the &lt;em&gt;target&lt;/em&gt; system
+1382 chroot, which would have the native libraries and headers specific to
+1383 that &lt;em&gt;target&lt;/em&gt; system. After that, we can use the cross-compiler
+1384 on the &lt;em&gt;build&lt;/em&gt; system, pointing into chroot to get the build
+1385 dependencies right. This allows building for foreign architectures with
+1386 native compilation speed.&lt;/p&gt;
+1387 &lt;p&gt;For example, cross-compiling to AArch64 from x86_64 could be done
+1388 like this:&lt;/p&gt;
+1389 &lt;ul&gt;
+1390 &lt;li&gt;&lt;p&gt;Install cross-compiler on the &lt;em&gt;build&lt;/em&gt; system:
+1391 &lt;code&gt;apt install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1392 &lt;li&gt;&lt;p&gt;Create chroot on the &lt;em&gt;build&lt;/em&gt; system, configuring it for
+1393 &lt;em&gt;target&lt;/em&gt; system:
+1394 &lt;code&gt;sudo qemu-debootstrap \       --arch=arm64 \       --verbose \       --include=fakeroot,symlinks,build-essential,libx11-dev,libxext-dev,libxrender-dev,libxrandr-dev,libxtst-dev,libxt-dev,libcups2-dev,libfontconfig1-dev,libasound2-dev,libfreetype6-dev,libpng-dev,libffi-dev \       --resolve-deps \       buster \       ~/sysroot-arm64 \       http://httpredir.debian.org/debian/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1395 &lt;li&gt;&lt;p&gt;Make sure the symlinks inside the newly created chroot point to
+1396 proper locations:
+1397 &lt;code&gt;sudo chroot ~/sysroot-arm64 symlinks -cr .&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1398 &lt;li&gt;&lt;p&gt;Configure and build with newly created chroot as
+1399 sysroot/toolchain-path:
+1400 &lt;code&gt;sh ./configure \       --openjdk-target=aarch64-linux-gnu \       --with-sysroot=~/sysroot-arm64     make images     ls build/linux-aarch64-server-release/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1401 &lt;/ul&gt;
+1402 &lt;p&gt;The build does not create new files in that chroot, so it can be
+1403 reused for multiple builds without additional cleanup.&lt;/p&gt;
+1404 &lt;p&gt;The build system should automatically detect the toolchain paths and
+1405 dependencies, but sometimes it might require a little nudge with:&lt;/p&gt;
+1406 &lt;ul&gt;
+1407 &lt;li&gt;&lt;p&gt;Native compilers: override &lt;code&gt;CC&lt;/code&gt; or &lt;code&gt;CXX&lt;/code&gt;
+1408 for &lt;code&gt;./configure&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1409 &lt;li&gt;&lt;p&gt;Freetype lib location: override &lt;code&gt;--with-freetype-lib&lt;/code&gt;,
+1410 for example &lt;code&gt;${sysroot}/usr/lib/${target}/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1411 &lt;li&gt;&lt;p&gt;Freetype includes location: override
+1412 &lt;code&gt;--with-freetype-include&lt;/code&gt; for example
+1413 &lt;code&gt;${sysroot}/usr/include/freetype2/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1414 &lt;li&gt;&lt;p&gt;X11 libraries location: override &lt;code&gt;--x-libraries&lt;/code&gt;, for
+1415 example &lt;code&gt;${sysroot}/usr/lib/${target}/&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1416 &lt;/ul&gt;
+1417 &lt;p&gt;Architectures that are known to successfully cross-compile like this
+1418 are:&lt;/p&gt;
+1419 &lt;table&gt;
+1420 &lt;thead&gt;
+1421 &lt;tr class=&quot;header&quot;&gt;
+1422 &lt;th style=&quot;text-align: left;&quot;&gt;Target&lt;/th&gt;
+1423 &lt;th style=&quot;text-align: left;&quot;&gt;Debian tree&lt;/th&gt;
+1424 &lt;th style=&quot;text-align: left;&quot;&gt;Debian arch&lt;/th&gt;
+1425 &lt;th style=&quot;text-align: left;&quot;&gt;&lt;code&gt;--openjdk-target=...&lt;/code&gt;&lt;/th&gt;
+1426 &lt;th&gt;&lt;code&gt;--with-jvm-variants=...&lt;/code&gt;&lt;/th&gt;
+1427 &lt;/tr&gt;
+1428 &lt;/thead&gt;
+1429 &lt;tbody&gt;
+1430 &lt;tr class=&quot;odd&quot;&gt;
+1431 &lt;td style=&quot;text-align: left;&quot;&gt;x86&lt;/td&gt;
+1432 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1433 &lt;td style=&quot;text-align: left;&quot;&gt;i386&lt;/td&gt;
+1434 &lt;td style=&quot;text-align: left;&quot;&gt;i386-linux-gnu&lt;/td&gt;
+1435 &lt;td&gt;(all)&lt;/td&gt;
+1436 &lt;/tr&gt;
+1437 &lt;tr class=&quot;even&quot;&gt;
+1438 &lt;td style=&quot;text-align: left;&quot;&gt;arm&lt;/td&gt;
+1439 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1440 &lt;td style=&quot;text-align: left;&quot;&gt;armhf&lt;/td&gt;
+1441 &lt;td style=&quot;text-align: left;&quot;&gt;arm-linux-gnueabihf&lt;/td&gt;
+1442 &lt;td&gt;(all)&lt;/td&gt;
+1443 &lt;/tr&gt;
+1444 &lt;tr class=&quot;odd&quot;&gt;
+1445 &lt;td style=&quot;text-align: left;&quot;&gt;aarch64&lt;/td&gt;
+1446 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1447 &lt;td style=&quot;text-align: left;&quot;&gt;arm64&lt;/td&gt;
+1448 &lt;td style=&quot;text-align: left;&quot;&gt;aarch64-linux-gnu&lt;/td&gt;
+1449 &lt;td&gt;(all)&lt;/td&gt;
+1450 &lt;/tr&gt;
+1451 &lt;tr class=&quot;even&quot;&gt;
+1452 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64le&lt;/td&gt;
+1453 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1454 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64el&lt;/td&gt;
+1455 &lt;td style=&quot;text-align: left;&quot;&gt;powerpc64le-linux-gnu&lt;/td&gt;
+1456 &lt;td&gt;(all)&lt;/td&gt;
+1457 &lt;/tr&gt;
+1458 &lt;tr class=&quot;odd&quot;&gt;
+1459 &lt;td style=&quot;text-align: left;&quot;&gt;s390x&lt;/td&gt;
+1460 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1461 &lt;td style=&quot;text-align: left;&quot;&gt;s390x&lt;/td&gt;
+1462 &lt;td style=&quot;text-align: left;&quot;&gt;s390x-linux-gnu&lt;/td&gt;
+1463 &lt;td&gt;(all)&lt;/td&gt;
+1464 &lt;/tr&gt;
+1465 &lt;tr class=&quot;even&quot;&gt;
+1466 &lt;td style=&quot;text-align: left;&quot;&gt;mipsle&lt;/td&gt;
+1467 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1468 &lt;td style=&quot;text-align: left;&quot;&gt;mipsel&lt;/td&gt;
+1469 &lt;td style=&quot;text-align: left;&quot;&gt;mipsel-linux-gnu&lt;/td&gt;
+1470 &lt;td&gt;zero&lt;/td&gt;
+1471 &lt;/tr&gt;
+1472 &lt;tr class=&quot;odd&quot;&gt;
+1473 &lt;td style=&quot;text-align: left;&quot;&gt;mips64le&lt;/td&gt;
+1474 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1475 &lt;td style=&quot;text-align: left;&quot;&gt;mips64el&lt;/td&gt;
+1476 &lt;td style=&quot;text-align: left;&quot;&gt;mips64el-linux-gnueabi64&lt;/td&gt;
+1477 &lt;td&gt;zero&lt;/td&gt;
+1478 &lt;/tr&gt;
+1479 &lt;tr class=&quot;even&quot;&gt;
+1480 &lt;td style=&quot;text-align: left;&quot;&gt;armel&lt;/td&gt;
+1481 &lt;td style=&quot;text-align: left;&quot;&gt;buster&lt;/td&gt;
+1482 &lt;td style=&quot;text-align: left;&quot;&gt;arm&lt;/td&gt;
+1483 &lt;td style=&quot;text-align: left;&quot;&gt;arm-linux-gnueabi&lt;/td&gt;
+1484 &lt;td&gt;zero&lt;/td&gt;
+1485 &lt;/tr&gt;
+1486 &lt;tr class=&quot;odd&quot;&gt;
+1487 &lt;td style=&quot;text-align: left;&quot;&gt;ppc&lt;/td&gt;
+1488 &lt;td style=&quot;text-align: left;&quot;&gt;sid&lt;/td&gt;
+1489 &lt;td style=&quot;text-align: left;&quot;&gt;powerpc&lt;/td&gt;
+1490 &lt;td style=&quot;text-align: left;&quot;&gt;powerpc-linux-gnu&lt;/td&gt;
+1491 &lt;td&gt;zero&lt;/td&gt;
+1492 &lt;/tr&gt;
+1493 &lt;tr class=&quot;even&quot;&gt;
+1494 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64be&lt;/td&gt;
+1495 &lt;td style=&quot;text-align: left;&quot;&gt;sid&lt;/td&gt;
+1496 &lt;td style=&quot;text-align: left;&quot;&gt;ppc64&lt;/td&gt;
+1497 &lt;td style=&quot;text-align: left;&quot;&gt;powerpc64-linux-gnu&lt;/td&gt;
+1498 &lt;td&gt;(all)&lt;/td&gt;
+1499 &lt;/tr&gt;
+1500 &lt;tr class=&quot;odd&quot;&gt;
+1501 &lt;td style=&quot;text-align: left;&quot;&gt;m68k&lt;/td&gt;
+1502 &lt;td style=&quot;text-align: left;&quot;&gt;sid&lt;/td&gt;
+1503 &lt;td style=&quot;text-align: left;&quot;&gt;m68k&lt;/td&gt;
+1504 &lt;td style=&quot;text-align: left;&quot;&gt;m68k-linux-gnu&lt;/td&gt;
+1505 &lt;td&gt;zero&lt;/td&gt;
+1506 &lt;/tr&gt;
+1507 &lt;tr class=&quot;even&quot;&gt;
+1508 &lt;td style=&quot;text-align: left;&quot;&gt;alpha&lt;/td&gt;
+1509 &lt;td style=&quot;text-align: left;&quot;&gt;sid&lt;/td&gt;
+1510 &lt;td style=&quot;text-align: left;&quot;&gt;alpha&lt;/td&gt;
+1511 &lt;td style=&quot;text-align: left;&quot;&gt;alpha-linux-gnu&lt;/td&gt;
+1512 &lt;td&gt;zero&lt;/td&gt;
+1513 &lt;/tr&gt;
+1514 &lt;tr class=&quot;odd&quot;&gt;
+1515 &lt;td style=&quot;text-align: left;&quot;&gt;sh4&lt;/td&gt;
+1516 &lt;td style=&quot;text-align: left;&quot;&gt;sid&lt;/td&gt;
+1517 &lt;td style=&quot;text-align: left;&quot;&gt;sh4&lt;/td&gt;
+1518 &lt;td style=&quot;text-align: left;&quot;&gt;sh4-linux-gnu&lt;/td&gt;
+1519 &lt;td&gt;zero&lt;/td&gt;
+1520 &lt;/tr&gt;
+1521 &lt;/tbody&gt;
+1522 &lt;/table&gt;
+1523 &lt;h3 id=&quot;building-for-armaarch64&quot;&gt;Building for ARM/aarch64&lt;/h3&gt;
+1524 &lt;p&gt;A common cross-compilation target is the ARM CPU. When building for
+1525 ARM, it is useful to set the ABI profile. A number of pre-defined ABI
+1526 profiles are available using &lt;code&gt;--with-abi-profile&lt;/code&gt;:
+1527 arm-vfp-sflt, arm-vfp-hflt, arm-sflt, armv5-vfp-sflt, armv6-vfp-hflt.
+1528 Note that soft-float ABIs are no longer properly supported by the
+1529 JDK.&lt;/p&gt;
+1530 &lt;h3 id=&quot;building-for-musl&quot;&gt;Building for musl&lt;/h3&gt;
+1531 &lt;p&gt;Just like it&#39;s possible to cross-compile for a different CPU, it&#39;s
+1532 possible to cross-compile for musl libc on a glibc-based &lt;em&gt;build&lt;/em&gt;
+1533 system. A devkit suitable for most target CPU architectures can be
+1534 obtained from &lt;a href=&quot;https://musl.cc&quot;&gt;musl.cc&lt;/a&gt;. After installing
+1535 the required packages in the sysroot, configure the build with
+1536 &lt;code&gt;--openjdk-target&lt;/code&gt;:&lt;/p&gt;
+1537 &lt;pre&gt;&lt;code&gt;sh ./configure --with-jvm-variants=server \
+1538 --with-boot-jdk=$BOOT_JDK \
+1539 --with-build-jdk=$BUILD_JDK \
+1540 --openjdk-target=x86_64-unknown-linux-musl \
+1541 --with-devkit=$DEVKIT \
+1542 --with-sysroot=$SYSROOT&lt;/code&gt;&lt;/pre&gt;
+1543 &lt;p&gt;and run &lt;code&gt;make&lt;/code&gt; normally.&lt;/p&gt;
+1544 &lt;h3 id=&quot;verifying-the-build&quot;&gt;Verifying the Build&lt;/h3&gt;
+1545 &lt;p&gt;The build will end up in a directory named like
+1546 &lt;code&gt;build/linux-arm-normal-server-release&lt;/code&gt;.&lt;/p&gt;
+1547 &lt;p&gt;Inside this build output directory, the &lt;code&gt;images/jdk&lt;/code&gt; will
+1548 contain the newly built JDK, for your &lt;em&gt;target&lt;/em&gt; system.&lt;/p&gt;
+1549 &lt;p&gt;Copy these folders to your &lt;em&gt;target&lt;/em&gt; system. Then you can run
+1550 e.g. &lt;code&gt;images/jdk/bin/java -version&lt;/code&gt;.&lt;/p&gt;
+1551 &lt;h2 id=&quot;build-performance&quot;&gt;Build Performance&lt;/h2&gt;
+1552 &lt;p&gt;Building the JDK requires a lot of horsepower. Some of the build
+1553 tools can be adjusted to utilize more or less of resources such as
+1554 parallel threads and memory. The &lt;code&gt;configure&lt;/code&gt; script analyzes
+1555 your system and selects reasonable values for such options based on your
+1556 hardware. If you encounter resource problems, such as out of memory
+1557 conditions, you can modify the detected values with:&lt;/p&gt;
+1558 &lt;ul&gt;
+1559 &lt;li&gt;&lt;p&gt;&lt;code&gt;--with-num-cores&lt;/code&gt; -- number of cores in the build
+1560 system, e.g. &lt;code&gt;--with-num-cores=8&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+1561 &lt;li&gt;&lt;p&gt;&lt;code&gt;--with-memory-size&lt;/code&gt; -- memory (in MB) available in
+1562 the build system, e.g. &lt;code&gt;--with-memory-size=1024&lt;/code&gt;&lt;/p&gt;&lt;/li&gt;
+1563 &lt;/ul&gt;
+1564 &lt;p&gt;You can also specify directly the number of build jobs to use with
+1565 &lt;code&gt;--with-jobs=N&lt;/code&gt; to &lt;code&gt;configure&lt;/code&gt;, or
+1566 &lt;code&gt;JOBS=N&lt;/code&gt; to &lt;code&gt;make&lt;/code&gt;. Do not use the &lt;code&gt;-j&lt;/code&gt;
+1567 flag to &lt;code&gt;make&lt;/code&gt;. In most cases it will be ignored by the
+1568 makefiles, but it can cause problems for some make targets.&lt;/p&gt;
+1569 &lt;p&gt;It might also be necessary to specify the JVM arguments passed to the
+1570 Boot JDK, using e.g. &lt;code&gt;--with-boot-jdk-jvmargs=&quot;-Xmx8G&quot;&lt;/code&gt;.
+1571 Doing so will override the default JVM arguments passed to the Boot
+1572 JDK.&lt;/p&gt;
+1573 &lt;p&gt;At the end of a successful execution of &lt;code&gt;configure&lt;/code&gt;, you
+1574 will get a performance summary, indicating how well the build will
+1575 perform. Here you will also get performance hints. If you want to build
+1576 fast, pay attention to those!&lt;/p&gt;
+1577 &lt;p&gt;If you want to tweak build performance, run with
+1578 &lt;code&gt;make LOG=info&lt;/code&gt; to get a build time summary at the end of the
+1579 build process.&lt;/p&gt;
+1580 &lt;h3 id=&quot;disk-speed&quot;&gt;Disk Speed&lt;/h3&gt;
+1581 &lt;p&gt;If you are using network shares, e.g. via NFS, for your source code,
+1582 make sure the build directory is situated on local disk (e.g. by
+1583 &lt;code&gt;ln -s /localdisk/jdk-build $JDK-SHARE/build&lt;/code&gt;). The
+1584 performance penalty is extremely high for building on a network share;
+1585 close to unusable.&lt;/p&gt;
+1586 &lt;p&gt;Also, make sure that your build tools (including Boot JDK and
+1587 toolchain) is located on a local disk and not a network share.&lt;/p&gt;
+1588 &lt;p&gt;As has been stressed elsewhere, do use SSD for source code and build
+1589 directory, as well as (if possible) the build tools.&lt;/p&gt;
+1590 &lt;h3 id=&quot;virus-checking&quot;&gt;Virus Checking&lt;/h3&gt;
+1591 &lt;p&gt;The use of virus checking software, especially on Windows, can
+1592 &lt;em&gt;significantly&lt;/em&gt; slow down building of the JDK. If possible, turn
+1593 off such software, or exclude the directory containing the JDK source
+1594 code from on-the-fly checking.&lt;/p&gt;
+1595 &lt;h3 id=&quot;ccache&quot;&gt;Ccache&lt;/h3&gt;
+1596 &lt;p&gt;The JDK build supports building with ccache when using gcc or clang.
+1597 Using ccache can radically speed up compilation of native code if you
+1598 often rebuild the same sources. Your milage may vary however, so we
+1599 recommend evaluating it for yourself. To enable it, make sure it&#39;s on
+1600 the path and configure with &lt;code&gt;--enable-ccache&lt;/code&gt;.&lt;/p&gt;
+1601 &lt;h3 id=&quot;precompiled-headers&quot;&gt;Precompiled Headers&lt;/h3&gt;
+1602 &lt;p&gt;By default, the Hotspot build uses preccompiled headers (PCH) on the
+1603 toolchains were it is properly supported (clang, gcc, and Visual
+1604 Studio). Normally, this speeds up the build process, but in some
+1605 circumstances, it can actually slow things down.&lt;/p&gt;
+1606 &lt;p&gt;You can experiment by disabling precompiled headers using
+1607 &lt;code&gt;--disable-precompiled-headers&lt;/code&gt;.&lt;/p&gt;
+1608 &lt;h3 id=&quot;icecc-icecream&quot;&gt;Icecc / icecream&lt;/h3&gt;
+1609 &lt;p&gt;&lt;a href=&quot;http://github.com/icecc/icecream&quot;&gt;icecc/icecream&lt;/a&gt; is a
+1610 simple way to setup a distributed compiler network. If you have multiple
+1611 machines available for building the JDK, you can drastically cut
+1612 individual build times by utilizing it.&lt;/p&gt;
+1613 &lt;p&gt;To use, setup an icecc network, and install icecc on the build
+1614 machine. Then run &lt;code&gt;configure&lt;/code&gt; using
+1615 &lt;code&gt;--enable-icecc&lt;/code&gt;.&lt;/p&gt;
+1616 &lt;h3 id=&quot;using-the-javac-server&quot;&gt;Using the javac server&lt;/h3&gt;
+1617 &lt;p&gt;To speed up compilation of Java code, especially during incremental
+1618 compilations, the javac server is automatically enabled in the
+1619 configuration step by default. To explicitly enable or disable the javac
+1620 server, use either &lt;code&gt;--enable-javac-server&lt;/code&gt; or
+1621 &lt;code&gt;--disable-javac-server&lt;/code&gt;.&lt;/p&gt;
+1622 &lt;h3 id=&quot;building-the-right-target&quot;&gt;Building the Right Target&lt;/h3&gt;
+1623 &lt;p&gt;Selecting the proper target to build can have dramatic impact on
+1624 build time. For normal usage, &lt;code&gt;jdk&lt;/code&gt; or the default target is
+1625 just fine. You only need to build &lt;code&gt;images&lt;/code&gt; for shipping, or
+1626 if your tests require it.&lt;/p&gt;
+1627 &lt;p&gt;See also &lt;a href=&quot;#using-fine-grained-make-targets&quot;&gt;Using
+1628 Fine-Grained Make Targets&lt;/a&gt; on how to build an even smaller subset of
+1629 the product.&lt;/p&gt;
+1630 &lt;h2 id=&quot;troubleshooting&quot;&gt;Troubleshooting&lt;/h2&gt;
+1631 &lt;p&gt;If your build fails, it can sometimes be difficult to pinpoint the
+1632 problem or find a proper solution.&lt;/p&gt;
+1633 &lt;h3 id=&quot;locating-the-source-of-the-error&quot;&gt;Locating the Source of the
+1634 Error&lt;/h3&gt;
+1635 &lt;p&gt;When a build fails, it can be hard to pinpoint the actual cause of
+1636 the error. In a typical build process, different parts of the product
+1637 build in parallel, with the output interlaced.&lt;/p&gt;
+1638 &lt;h4 id=&quot;build-failure-summary&quot;&gt;Build Failure Summary&lt;/h4&gt;
+1639 &lt;p&gt;To help you, the build system will print a failure summary at the
+1640 end. It looks like this:&lt;/p&gt;
+1641 &lt;pre&gt;&lt;code&gt;ERROR: Build failed for target &amp;#39;hotspot&amp;#39; in configuration &amp;#39;linux-x64&amp;#39; (exit code 2)
+1642 
+1643 === Output from failing command(s) repeated here ===
+1644 * For target hotspot_variant-server_libjvm_objs_psMemoryPool.o:
+1645 /localhome/git/jdk-sandbox/hotspot/src/share/vm/services/psMemoryPool.cpp:1:1: error: &amp;#39;failhere&amp;#39; does not name a type
+1646    ... (rest of output omitted)
+1647 
+1648 * All command lines available in /localhome/git/jdk-sandbox/build/linux-x64/make-support/failure-logs.
+1649 === End of repeated output ===
+1650 
+1651 === Make failed targets repeated here ===
+1652 lib/CompileJvm.gmk:207: recipe for target &amp;#39;/localhome/git/jdk-sandbox/build/linux-x64/hotspot/variant-server/libjvm/objs/psMemoryPool.o&amp;#39; failed
+1653 make/Main.gmk:263: recipe for target &amp;#39;hotspot-server-libs&amp;#39; failed
+1654 === End of repeated output ===
+1655 
+1656 Hint: Try searching the build log for the name of the first failed target.
+1657 Hint: If caused by a warning, try configure --disable-warnings-as-errors.&lt;/code&gt;&lt;/pre&gt;
+1658 &lt;p&gt;Let&#39;s break it down! First, the selected configuration, and the
+1659 top-level target you entered on the command line that caused the failure
+1660 is printed.&lt;/p&gt;
+1661 &lt;p&gt;Then, between the
+1662 &lt;code&gt;Output from failing command(s) repeated here&lt;/code&gt; and
+1663 &lt;code&gt;End of repeated output&lt;/code&gt; the first lines of output (stdout
+1664 and stderr) from the actual failing command is repeated. In most cases,
+1665 this is the error message that caused the build to fail. If multiple
+1666 commands were failing (this can happen in a parallel build), output from
+1667 all failed commands will be printed here.&lt;/p&gt;
+1668 &lt;p&gt;The path to the &lt;code&gt;failure-logs&lt;/code&gt; directory is printed. In
+1669 this file you will find a &lt;code&gt;&amp;lt;target&amp;gt;.log&lt;/code&gt; file that
+1670 contains the output from this command in its entirety, and also a
+1671 &lt;code&gt;&amp;lt;target&amp;gt;.cmd&lt;/code&gt;, which contain the complete command line
+1672 used for running this command. You can re-run the failing command by
+1673 executing &lt;code&gt;. &amp;lt;path to failure-logs&amp;gt;/&amp;lt;target&amp;gt;.cmd&lt;/code&gt;
+1674 in your shell.&lt;/p&gt;
+1675 &lt;p&gt;Another way to trace the failure is to follow the chain of make
+1676 targets, from top-level targets to individual file targets. Between
+1677 &lt;code&gt;Make failed targets repeated here&lt;/code&gt; and
+1678 &lt;code&gt;End of repeated output&lt;/code&gt; the output from make showing this
+1679 chain is repeated. The first failed recipe will typically contain the
+1680 full path to the file in question that failed to compile. Following
+1681 lines will show a trace of make targets why we ended up trying to
+1682 compile that file.&lt;/p&gt;
+1683 &lt;p&gt;Finally, some hints are given on how to locate the error in the
+1684 complete log. In this example, we would try searching the log file for
+1685 &quot;&lt;code&gt;psMemoryPool.o&lt;/code&gt;&quot;. Another way to quickly locate make errors
+1686 in the log is to search for &quot;&lt;code&gt;] Error&lt;/code&gt;&quot; or
+1687 &quot;&lt;code&gt;***&lt;/code&gt;&quot;.&lt;/p&gt;
+1688 &lt;p&gt;Note that the build failure summary will only help you if the issue
+1689 was a compilation failure or similar. If the problem is more esoteric,
+1690 or is due to errors in the build machinery, you will likely get empty
+1691 output logs, and &lt;code&gt;No indication of failed target found&lt;/code&gt;
+1692 instead of the make target chain.&lt;/p&gt;
+1693 &lt;h4 id=&quot;checking-the-build-log-file&quot;&gt;Checking the Build Log File&lt;/h4&gt;
+1694 &lt;p&gt;The output (stdout and stderr) from the latest build is always stored
+1695 in &lt;code&gt;$BUILD/build.log&lt;/code&gt;. The previous build log is stored as
+1696 &lt;code&gt;build.log.old&lt;/code&gt;. This means that it is not necessary to
+1697 redirect the build output yourself if you want to process it.&lt;/p&gt;
+1698 &lt;p&gt;You can increase the verbosity of the log file, by the
+1699 &lt;code&gt;LOG&lt;/code&gt; control variable to &lt;code&gt;make&lt;/code&gt;. If you want to
+1700 see the command lines used in compilations, use
+1701 &lt;code&gt;LOG=cmdlines&lt;/code&gt;. To increase the general verbosity, use
+1702 &lt;code&gt;LOG=info&lt;/code&gt;, &lt;code&gt;LOG=debug&lt;/code&gt; or &lt;code&gt;LOG=trace&lt;/code&gt;.
+1703 Both of these can be combined with &lt;code&gt;cmdlines&lt;/code&gt;, e.g.
+1704 &lt;code&gt;LOG=info,cmdlines&lt;/code&gt;. The &lt;code&gt;debug&lt;/code&gt; log level will
+1705 show most shell commands executed by make, and &lt;code&gt;trace&lt;/code&gt; will
+1706 show all. Beware that both these log levels will produce a massive build
+1707 log!&lt;/p&gt;
+1708 &lt;h3 id=&quot;fixing-unexpected-build-failures&quot;&gt;Fixing Unexpected Build
+1709 Failures&lt;/h3&gt;
+1710 &lt;p&gt;Most of the time, the build will fail due to incorrect changes in the
+1711 source code.&lt;/p&gt;
+1712 &lt;p&gt;Sometimes the build can fail with no apparent changes that have
+1713 caused the failure. If this is the first time you are building the JDK
+1714 on this particular computer, and the build fails, the problem is likely
+1715 with your build environment. But even if you have previously built the
+1716 JDK with success, and it now fails, your build environment might have
+1717 changed (perhaps due to OS upgrades or similar). But most likely, such
+1718 failures are due to problems with the incremental rebuild.&lt;/p&gt;
+1719 &lt;h4 id=&quot;problems-with-the-build-environment&quot;&gt;Problems with the Build
+1720 Environment&lt;/h4&gt;
+1721 &lt;p&gt;Make sure your configuration is correct. Re-run
+1722 &lt;code&gt;configure&lt;/code&gt;, and look for any warnings. Warnings that appear
+1723 in the middle of the &lt;code&gt;configure&lt;/code&gt; output is also repeated at
+1724 the end, after the summary. The entire log is stored in
+1725 &lt;code&gt;$BUILD/configure.log&lt;/code&gt;.&lt;/p&gt;
+1726 &lt;p&gt;Verify that the summary at the end looks correct. Are you indeed
+1727 using the Boot JDK and native toolchain that you expect?&lt;/p&gt;
+1728 &lt;p&gt;By default, the JDK has a strict approach where warnings from the
+1729 compiler is considered errors which fail the build. For very new or very
+1730 old compiler versions, this can trigger new classes of warnings, which
+1731 thus fails the build. Run &lt;code&gt;configure&lt;/code&gt; with
+1732 &lt;code&gt;--disable-warnings-as-errors&lt;/code&gt; to turn of this behavior. (The
+1733 warnings will still show, but not make the build fail.)&lt;/p&gt;
+1734 &lt;h4 id=&quot;problems-with-incremental-rebuilds&quot;&gt;Problems with Incremental
+1735 Rebuilds&lt;/h4&gt;
+1736 &lt;p&gt;Incremental rebuilds mean that when you modify part of the product,
+1737 only the affected parts get rebuilt. While this works great in most
+1738 cases, and significantly speed up the development process, from time to
+1739 time complex interdependencies will result in an incorrect build result.
+1740 This is the most common cause for unexpected build problems.&lt;/p&gt;
+1741 &lt;p&gt;Here are a suggested list of things to try if you are having
+1742 unexpected build problems. Each step requires more time than the one
+1743 before, so try them in order. Most issues will be solved at step 1 or
+1744 2.&lt;/p&gt;
+1745 &lt;ol type=&quot;1&quot;&gt;
+1746 &lt;li&gt;&lt;p&gt;Make sure your repository is up-to-date&lt;/p&gt;
+1747 &lt;p&gt;Run &lt;code&gt;git pull origin master&lt;/code&gt; to make sure you have the
+1748 latest changes.&lt;/p&gt;&lt;/li&gt;
+1749 &lt;li&gt;&lt;p&gt;Clean build results&lt;/p&gt;
+1750 &lt;p&gt;The simplest way to fix incremental rebuild issues is to run
+1751 &lt;code&gt;make clean&lt;/code&gt;. This will remove all build results, but not the
+1752 configuration or any build system support artifacts. In most cases, this
+1753 will solve build errors resulting from incremental build
+1754 mismatches.&lt;/p&gt;&lt;/li&gt;
+1755 &lt;li&gt;&lt;p&gt;Completely clean the build directory.&lt;/p&gt;
+1756 &lt;p&gt;If this does not work, the next step is to run
+1757 &lt;code&gt;make dist-clean&lt;/code&gt;, or removing the build output directory
+1758 (&lt;code&gt;$BUILD&lt;/code&gt;). This will clean all generated output, including
+1759 your configuration. You will need to re-run &lt;code&gt;configure&lt;/code&gt; after
+1760 this step. A good idea is to run &lt;code&gt;make print-configuration&lt;/code&gt;
+1761 before running &lt;code&gt;make dist-clean&lt;/code&gt;, as this will print your
+1762 current &lt;code&gt;configure&lt;/code&gt; command line. Here&#39;s a way to do
+1763 this:&lt;/p&gt;
+1764 &lt;pre&gt;&lt;code&gt;make print-configuration &amp;gt; current-configuration
+1765 make dist-clean
+1766 bash configure $(cat current-configuration)
+1767 make&lt;/code&gt;&lt;/pre&gt;&lt;/li&gt;
+1768 &lt;li&gt;&lt;p&gt;Re-clone the Git repository&lt;/p&gt;
+1769 &lt;p&gt;Sometimes the Git repository gets in a state that causes the product
+1770 to be un-buildable. In such a case, the simplest solution is often the
+1771 &quot;sledgehammer approach&quot;: delete the entire repository, and re-clone it.
+1772 If you have local changes, save them first to a different location using
+1773 &lt;code&gt;git format-patch&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+1774 &lt;/ol&gt;
+1775 &lt;h3 id=&quot;specific-build-issues&quot;&gt;Specific Build Issues&lt;/h3&gt;
+1776 &lt;h4 id=&quot;clock-skew&quot;&gt;Clock Skew&lt;/h4&gt;
+1777 &lt;p&gt;If you get an error message like this:&lt;/p&gt;
+1778 &lt;pre&gt;&lt;code&gt;File &amp;#39;xxx&amp;#39; has modification time in the future.
+1779 Clock skew detected. Your build may be incomplete.&lt;/code&gt;&lt;/pre&gt;
+1780 &lt;p&gt;then the clock on your build machine is out of sync with the
+1781 timestamps on the source files. Other errors, apparently unrelated but
+1782 in fact caused by the clock skew, can occur along with the clock skew
+1783 warnings. These secondary errors may tend to obscure the fact that the
+1784 true root cause of the problem is an out-of-sync clock.&lt;/p&gt;
+1785 &lt;p&gt;If you see these warnings, reset the clock on the build machine, run
+1786 &lt;code&gt;make clean&lt;/code&gt; and restart the build.&lt;/p&gt;
+1787 &lt;h4 id=&quot;out-of-memory-errors&quot;&gt;Out of Memory Errors&lt;/h4&gt;
+1788 &lt;p&gt;On Windows, you might get error messages like this:&lt;/p&gt;
+1789 &lt;pre&gt;&lt;code&gt;fatal error - couldn&amp;#39;t allocate heap
+1790 cannot create ... Permission denied
+1791 spawn failed&lt;/code&gt;&lt;/pre&gt;
+1792 &lt;p&gt;This can be a sign of a Cygwin problem. See the information about
+1793 solving problems in the &lt;a href=&quot;#cygwin&quot;&gt;Cygwin&lt;/a&gt; section. Rebooting
+1794 the computer might help temporarily.&lt;/p&gt;
+1795 &lt;h4 id=&quot;spaces-in-path&quot;&gt;Spaces in Path&lt;/h4&gt;
+1796 &lt;p&gt;On Windows, when configuring, &lt;code&gt;fixpath.sh&lt;/code&gt; may report that
+1797 some directory names have spaces. Usually, it assumes those directories
+1798 have &lt;a
+1799 href=&quot;https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-8dot3name&quot;&gt;short
+1800 paths&lt;/a&gt;. You can run &lt;code&gt;fsutil file setshortname&lt;/code&gt; in
+1801 &lt;code&gt;cmd&lt;/code&gt; on certain directories, such as
+1802 &lt;code&gt;Microsoft Visual Studio&lt;/code&gt; or &lt;code&gt;Windows Kits&lt;/code&gt;, to
+1803 assign arbitrary short paths so &lt;code&gt;configure&lt;/code&gt; can access
+1804 them.&lt;/p&gt;
+1805 &lt;h3 id=&quot;getting-help&quot;&gt;Getting Help&lt;/h3&gt;
+1806 &lt;p&gt;If none of the suggestions in this document helps you, or if you find
+1807 what you believe is a bug in the build system, please contact the Build
+1808 Group by sending a mail to &lt;a
+1809 href=&quot;mailto:build-dev@openjdk.org&quot;&gt;build-dev@openjdk.org&lt;/a&gt;. Please
+1810 include the relevant parts of the configure and/or build log.&lt;/p&gt;
+1811 &lt;p&gt;If you need general help or advice about developing for the JDK, you
+1812 can also contact the Adoption Group. See the section on &lt;a
+1813 href=&quot;#contributing-to-openjdk&quot;&gt;Contributing to OpenJDK&lt;/a&gt; for more
+1814 information.&lt;/p&gt;
+1815 &lt;h2 id=&quot;reproducible-builds&quot;&gt;Reproducible Builds&lt;/h2&gt;
+1816 &lt;p&gt;Build reproducibility is the property of getting exactly the same
+1817 bits out when building, every time, independent on who builds the
+1818 product, or where. This is for many reasons a harder goal than it
+1819 initially appears, but it is an important goal, for security reasons and
+1820 others. Please see &lt;a
+1821 href=&quot;https://reproducible-builds.org&quot;&gt;Reproducible Builds&lt;/a&gt; for more
+1822 information about the background and reasons for reproducible
+1823 builds.&lt;/p&gt;
+1824 &lt;p&gt;Currently, it is not possible to build OpenJDK fully reproducibly,
+1825 but getting there is an ongoing effort.&lt;/p&gt;
+1826 &lt;p&gt;An absolute prerequisite for building reproducible is to speficy a
+1827 fixed build time, since time stamps are embedded in many file formats.
+1828 This is done by setting the &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; environment
+1829 variable, which is an &lt;a
+1830 href=&quot;https://reproducible-builds.org/docs/source-date-epoch/&quot;&gt;industry
+1831 standard&lt;/a&gt;, that many tools, such as gcc, recognize, and use in place
+1832 of the current time when generating output.&lt;/p&gt;
+1833 &lt;p&gt;To generate reproducible builds, you must set
+1834 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; before running &lt;code&gt;configure&lt;/code&gt;.
+1835 The value in &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; will be stored in the
+1836 configuration, and used by &lt;code&gt;make&lt;/code&gt;. Setting
+1837 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; before running &lt;code&gt;make&lt;/code&gt; will
+1838 have no effect on the build.&lt;/p&gt;
+1839 &lt;p&gt;You must also make sure your build does not rely on
+1840 &lt;code&gt;configure&lt;/code&gt;&#39;s default adhoc version strings. Default adhoc
+1841 version strings &lt;code&gt;OPT&lt;/code&gt; segment include user name and source
+1842 directory. You can either override just the &lt;code&gt;OPT&lt;/code&gt; segment
+1843 using &lt;code&gt;--with-version-opt=&amp;lt;any fixed string&amp;gt;&lt;/code&gt;, or you
+1844 can specify the entire version string using
+1845 &lt;code&gt;--with-version-string=&amp;lt;your version&amp;gt;&lt;/code&gt;.&lt;/p&gt;
+1846 &lt;p&gt;This is a typical example of how to build the JDK in a reproducible
+1847 way:&lt;/p&gt;
+1848 &lt;pre&gt;&lt;code&gt;export SOURCE_DATE_EPOCH=946684800
+1849 bash configure --with-version-opt=adhoc
+1850 make&lt;/code&gt;&lt;/pre&gt;
+1851 &lt;p&gt;Note that regardless if you specify a source date for
+1852 &lt;code&gt;configure&lt;/code&gt; or not, the JDK build system will set
+1853 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; for all build tools when building. If
+1854 &lt;code&gt;--with-source-date&lt;/code&gt; has the value &lt;code&gt;current&lt;/code&gt;
+1855 (which is the default unless &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; is found by
+1856 in the environment by &lt;code&gt;configure&lt;/code&gt;), the source date value
+1857 will be determined at configure time.&lt;/p&gt;
+1858 &lt;p&gt;There are several aspects of reproducible builds that can be
+1859 individually adjusted by &lt;code&gt;configure&lt;/code&gt; arguments. If any of
+1860 these are given, they will override the value derived from
+1861 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt;. These arguments are:&lt;/p&gt;
+1862 &lt;ul&gt;
+1863 &lt;li&gt;&lt;p&gt;&lt;code&gt;--with-source-date&lt;/code&gt;&lt;/p&gt;
+1864 &lt;p&gt;This option controls how the JDK build sets
+1865 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; when building. It can be set to a value
+1866 describing a date, either an epoch based timestamp as an integer, or a
+1867 valid ISO-8601 date.&lt;/p&gt;
+1868 &lt;p&gt;It can also be set to one of the special values &lt;code&gt;current&lt;/code&gt;,
+1869 &lt;code&gt;updated&lt;/code&gt; or &lt;code&gt;version&lt;/code&gt;. &lt;code&gt;current&lt;/code&gt; means
+1870 that the time of running &lt;code&gt;configure&lt;/code&gt; will be used.
+1871 &lt;code&gt;version&lt;/code&gt; will use the nominal release date for the current
+1872 JDK version. &lt;code&gt;updated&lt;/code&gt;, which means that
+1873 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; will be set to the current time each time
+1874 you are running &lt;code&gt;make&lt;/code&gt;. All choices, except for
+1875 &lt;code&gt;updated&lt;/code&gt;, will set a fixed value for the source date
+1876 timestamp.&lt;/p&gt;
+1877 &lt;p&gt;When &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt; is set, the default value for
+1878 &lt;code&gt;--with-source-date&lt;/code&gt; will be the value given by
+1879 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt;. Otherwise, the default value is
+1880 &lt;code&gt;current&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+1881 &lt;li&gt;&lt;p&gt;&lt;code&gt;--with-hotspot-build-time&lt;/code&gt;&lt;/p&gt;
+1882 &lt;p&gt;This option controls the build time string that will be included in
+1883 the hotspot library (&lt;code&gt;libjvm.so&lt;/code&gt; or &lt;code&gt;jvm.dll&lt;/code&gt;).
+1884 When the source date is fixed (e.g. by setting
+1885 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt;), the default value for
+1886 &lt;code&gt;--with-hotspot-build-time&lt;/code&gt; will be an ISO 8601
+1887 representation of that time stamp. Otherwise the default value will be
+1888 the current time when building hotspot.&lt;/p&gt;&lt;/li&gt;
+1889 &lt;li&gt;&lt;p&gt;&lt;code&gt;--with-copyright-year&lt;/code&gt;&lt;/p&gt;
+1890 &lt;p&gt;This option controls the copyright year in some generated text files.
+1891 When the source date is fixed (e.g. by setting
+1892 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt;), the default value for
+1893 &lt;code&gt;--with-copyright-year&lt;/code&gt; will be the year of that time stamp.
+1894 Otherwise the default is the current year at the time of running
+1895 configure. This can be overridden by
+1896 &lt;code&gt;--with-copyright-year=&amp;lt;year&amp;gt;&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+1897 &lt;li&gt;&lt;p&gt;&lt;code&gt;--enable-reproducible-build&lt;/code&gt;&lt;/p&gt;
+1898 &lt;p&gt;This option controls some additional behavior needed to make the
+1899 build reproducible. When the source date is fixed (e.g. by setting
+1900 &lt;code&gt;SOURCE_DATE_EPOCH&lt;/code&gt;), this flag will be turned on by default.
+1901 Otherwise, the value is determined by heuristics. If it is explicitly
+1902 turned off, the build might not be reproducible.&lt;/p&gt;&lt;/li&gt;
+1903 &lt;/ul&gt;
+1904 &lt;h2 id=&quot;hints-and-suggestions-for-advanced-users&quot;&gt;Hints and Suggestions
+1905 for Advanced Users&lt;/h2&gt;
+1906 &lt;h3 id=&quot;bash-completion&quot;&gt;Bash Completion&lt;/h3&gt;
+1907 &lt;p&gt;The &lt;code&gt;configure&lt;/code&gt; and &lt;code&gt;make&lt;/code&gt; commands tries to
+1908 play nice with bash command-line completion (using
+1909 &lt;code&gt;&amp;lt;tab&amp;gt;&lt;/code&gt; or &lt;code&gt;&amp;lt;tab&amp;gt;&amp;lt;tab&amp;gt;&lt;/code&gt;). To use
+1910 this functionality, make sure you enable completion in your
+1911 &lt;code&gt;~/.bashrc&lt;/code&gt; (see instructions for bash in your operating
+1912 system).&lt;/p&gt;
+1913 &lt;p&gt;Make completion will work out of the box, and will complete valid
+1914 make targets. For instance, typing &lt;code&gt;make jdk-i&amp;lt;tab&amp;gt;&lt;/code&gt;
+1915 will complete to &lt;code&gt;make jdk-image&lt;/code&gt;.&lt;/p&gt;
+1916 &lt;p&gt;The &lt;code&gt;configure&lt;/code&gt; script can get completion for options, but
+1917 for this to work you need to help &lt;code&gt;bash&lt;/code&gt; on the way. The
+1918 standard way of running the script, &lt;code&gt;bash configure&lt;/code&gt;, will
+1919 not be understood by bash completion. You need &lt;code&gt;configure&lt;/code&gt; to
+1920 be the command to run. One way to achieve this is to add a simple helper
+1921 script to your path:&lt;/p&gt;
+1922 &lt;pre&gt;&lt;code&gt;cat &amp;lt;&amp;lt; EOT &amp;gt; /tmp/configure
+1923 #!/bin/bash
+1924 if [ \$(pwd) = \$(cd \$(dirname \$0); pwd) ] ; then
+1925   echo &amp;gt;&amp;amp;2 &amp;quot;Abort: Trying to call configure helper recursively&amp;quot;
+1926   exit 1
+1927 fi
+1928 
+1929 bash \$PWD/configure &amp;quot;\$@&amp;quot;
+1930 EOT
+1931 chmod +x /tmp/configure
+1932 sudo mv /tmp/configure /usr/local/bin&lt;/code&gt;&lt;/pre&gt;
+1933 &lt;p&gt;Now &lt;code&gt;configure --en&amp;lt;tab&amp;gt;-dt&amp;lt;tab&amp;gt;&lt;/code&gt; will result
+1934 in &lt;code&gt;configure --enable-dtrace&lt;/code&gt;.&lt;/p&gt;
+1935 &lt;h3 id=&quot;using-multiple-configurations&quot;&gt;Using Multiple
+1936 Configurations&lt;/h3&gt;
+1937 &lt;p&gt;You can have multiple configurations for a single source repository.
+1938 When you create a new configuration, run
+1939 &lt;code&gt;configure --with-conf-name=&amp;lt;name&amp;gt;&lt;/code&gt; to create a
+1940 configuration with the name &lt;code&gt;&amp;lt;name&amp;gt;&lt;/code&gt;. Alternatively,
+1941 you can create a directory under &lt;code&gt;build&lt;/code&gt; and run
+1942 &lt;code&gt;configure&lt;/code&gt; from there, e.g.
+1943 &lt;code&gt;mkdir build/&amp;lt;name&amp;gt; &amp;amp;&amp;amp; cd build/&amp;lt;name&amp;gt; &amp;amp;&amp;amp; bash ../../configure&lt;/code&gt;.&lt;/p&gt;
+1944 &lt;p&gt;Then you can build that configuration using
+1945 &lt;code&gt;make CONF_NAME=&amp;lt;name&amp;gt;&lt;/code&gt; or
+1946 &lt;code&gt;make CONF=&amp;lt;pattern&amp;gt;&lt;/code&gt;, where
+1947 &lt;code&gt;&amp;lt;pattern&amp;gt;&lt;/code&gt; is a substring matching one or several
+1948 configurations, e.g. &lt;code&gt;CONF=debug&lt;/code&gt;. The special empty pattern
+1949 (&lt;code&gt;CONF=&lt;/code&gt;) will match &lt;em&gt;all&lt;/em&gt; available configuration, so
+1950 &lt;code&gt;make CONF= hotspot&lt;/code&gt; will build the &lt;code&gt;hotspot&lt;/code&gt;
+1951 target for all configurations. Alternatively, you can execute
+1952 &lt;code&gt;make&lt;/code&gt; in the configuration directory, e.g.
+1953 &lt;code&gt;cd build/&amp;lt;name&amp;gt; &amp;amp;&amp;amp; make&lt;/code&gt;.&lt;/p&gt;
+1954 &lt;h3 id=&quot;handling-reconfigurations&quot;&gt;Handling Reconfigurations&lt;/h3&gt;
+1955 &lt;p&gt;If you update the repository and part of the configure script has
+1956 changed, the build system will force you to re-run
+1957 &lt;code&gt;configure&lt;/code&gt;.&lt;/p&gt;
+1958 &lt;p&gt;Most of the time, you will be fine by running &lt;code&gt;configure&lt;/code&gt;
+1959 again with the same arguments as the last time, which can easily be
+1960 performed by &lt;code&gt;make reconfigure&lt;/code&gt;. To simplify this, you can
+1961 use the &lt;code&gt;CONF_CHECK&lt;/code&gt; make control variable, either as
+1962 &lt;code&gt;make CONF_CHECK=auto&lt;/code&gt;, or by setting an environment
+1963 variable. For instance, if you add &lt;code&gt;export CONF_CHECK=auto&lt;/code&gt;
+1964 to your &lt;code&gt;.bashrc&lt;/code&gt; file, &lt;code&gt;make&lt;/code&gt; will always run
+1965 &lt;code&gt;reconfigure&lt;/code&gt; automatically whenever the configure script has
+1966 changed.&lt;/p&gt;
+1967 &lt;p&gt;You can also use &lt;code&gt;CONF_CHECK=ignore&lt;/code&gt; to skip the check for
+1968 a needed configure update. This might speed up the build, but comes at
+1969 the risk of an incorrect build result. This is only recommended if you
+1970 know what you&#39;re doing.&lt;/p&gt;
+1971 &lt;p&gt;From time to time, you will also need to modify the command line to
+1972 &lt;code&gt;configure&lt;/code&gt; due to changes. Use
+1973 &lt;code&gt;make print-configuration&lt;/code&gt; to show the command line used for
+1974 your current configuration.&lt;/p&gt;
+1975 &lt;h3 id=&quot;using-fine-grained-make-targets&quot;&gt;Using Fine-Grained Make
+1976 Targets&lt;/h3&gt;
+1977 &lt;p&gt;The default behavior for make is to create consistent and correct
+1978 output, at the expense of build speed, if necessary.&lt;/p&gt;
+1979 &lt;p&gt;If you are prepared to take some risk of an incorrect build, and know
+1980 enough of the system to understand how things build and interact, you
+1981 can speed up the build process considerably by instructing make to only
+1982 build a portion of the product.&lt;/p&gt;
+1983 &lt;h4 id=&quot;building-individual-modules&quot;&gt;Building Individual Modules&lt;/h4&gt;
+1984 &lt;p&gt;The safe way to use fine-grained make targets is to use the module
+1985 specific make targets. All source code in the JDK is organized so it
+1986 belongs to a module, e.g. &lt;code&gt;java.base&lt;/code&gt; or
+1987 &lt;code&gt;jdk.jdwp.agent&lt;/code&gt;. You can build only a specific module, by
+1988 giving it as make target: &lt;code&gt;make jdk.jdwp.agent&lt;/code&gt;. If the
+1989 specified module depends on other modules (e.g. &lt;code&gt;java.base&lt;/code&gt;),
+1990 those modules will be built first.&lt;/p&gt;
+1991 &lt;p&gt;You can also specify a set of modules, just as you can always specify
+1992 a set of make targets:
+1993 &lt;code&gt;make jdk.crypto.cryptoki jdk.crypto.ec jdk.crypto.mscapi&lt;/code&gt;&lt;/p&gt;
+1994 &lt;h4 id=&quot;building-individual-module-phases&quot;&gt;Building Individual Module
+1995 Phases&lt;/h4&gt;
+1996 &lt;p&gt;The build process for each module is divided into separate phases.
+1997 Not all modules need all phases. Which are needed depends on what kind
+1998 of source code and other artifact the module consists of. The phases
+1999 are:&lt;/p&gt;
+2000 &lt;ul&gt;
+2001 &lt;li&gt;&lt;code&gt;gensrc&lt;/code&gt; (Generate source code to compile)&lt;/li&gt;
+2002 &lt;li&gt;&lt;code&gt;gendata&lt;/code&gt; (Generate non-source code artifacts)&lt;/li&gt;
+2003 &lt;li&gt;&lt;code&gt;copy&lt;/code&gt; (Copy resource artifacts)&lt;/li&gt;
+2004 &lt;li&gt;&lt;code&gt;java&lt;/code&gt; (Compile Java code)&lt;/li&gt;
+2005 &lt;li&gt;&lt;code&gt;launchers&lt;/code&gt; (Compile native executables)&lt;/li&gt;
+2006 &lt;li&gt;&lt;code&gt;libs&lt;/code&gt; (Compile native libraries)&lt;/li&gt;
+2007 &lt;/ul&gt;
+2008 &lt;p&gt;You can build only a single phase for a module by using the notation
+2009 &lt;code&gt;$MODULE-$PHASE&lt;/code&gt;. For instance, to build the
+2010 &lt;code&gt;gensrc&lt;/code&gt; phase for &lt;code&gt;java.base&lt;/code&gt;, use
+2011 &lt;code&gt;make java.base-gensrc&lt;/code&gt;.&lt;/p&gt;
+2012 &lt;p&gt;Note that some phases may depend on others, e.g. &lt;code&gt;java&lt;/code&gt;
+2013 depends on &lt;code&gt;gensrc&lt;/code&gt; (if present). Make will build all needed
+2014 prerequisites before building the requested phase.&lt;/p&gt;
+2015 &lt;h4 id=&quot;skipping-the-dependency-check&quot;&gt;Skipping the Dependency
+2016 Check&lt;/h4&gt;
+2017 &lt;p&gt;When using an iterative development style with frequent quick
+2018 rebuilds, the dependency check made by make can take up a significant
+2019 portion of the time spent on the rebuild. In such cases, it can be
+2020 useful to bypass the dependency check in make.&lt;/p&gt;
+2021 &lt;blockquote&gt;
+2022 &lt;p&gt;&lt;strong&gt;Note that if used incorrectly, this can lead to a broken
+2023 build!&lt;/strong&gt;&lt;/p&gt;
+2024 &lt;/blockquote&gt;
+2025 &lt;p&gt;To achieve this, append &lt;code&gt;-only&lt;/code&gt; to the build target. For
+2026 instance, &lt;code&gt;make jdk.jdwp.agent-java-only&lt;/code&gt; will &lt;em&gt;only&lt;/em&gt;
+2027 build the &lt;code&gt;java&lt;/code&gt; phase of the &lt;code&gt;jdk.jdwp.agent&lt;/code&gt;
+2028 module. If the required dependencies are not present, the build can
+2029 fail. On the other hand, the execution time measures in
+2030 milliseconds.&lt;/p&gt;
+2031 &lt;p&gt;A useful pattern is to build the first time normally (e.g.
+2032 &lt;code&gt;make jdk.jdwp.agent&lt;/code&gt;) and then on subsequent builds, use the
+2033 &lt;code&gt;-only&lt;/code&gt; make target.&lt;/p&gt;
+2034 &lt;h4 id=&quot;rebuilding-part-of-java.base-jdk_filter&quot;&gt;Rebuilding Part of
+2035 java.base (JDK_FILTER)&lt;/h4&gt;
+2036 &lt;p&gt;If you are modifying files in &lt;code&gt;java.base&lt;/code&gt;, which is the by
+2037 far largest module in the JDK, then you need to rebuild all those files
+2038 whenever a single file has changed. (This inefficiency will hopefully be
+2039 addressed in JDK 10.)&lt;/p&gt;
+2040 &lt;p&gt;As a hack, you can use the make control variable
+2041 &lt;code&gt;JDK_FILTER&lt;/code&gt; to specify a pattern that will be used to limit
+2042 the set of files being recompiled. For instance,
+2043 &lt;code&gt;make java.base JDK_FILTER=javax/crypto&lt;/code&gt; (or, to combine
+2044 methods, &lt;code&gt;make java.base-java-only JDK_FILTER=javax/crypto&lt;/code&gt;)
+2045 will limit the compilation to files in the &lt;code&gt;javax.crypto&lt;/code&gt;
+2046 package.&lt;/p&gt;
+2047 &lt;h2 id=&quot;understanding-the-build-system&quot;&gt;Understanding the Build
+2048 System&lt;/h2&gt;
+2049 &lt;p&gt;This section will give you a more technical description on the
+2050 details of the build system.&lt;/p&gt;
+2051 &lt;h3 id=&quot;configurations&quot;&gt;Configurations&lt;/h3&gt;
+2052 &lt;p&gt;The build system expects to find one or more configuration. These are
+2053 technically defined by the &lt;code&gt;spec.gmk&lt;/code&gt; in a subdirectory to
+2054 the &lt;code&gt;build&lt;/code&gt; subdirectory. The &lt;code&gt;spec.gmk&lt;/code&gt; file is
+2055 generated by &lt;code&gt;configure&lt;/code&gt;, and contains in principle the
+2056 configuration (directly or by files included by
+2057 &lt;code&gt;spec.gmk&lt;/code&gt;).&lt;/p&gt;
+2058 &lt;p&gt;You can, in fact, select a configuration to build by pointing to the
+2059 &lt;code&gt;spec.gmk&lt;/code&gt; file with the &lt;code&gt;SPEC&lt;/code&gt; make control
+2060 variable, e.g. &lt;code&gt;make SPEC=$BUILD/spec.gmk&lt;/code&gt;. While this is not
+2061 the recommended way to call &lt;code&gt;make&lt;/code&gt; as a user, it is what is
+2062 used under the hood by the build system.&lt;/p&gt;
+2063 &lt;h3 id=&quot;build-output-structure&quot;&gt;Build Output Structure&lt;/h3&gt;
+2064 &lt;p&gt;The build output for a configuration will end up in
+2065 &lt;code&gt;build/&amp;lt;configuration name&amp;gt;&lt;/code&gt;, which we refer to as
+2066 &lt;code&gt;$BUILD&lt;/code&gt; in this document. The &lt;code&gt;$BUILD&lt;/code&gt; directory
+2067 contains the following important directories:&lt;/p&gt;
+2068 &lt;pre&gt;&lt;code&gt;buildtools/
+2069 configure-support/
+2070 hotspot/
+2071 images/
+2072 jdk/
+2073 make-support/
+2074 support/
+2075 test-results/
+2076 test-support/&lt;/code&gt;&lt;/pre&gt;
+2077 &lt;p&gt;This is what they are used for:&lt;/p&gt;
+2078 &lt;ul&gt;
+2079 &lt;li&gt;&lt;p&gt;&lt;code&gt;images&lt;/code&gt;: This is the directory were the output of the
+2080 &lt;code&gt;*-image&lt;/code&gt; make targets end up. For instance,
+2081 &lt;code&gt;make jdk-image&lt;/code&gt; ends up in &lt;code&gt;images/jdk&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+2082 &lt;li&gt;&lt;p&gt;&lt;code&gt;jdk&lt;/code&gt;: This is the &quot;exploded image&quot;. After
+2083 &lt;code&gt;make jdk&lt;/code&gt;, you will be able to launch the newly built JDK by
+2084 running &lt;code&gt;$BUILD/jdk/bin/java&lt;/code&gt;.&lt;/p&gt;&lt;/li&gt;
+2085 &lt;li&gt;&lt;p&gt;&lt;code&gt;test-results&lt;/code&gt;: This directory contains the results
+2086 from running tests.&lt;/p&gt;&lt;/li&gt;
+2087 &lt;li&gt;&lt;p&gt;&lt;code&gt;support&lt;/code&gt;: This is an area for intermediate files
+2088 needed during the build, e.g. generated source code, object files and
+2089 class files. Some noteworthy directories in &lt;code&gt;support&lt;/code&gt; is
+2090 &lt;code&gt;gensrc&lt;/code&gt;, which contains the generated source code, and the
+2091 &lt;code&gt;modules_*&lt;/code&gt; directories, which contains the files in a
+2092 per-module hierarchy that will later be collapsed into the
+2093 &lt;code&gt;jdk&lt;/code&gt; directory of the exploded image.&lt;/p&gt;&lt;/li&gt;
+2094 &lt;li&gt;&lt;p&gt;&lt;code&gt;buildtools&lt;/code&gt;: This is an area for tools compiled for
+2095 the build platform that are used during the rest of the build.&lt;/p&gt;&lt;/li&gt;
+2096 &lt;li&gt;&lt;p&gt;&lt;code&gt;hotspot&lt;/code&gt;: This is an area for intermediate files
+2097 needed when building hotspot.&lt;/p&gt;&lt;/li&gt;
+2098 &lt;li&gt;&lt;p&gt;&lt;code&gt;configure-support&lt;/code&gt;, &lt;code&gt;make-support&lt;/code&gt; and
+2099 &lt;code&gt;test-support&lt;/code&gt;: These directories contain files that are
+2100 needed by the build system for &lt;code&gt;configure&lt;/code&gt;, &lt;code&gt;make&lt;/code&gt;
+2101 and for running tests.&lt;/p&gt;&lt;/li&gt;
+2102 &lt;/ul&gt;
+2103 &lt;h3 id=&quot;fixpath&quot;&gt;Fixpath&lt;/h3&gt;
+2104 &lt;p&gt;Windows path typically look like &lt;code&gt;C:\User\foo&lt;/code&gt;, while Unix
+2105 paths look like &lt;code&gt;/home/foo&lt;/code&gt;. Tools with roots from Unix often
+2106 experience issues related to this mismatch when running on Windows.&lt;/p&gt;
+2107 &lt;p&gt;In the JDK build, we always use Unix paths internally, and only just
+2108 before calling a tool that does not understand Unix paths do we convert
+2109 them to Windows paths.&lt;/p&gt;
+2110 &lt;p&gt;This conversion is done by the &lt;code&gt;fixpath&lt;/code&gt; tool, which is a
+2111 small wrapper that modifies unix-style paths to Windows-style paths in
+2112 command lines. Fixpath is compiled automatically by
+2113 &lt;code&gt;configure&lt;/code&gt;.&lt;/p&gt;
+2114 &lt;h3 id=&quot;native-debug-symbols&quot;&gt;Native Debug Symbols&lt;/h3&gt;
+2115 &lt;p&gt;Native libraries and executables can have debug symbol (and other
+2116 debug information) associated with them. How this works is very much
+2117 platform dependent, but a common problem is that debug symbol
+2118 information takes a lot of disk space, but is rarely needed by the end
+2119 user.&lt;/p&gt;
+2120 &lt;p&gt;The JDK supports different methods on how to handle debug symbols.
+2121 The method used is selected by &lt;code&gt;--with-native-debug-symbols&lt;/code&gt;,
+2122 and available methods are &lt;code&gt;none&lt;/code&gt;, &lt;code&gt;internal&lt;/code&gt;,
+2123 &lt;code&gt;external&lt;/code&gt;, &lt;code&gt;zipped&lt;/code&gt;.&lt;/p&gt;
+2124 &lt;ul&gt;
+2125 &lt;li&gt;&lt;p&gt;&lt;code&gt;none&lt;/code&gt; means that no debug symbols will be generated
+2126 during the build.&lt;/p&gt;&lt;/li&gt;
+2127 &lt;li&gt;&lt;p&gt;&lt;code&gt;internal&lt;/code&gt; means that debug symbols will be generated
+2128 during the build, and they will be stored in the generated
+2129 binary.&lt;/p&gt;&lt;/li&gt;
+2130 &lt;li&gt;&lt;p&gt;&lt;code&gt;external&lt;/code&gt; means that debug symbols will be generated
+2131 during the build, and after the compilation, they will be moved into a
+2132 separate &lt;code&gt;.debuginfo&lt;/code&gt; file. (This was previously known as
+2133 FDS, Full Debug Symbols).&lt;/p&gt;&lt;/li&gt;
+2134 &lt;li&gt;&lt;p&gt;&lt;code&gt;zipped&lt;/code&gt; is like &lt;code&gt;external&lt;/code&gt;, but the
+2135 .debuginfo file will also be zipped into a &lt;code&gt;.diz&lt;/code&gt;
+2136 file.&lt;/p&gt;&lt;/li&gt;
+2137 &lt;/ul&gt;
+2138 &lt;p&gt;When building for distribution, &lt;code&gt;zipped&lt;/code&gt; is a good
+2139 solution. Binaries built with &lt;code&gt;internal&lt;/code&gt; is suitable for use
+2140 by developers, since they facilitate debugging, but should be stripped
+2141 before distributed to end users.&lt;/p&gt;
+2142 &lt;h3 id=&quot;autoconf-details&quot;&gt;Autoconf Details&lt;/h3&gt;
+2143 &lt;p&gt;The &lt;code&gt;configure&lt;/code&gt; script is based on the autoconf framework,
+2144 but in some details deviate from a normal autoconf
+2145 &lt;code&gt;configure&lt;/code&gt; script.&lt;/p&gt;
+2146 &lt;p&gt;The &lt;code&gt;configure&lt;/code&gt; script in the top level directory of the
+2147 JDK is just a thin wrapper that calls
+2148 &lt;code&gt;make/autoconf/configure&lt;/code&gt;. This in turn will run
+2149 &lt;code&gt;autoconf&lt;/code&gt; to create the runnable (generated) configure
+2150 script, as &lt;code&gt;.build/generated-configure.sh&lt;/code&gt;. Apart from being
+2151 responsible for the generation of the runnable script, the
+2152 &lt;code&gt;configure&lt;/code&gt; script also provides functionality that is not
+2153 easily expressed in the normal Autoconf framework. As part of this
+2154 functionality, the generated script is called.&lt;/p&gt;
+2155 &lt;p&gt;The build system will detect if the Autoconf source files have
+2156 changed, and will trigger a regeneration of the generated script if
+2157 needed. You can also manually request such an update by
+2158 &lt;code&gt;bash configure autogen&lt;/code&gt;.&lt;/p&gt;
+2159 &lt;p&gt;In previous versions of the JDK, the generated script was checked in
+2160 at &lt;code&gt;make/autoconf/generated-configure.sh&lt;/code&gt;. This is no longer
+2161 the case.&lt;/p&gt;
+2162 &lt;h3 id=&quot;developing-the-build-system-itself&quot;&gt;Developing the Build System
+2163 Itself&lt;/h3&gt;
+2164 &lt;p&gt;This section contains a few remarks about how to develop for the
+2165 build system itself. It is not relevant if you are only making changes
+2166 in the product source code.&lt;/p&gt;
+2167 &lt;p&gt;While technically using &lt;code&gt;make&lt;/code&gt;, the make source files of
+2168 the JDK does not resemble most other Makefiles. Instead of listing
+2169 specific targets and actions (perhaps using patterns), the basic modus
+2170 operandi is to call a high-level function (or properly, macro) from the
+2171 API in &lt;code&gt;make/common&lt;/code&gt;. For instance, to compile all classes in
+2172 the &lt;code&gt;jdk.internal.foo&lt;/code&gt; package in the &lt;code&gt;jdk.foo&lt;/code&gt;
+2173 module, a call like this would be made:&lt;/p&gt;
+2174 &lt;pre&gt;&lt;code&gt;$(eval $(call SetupJavaCompilation, BUILD_FOO_CLASSES, \
+2175     SETUP := GENERATE_OLDBYTECODE, \
+2176     SRC := $(TOPDIR)/src/jkd.foo/share/classes, \
+2177     INCLUDES := jdk/internal/foo, \
+2178     BIN := $(SUPPORT_OUTPUTDIR)/foo_classes, \
+2179 ))&lt;/code&gt;&lt;/pre&gt;
+2180 &lt;p&gt;By encapsulating and expressing the high-level knowledge of
+2181 &lt;em&gt;what&lt;/em&gt; should be done, rather than &lt;em&gt;how&lt;/em&gt; it should be done
+2182 (as is normal in Makefiles), we can build a much more powerful and
+2183 flexible build system.&lt;/p&gt;
+2184 &lt;p&gt;Correct dependency tracking is paramount. Sloppy dependency tracking
+2185 will lead to improper parallelization, or worse, race conditions.&lt;/p&gt;
+2186 &lt;p&gt;To test for/debug race conditions, try running
+2187 &lt;code&gt;make JOBS=1&lt;/code&gt; and &lt;code&gt;make JOBS=100&lt;/code&gt; and see if it
+2188 makes any difference. (It shouldn&#39;t).&lt;/p&gt;
+2189 &lt;p&gt;To compare the output of two different builds and see if, and how,
+2190 they differ, run &lt;code&gt;$BUILD1/compare.sh -o $BUILD2&lt;/code&gt;, where
+2191 &lt;code&gt;$BUILD1&lt;/code&gt; and &lt;code&gt;$BUILD2&lt;/code&gt; are the two builds you
+2192 want to compare.&lt;/p&gt;
+2193 &lt;p&gt;To automatically build two consecutive versions and compare them, use
+2194 &lt;code&gt;COMPARE_BUILD&lt;/code&gt;. The value of &lt;code&gt;COMPARE_BUILD&lt;/code&gt; is a
+2195 set of variable=value assignments, like this:&lt;/p&gt;
+2196 &lt;pre&gt;&lt;code&gt;make COMPARE_BUILD=CONF=--enable-new-hotspot-feature:MAKE=hotspot&lt;/code&gt;&lt;/pre&gt;
+2197 &lt;p&gt;See &lt;code&gt;make/InitSupport.gmk&lt;/code&gt; for details on how to use
+2198 &lt;code&gt;COMPARE_BUILD&lt;/code&gt;.&lt;/p&gt;
+2199 &lt;p&gt;To analyze build performance, run with &lt;code&gt;LOG=trace&lt;/code&gt; and
+2200 check &lt;code&gt;$BUILD/build-trace-time.log&lt;/code&gt;. Use &lt;code&gt;JOBS=1&lt;/code&gt;
+2201 to avoid parallelism.&lt;/p&gt;
+2202 &lt;p&gt;Please check that you adhere to the &lt;a
+2203 href=&quot;http://openjdk.org/groups/build/doc/code-conventions.html&quot;&gt;Code
+2204 Conventions for the Build System&lt;/a&gt; before submitting patches.&lt;/p&gt;
+2205 &lt;h2 id=&quot;contributing-to-the-jdk&quot;&gt;Contributing to the JDK&lt;/h2&gt;
+2206 &lt;p&gt;So, now you&#39;ve built your JDK, and made your first patch, and want to
+2207 contribute it back to the OpenJDK Community.&lt;/p&gt;
+2208 &lt;p&gt;First of all: Thank you! We gladly welcome your contribution.
+2209 However, please bear in mind that the JDK is a massive project, and we
+2210 must ask you to follow our rules and guidelines to be able to accept
+2211 your contribution.&lt;/p&gt;
+2212 &lt;p&gt;The official place to start is the &lt;a
+2213 href=&quot;http://openjdk.org/contribute/&quot;&gt;&#39;How to contribute&#39; page&lt;/a&gt;.
+2214 There is also an official (but somewhat outdated and skimpy on details)
+2215 &lt;a href=&quot;http://openjdk.org/guide/&quot;&gt;Developer&#39;s Guide&lt;/a&gt;.&lt;/p&gt;
+2216 &lt;p&gt;If this seems overwhelming to you, the Adoption Group is there to
+2217 help you! A good place to start is their &lt;a
+2218 href=&quot;https://wiki.openjdk.org/display/Adoption/New+Contributor&quot;&gt;&#39;New
+2219 Contributor&#39; page&lt;/a&gt;, or start reading the comprehensive &lt;a
+2220 href=&quot;https://adoptopenjdk.gitbooks.io/adoptopenjdk-getting-started-kit/en/&quot;&gt;Getting
+2221 Started Kit&lt;/a&gt;. The Adoption Group will also happily answer any
+2222 questions you have about contributing. Contact them by &lt;a
+2223 href=&quot;http://mail.openjdk.org/mailman/listinfo/adoption-discuss&quot;&gt;mail&lt;/a&gt;
+2224 or &lt;a href=&quot;http://openjdk.org/irc/&quot;&gt;IRC&lt;/a&gt;.&lt;/p&gt;
+2225 &lt;h2 id=&quot;editing-this-document&quot;&gt;Editing this document&lt;/h2&gt;
+2226 &lt;p&gt;If you want to contribute changes to this document, edit
+2227 &lt;code&gt;doc/building.md&lt;/code&gt; and then run
+2228 &lt;code&gt;make update-build-docs&lt;/code&gt; to generate the same changes in
+2229 &lt;code&gt;doc/building.html&lt;/code&gt;.&lt;/p&gt;
+2230 &lt;/body&gt;
+2231 &lt;/html&gt;
+    </pre>
+  </body>
+</html>

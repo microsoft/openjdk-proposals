@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>New doc/building.md</title>
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <pre>
+   1 % Building the JDK
+   2 
+   3 ## TL;DR (Instructions for the Impatient)
+   4 
+   5 If you are eager to try out building the JDK, these simple steps works most of
+   6 the time. They assume that you have installed Git (and Cygwin if running
+   7 on Windows) and cloned the top-level JDK repository that you want to build.
+   8 
+   9  1. [Get the complete source code](#getting-the-source-code): \
+  10     `git clone https://git.openjdk.org/jdk/`
+  11 
+  12  2. [Run configure](#running-configure): \
+  13     `bash configure`
+  14 
+  15     If `configure` fails due to missing dependencies (to either the
+  16     [toolchain](#native-compiler-toolchain-requirements), [build tools](
+  17     #build-tools-requirements), [external libraries](
+  18     #external-library-requirements) or the [boot JDK](#boot-jdk-requirements)),
+  19     most of the time it prints a suggestion on how to resolve the situation on
+  20     your platform. Follow the instructions, and try running `bash configure`
+  21     again.
+  22 
+  23  3. [Run make](#running-make): \
+  24     `make images`
+  25 
+  26  4. Verify your newly built JDK: \
+  27     `./build/*/images/jdk/bin/java -version`
+  28 
+  29  5. [Run basic tests](##running-tests): \
+  30     `make run-test-tier1`
+  31 
+  32 If any of these steps failed, or if you want to know more about build
+  33 requirements or build functionality, please continue reading this document.
+  34 
+  35 ## Introduction
+  36 
+  37 The JDK is a complex software project. Building it requires a certain amount of
+  38 technical expertise, a fair number of dependencies on external software, and
+  39 reasonably powerful hardware.
+  40 
+  41 If you just want to use the JDK and not build it yourself, this document is not
+  42 for you. See for instance [OpenJDK installation](
+  43 http://openjdk.org/install) for some methods of installing a prebuilt
+  44 JDK.
+  45 
+  46 ## Getting the Source Code
+  47 
+  48 Make sure you are getting the correct version. As of JDK 10, the source is no
+  49 longer split into separate repositories so you only need to clone one single
+  50 repository. At the [OpenJDK Git site](https://git.openjdk.org/) you
+  51 can see a list of all available repositories. If you want to build an older version,
+  52 e.g. JDK 11, it is recommended that you get the `jdk11u` repo, which contains
+  53 incremental updates, instead of the `jdk11` repo, which was frozen at JDK 11 GA.
+  54 
+  55 If you are new to Git, a good place to start is the book [Pro
+  56 Git](https://git-scm.com/book/en/v2). The rest of this document
+  57 assumes a working knowledge of Git.
+  58 
+  59 ### Special Considerations
+  60 
+  61 For a smooth building experience, it is recommended that you follow these rules
+  62 on where and how to check out the source code.
+  63 
+  64   * Do not check out the source code in a path which contains spaces. Chances
+  65     are the build will not work. This is most likely to be an issue on Windows
+  66     systems.
+  67 
+  68   * Do not check out the source code in a path which has a very long name or is
+  69     nested many levels deep. Chances are you will hit an OS limitation during
+  70     the build.
+  71 
+  72   * Put the source code on a local disk, not a network share. If possible, use
+  73     an SSD. The build process is very disk intensive, and having slow disk
+  74     access will significantly increase build times. If you need to use a
+  75     network share for the source code, see below for suggestions on how to keep
+  76     the build artifacts on a local disk.
+  77 
+  78   * On Windows, if using [Cygwin](#cygwin), extra care must be taken to make sure
+  79     the environment is consistent. It is recommended that you follow this
+  80     procedure:
+  81 
+  82       * Create the directory that is going to contain the top directory of the
+  83         JDK clone by using the `mkdir` command in the Cygwin bash shell.
+  84         That is, do *not* create it using Windows Explorer. This will ensure
+  85         that it will have proper Cygwin attributes, and that it&#39;s children will
+  86         inherit those attributes.
+  87 
+  88       * Do not put the JDK clone in a path under your Cygwin home
+  89         directory. This is especially important if your user name contains
+  90         spaces and/or mixed upper and lower case letters.
+  91 
+  92       * You need to install a git client. You have two choices, Cygwin git or
+  93         Git for Windows. Unfortunately there are pros and cons with each choice.
+  94 
+  95         * The Cygwin `git` client has no line ending issues and understands
+  96           Cygwin paths (which are used throughout the JDK build system).
+  97           However, it does not currently work well with the Skara CLI tooling.
+  98           Please see the [Skara wiki on Git clients](
+  99           https://wiki.openjdk.org/display/SKARA/Skara#Skara-Git) for
+ 100           up-to-date information about the Skara git client support.
+ 101 
+ 102         * The [Git for Windows](https://gitforwindows.org) client has issues
+ 103           with line endings, and do not understand Cygwin paths. It does work
+ 104           well with the Skara CLI tooling, however. To alleviate the line ending
+ 105           problems, make sure you set `core.autocrlf` to `false` (this is asked
+ 106           during installation).
+ 107 
+ 108     Failure to follow this procedure might result in hard-to-debug build
+ 109     problems.
+ 110 
+ 111 ## Build Hardware Requirements
+ 112 
+ 113 The JDK is a massive project, and require machines ranging from decent to
+ 114 powerful to be able to build in a reasonable amount of time, or to be able to
+ 115 complete a build at all.
+ 116 
+ 117 We *strongly* recommend usage of an SSD disk for the build, since disk speed is
+ 118 one of the limiting factors for build performance.
+ 119 
+ 120 ### Building on x86
+ 121 
+ 122 At a minimum, a machine with 2-4 cores is advisable, as well as 2-4 GB of RAM.
+ 123 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 124 space is required.
+ 125 
+ 126 Even for 32-bit builds, it is recommended to use a 64-bit build machine, and
+ 127 instead create a 32-bit target using `--with-target-bits=32`.
+ 128 
+ 129 Note: The Widows x86 port is deprecated.
+ 130 
+ 131 ### Building on aarch64
+ 132 
+ 133 At a minimum, a machine with 8 cores is advisable, as well as 8 GB of RAM.
+ 134 (The more cores to use, the more memory you need.) At least 6 GB of free disk
+ 135 space is required.
+ 136 
+ 137 If you do not have access to sufficiently powerful hardware, it is also
+ 138 possible to use [cross-compiling](#cross-compiling).
+ 139 
+ 140 #### Branch Protection
+ 141 
+ 142 In order to use Branch Protection features in the VM, `--enable-branch-protection`
+ 143 must be used. This option requires C++ compiler support (GCC 9.1.0+ or Clang
+ 144 10+). The resulting build can be run on both machines with and without support
+ 145 for branch protection in hardware. Branch Protection is only supported for
+ 146 Linux targets.
+ 147 
+ 148 ### Building on 32-bit arm
+ 149 
+ 150 This is not recommended. Instead, see the section on [Cross-compiling](
+ 151 #cross-compiling).
+ 152 
+ 153 ## Operating System Requirements
+ 154 
+ 155 The mainline JDK project supports Linux, macOS, AIX and Windows.
+ 156 Support for other operating system, e.g. BSD, exists in separate &quot;port&quot;
+ 157 projects.
+ 158 
+ 159 In general, the JDK can be built on a wide range of versions of these operating
+ 160 systems, but the further you deviate from what is tested on a daily basis, the
+ 161 more likely you are to run into problems.
+ 162 
+ 163 This table lists the OS versions used by Oracle when building the JDK. Such
+ 164 information is always subject to change, but this table is up to date at the
+ 165 time of writing.
+ 166 
+ 167  Operating system   Vendor/version used
+ 168  -----------------  -------------------------------------------------------
+ 169  Linux              Oracle Enterprise Linux 6.4 / 7.6
+ 170  macOS              Mac OS X 10.13 (High Sierra)
+ 171  Windows            Windows Server 2012 R2
+ 172 
+ 173 The double version numbers for Linux are due to the hybrid model
+ 174 used at Oracle, where header files and external libraries from an older version
+ 175 are used when building on a more modern version of the OS.
+ 176 
+ 177 The Build Group has a wiki page with [Supported Build Platforms](
+ 178 https://wiki.openjdk.org/display/Build/Supported+Build+Platforms). From
+ 179 time to time, this is updated by contributors to list successes or failures of
+ 180 building on different platforms.
+ 181 
+ 182 ### Windows
+ 183 
+ 184 Windows XP is not a supported platform, but all newer Windows should be able to
+ 185 build the JDK.
+ 186 
+ 187 On Windows, it is important that you pay attention to the instructions in the
+ 188 [Special Considerations](#special-considerations).
+ 189 
+ 190 Windows is the only non-POSIX OS supported by the JDK, and as such, requires
+ 191 some extra care. A POSIX support layer is required to build on Windows.
+ 192 Currently, the only supported such layers are Cygwin, Windows Subsystem for
+ 193 Linux (WSL), and MSYS2. (MSYS is no longer supported due to an outdated bash;
+ 194 While OpenJDK can be built with MSYS2, support for it is still experimental, so
+ 195 build failures and unusual errors are not uncommon.)
+ 196 
+ 197 Internally in the build system, all paths are represented as Unix-style paths,
+ 198 e.g. `/cygdrive/c/git/jdk/Makefile` rather than `C:\git\jdk\Makefile`. This
+ 199 rule also applies to input to the build system, e.g. in arguments to
+ 200 `configure`. So, use `--with-msvcr-dll=/cygdrive/c/msvcr100.dll` rather than
+ 201 `--with-msvcr-dll=c:\msvcr100.dll`. For details on this conversion, see the section
+ 202 on [Fixpath](#fixpath).
+ 203 
+ 204 Note: The Widows x86 port is deprecated.
+ 205 
+ 206 #### Cygwin
+ 207 
+ 208 A functioning [Cygwin](http://www.cygwin.com/) environment is required for
+ 209 building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
+ 210 using the 64-bit version of Cygwin.
+ 211 
+ 212 **Note:** Cygwin has a model of continuously updating all packages without any
+ 213 easy way to install or revert to a specific version of a package. This means
+ 214 that whenever you add or update a package in Cygwin, you might (inadvertently)
+ 215 update tools that are used by the JDK build process, and that can cause
+ 216 unexpected build problems.
+ 217 
+ 218 The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually not a
+ 219 problem, since Cygwin currently only distributes GNU Make at a version above
+ 220 4.0.
+ 221 
+ 222 Apart from the basic Cygwin installation, the following packages must also be
+ 223 installed:
+ 224 
+ 225   * `autoconf`
+ 226   * `make`
+ 227   * `zip`
+ 228   * `unzip`
+ 229 
+ 230 Often, you can install these packages using the following command line:
+ 231 ```
+ 232 &lt;path to Cygwin setup&gt;/setup-x86_64 -q -P autoconf -P make -P unzip -P zip
+ 233 ```
+ 234 
+ 235 Unfortunately, Cygwin can be unreliable in certain circumstances. If you
+ 236 experience build tool crashes or strange issues when building on Windows,
+ 237 please check the Cygwin FAQ on the [&quot;BLODA&quot; list](
+ 238 https://cygwin.com/faq/faq.html#faq.using.bloda) and the section on [fork()
+ 239 failures](https://cygwin.com/faq/faq.html#faq.using.fixing-fork-failures).
+ 240 
+ 241 #### Windows Subsystem for Linux (WSL)
+ 242 
+ 243 Windows 10 1809 or newer is supported due to a dependency on the wslpath utility
+ 244 and support for environment variable sharing through WSLENV. Version 1803 can
+ 245 work but intermittent build failures have been observed.
+ 246 
+ 247 It&#39;s possible to build both Windows and Linux binaries from WSL. To build
+ 248 Windows binaries, you must use a Windows boot JDK (located in a
+ 249 Windows-accessible directory). To build Linux binaries, you must use a Linux
+ 250 boot JDK. The default behavior is to build for Windows. To build for Linux, pass
+ 251 `--build=x86_64-unknown-linux-gnu --openjdk-target=x86_64-unknown-linux-gnu`
+ 252 to `configure`.
+ 253 
+ 254 If building Windows binaries, the source code must be located in a Windows-
+ 255 accessible directory. This is because Windows executables (such as Visual Studio
+ 256 and the boot JDK) must be able to access the source code. Also, the drive where
+ 257 the source is stored must be mounted as case-insensitive by changing either
+ 258 /etc/fstab or /etc/wsl.conf in WSL. Individual directories may be corrected
+ 259 using the fsutil tool in case the source was cloned before changing the mount
+ 260 options.
+ 261 
+ 262 Note that while it&#39;s possible to build on WSL, testing is still not fully
+ 263 supported.
+ 264 
+ 265 ### macOS
+ 266 
+ 267 Apple is using a quite aggressive scheme of pushing OS updates, and coupling
+ 268 these updates with required updates of Xcode. Unfortunately, this makes it
+ 269 difficult for a project such as the JDK to keep pace with a continuously updated
+ 270 machine running macOS. See the section on [Apple Xcode](#apple-xcode) on some
+ 271 strategies to deal with this.
+ 272 
+ 273 It is recommended that you use at least Mac OS X 10.13 (High Sierra). At the time
+ 274 of writing, the JDK has been successfully compiled on macOS 10.12 (Sierra).
+ 275 
+ 276 The standard macOS environment contains the basic tooling needed to build, but
+ 277 for external libraries a package manager is recommended. The JDK uses
+ 278 [homebrew](https://brew.sh/) in the examples, but feel free to use whatever
+ 279 manager you want (or none).
+ 280 
+ 281 ### Linux
+ 282 
+ 283 It is often not much problem to build the JDK on Linux. The only general advice
+ 284 is to try to use the compilers, external libraries and header files as provided
+ 285 by your distribution.
+ 286 
+ 287 The basic tooling is provided as part of the core operating system, but you
+ 288 will most likely need to install developer packages.
+ 289 
+ 290 For apt-based distributions (Debian, Ubuntu, etc), try this:
+ 291 ```
+ 292 sudo apt-get install build-essential
+ 293 ```
+ 294 
+ 295 For rpm-based distributions (Fedora, Red Hat, etc), try this:
+ 296 ```
+ 297 sudo yum groupinstall &quot;Development Tools&quot;
+ 298 ```
+ 299 
+ 300 For Alpine Linux, aside from basic tooling, install the GNU versions of some
+ 301 programs:
+ 302 
+ 303 ```
+ 304 sudo apk add build-base bash grep zip
+ 305 ```
+ 306 
+ 307 ### AIX
+ 308 
+ 309 Please consult the AIX section of the [Supported Build Platforms](
+ 310 https://wiki.openjdk.org/display/Build/Supported+Build+Platforms) OpenJDK
+ 311 Build Wiki page for details about which versions of AIX are supported.
+ 312 
+ 313 ## Native Compiler (Toolchain) Requirements
+ 314 
+ 315 Large portions of the JDK consists of native code, that needs to be compiled to
+ 316 be able to run on the target platform. In theory, toolchain and operating
+ 317 system should be independent factors, but in practice there&#39;s more or less a
+ 318 one-to-one correlation between target operating system and toolchain. There are
+ 319 ongoing efforts to loosen this strict coupling between compiler and operating
+ 320 system (see [JDK-8288293](https://bugs.openjdk.org/browse/JDK-8288293)) but it
+ 321 will likely be a very long time before this goal can be realized.
+ 322 
+ 323 | Operating system   | Supported toolchain       |
+ 324 | ------------------ | ------------------------- |
+ 325 | Linux              | gcc, clang                |
+ 326 | macOS              | Apple Xcode (using clang) |
+ 327 | AIX                | IBM XL C/C++              |
+ 328 | Windows            | Microsoft Visual Studio   |
+ 329 
+ 330 Please see the individual sections on the toolchains for version
+ 331 recommendations. As a reference, these versions of the toolchains are used, at
+ 332 the time of writing, by Oracle for the daily builds of the JDK. It should be
+ 333 possible to compile the JDK with both older and newer versions, but the closer
+ 334 you stay to this list, the more likely you are to compile successfully without
+ 335 issues.
+ 336 
+ 337 | Operating system   | Toolchain version                          |
+ 338 | ------------------ | ------------------------------------------ |
+ 339 | Linux              | gcc 11.2.0                                 |
+ 340 | macOS              | Apple Xcode 10.1 (using clang 10.0.0)      |
+ 341 | Windows            | Microsoft Visual Studio 2022 update 17.1.0 |
+ 342 
+ 343 All compilers are expected to be able to compile to the C99 language standard,
+ 344 as some C99 features are used in the source code. Microsoft Visual Studio
+ 345 doesn&#39;t fully support C99 so in practice shared code is limited to using C99
+ 346 features that it does support.
+ 347 
+ 348 ### gcc
+ 349 
+ 350 The minimum accepted version of gcc is 5.0. Older versions will generate a warning
+ 351 by `configure` and are unlikely to work.
+ 352 
+ 353 The JDK is currently known to be able to compile with at least version 11.2 of
+ 354 gcc.
+ 355 
+ 356 In general, any version between these two should be usable.
+ 357 
+ 358 ### clang
+ 359 
+ 360 The minimum accepted version of clang is 3.5. Older versions will not be
+ 361 accepted by `configure`.
+ 362 
+ 363 To use clang instead of gcc on Linux, use `--with-toolchain-type=clang`.
+ 364 
+ 365 ### Apple Xcode
+ 366 
+ 367 The oldest supported version of Xcode is 8.
+ 368 
+ 369 You will need the Xcode command line developer tools to be able to build
+ 370 the JDK. (Actually, *only* the command line tools are needed, not the IDE.)
+ 371 The simplest way to install these is to run:
+ 372 ```
+ 373 xcode-select --install
+ 374 ```
+ 375 
+ 376 When updating Xcode, it is advisable to keep an older version for building the JDK.
+ 377 To use a specific version of Xcode you have multiple options:
+ 378 
+ 379   * Use `xcode-select -s` before running `configure`, e.g. `xcode-select -s /Applications/Xcode13.1.app`. The drawback is that the setting
+ 380     is system wide and you may have to revert it after an OpenJDK build.
+ 381   * Use configure option `--with-xcode-path`, e.g. `configure --with-xcode-path=/Applications/Xcode13.1.app`
+ 382     This allows using a specific Xcode version for an OpenJDK build, independently of the active Xcode version by `xcode-select`.
+ 383 
+ 384 If you have recently (inadvertently) updated your OS and/or Xcode version, and
+ 385 the JDK can no longer be built, please see the section on [Problems with the
+ 386 Build Environment](#problems-with-the-build-environment), and [Getting
+ 387 Help](#getting-help) to find out if there are any recent, non-merged patches
+ 388 available for this update.
+ 389 
+ 390 ### Microsoft Visual Studio
+ 391 
+ 392 The minimum accepted version is Visual Studio 2019 version 16.8. (Note that this
+ 393 version is often presented as &quot;MSVC 14.28&quot;, and reported by cl.exe as 19.28.)
+ 394 Older versions will not be accepted by `configure` and will not work. The
+ 395 maximum accepted version of Visual Studio is 2022.
+ 396 
+ 397 If you have multiple versions of Visual Studio installed, `configure` will by
+ 398 default pick the latest. You can request a specific version to be used by
+ 399 setting `--with-toolchain-version`, e.g. `--with-toolchain-version=2022`.
+ 400 
+ 401 If you have Visual Studio installed but `configure` fails to detect it, it may
+ 402 be because of [spaces in path](#spaces-in-path).
+ 403 
+ 404 ### IBM XL C/C++
+ 405 
+ 406 Please consult the AIX section of the [Supported Build Platforms](
+ 407 https://wiki.openjdk.org/display/Build/Supported+Build+Platforms) OpenJDK
+ 408 Build Wiki page for details about which versions of XLC are supported.
+ 409 
+ 410 
+ 411 ## Boot JDK Requirements
+ 412 
+ 413 Paradoxically, building the JDK requires a pre-existing JDK. This is called the
+ 414 &quot;boot JDK&quot;. The boot JDK does not, however, have to be a JDK built directly from
+ 415 the source code available in the OpenJDK Community.  If you are porting the JDK
+ 416 to a new platform, chances are that there already exists another JDK for that
+ 417 platform that is usable as boot JDK.
+ 418 
+ 419 The rule of thumb is that the boot JDK for building JDK major version *N*
+ 420 should be a JDK of major version *N-1*, so for building JDK 9 a JDK 8 would be
+ 421 suitable as boot JDK. However, the JDK should be able to &quot;build itself&quot;, so an
+ 422 up-to-date build of the current JDK source is an acceptable alternative. If
+ 423 you are following the *N-1* rule, make sure you&#39;ve got the latest update
+ 424 version, since JDK 8 GA might not be able to build JDK 9 on all platforms.
+ 425 
+ 426 Early in the release cycle, version *N-1* may not yet have been released. In
+ 427 that case, the preferred boot JDK will be version *N-2* until version *N-1*
+ 428 is available.
+ 429 
+ 430 If the boot JDK is not automatically detected, or the wrong JDK is picked, use
+ 431 `--with-boot-jdk` to point to the JDK to use.
+ 432 
+ 433 ### Getting JDK binaries
+ 434 
+ 435 JDK binaries for Linux, Windows and macOS can be downloaded from
+ 436 [jdk.java.net](http://jdk.java.net). An alternative is to download the
+ 437 [Oracle JDK](http://www.oracle.com/technetwork/java/javase/downloads). Another
+ 438 is the [Adopt OpenJDK Project](https://adoptopenjdk.net/), which publishes
+ 439 experimental prebuilt binaries for various platforms.
+ 440 
+ 441 On Linux you can also get a JDK from the Linux distribution. On apt-based
+ 442 distros (like Debian and Ubuntu), `sudo apt-get install openjdk-&lt;VERSION&gt;-jdk`
+ 443 is typically enough to install a JDK \&lt;VERSION\&gt;. On rpm-based distros (like
+ 444 Fedora and Red Hat), try `sudo yum install java-&lt;VERSION&gt;-openjdk-devel`.
+ 445 
+ 446 ## External Library Requirements
+ 447 
+ 448 Different platforms require different external libraries. In general, libraries
+ 449 are not optional - that is, they are either required or not used.
+ 450 
+ 451 If a required library is not detected by `configure`, you need to provide the
+ 452 path to it. There are two forms of the `configure` arguments to point to an
+ 453 external library: `--with-&lt;LIB&gt;=&lt;path&gt;` or `--with-&lt;LIB&gt;-include=&lt;path to
+ 454 include&gt; --with-&lt;LIB&gt;-lib=&lt;path to lib&gt;`. The first variant is more concise,
+ 455 but require the include files and library files to reside in a default
+ 456 hierarchy under this directory. In most cases, it works fine.
+ 457 
+ 458 As a fallback, the second version allows you to point to the include directory
+ 459 and the lib directory separately.
+ 460 
+ 461 ### FreeType
+ 462 
+ 463 FreeType2 from [The FreeType Project](http://www.freetype.org/) is not required
+ 464 on any platform. The exception is on Unix-based platforms when configuring such
+ 465 that the build artifacts will reference a system installed library,
+ 466 rather than bundling the JDK&#39;s own copy.
+ 467 
+ 468   * To install on an apt-based Linux, try running `sudo apt-get install
+ 469     libfreetype6-dev`.
+ 470   * To install on an rpm-based Linux, try running `sudo yum install
+ 471     freetype-devel`.
+ 472   * To install on Alpine Linux, try running `sudo apk add freetype-dev`.
+ 473   * To install on macOS, try running `brew install freetype`.
+ 474 
+ 475 Use `--with-freetype-include=&lt;path&gt;` and `--with-freetype-lib=&lt;path&gt;`
+ 476 if `configure` does not automatically locate the platform FreeType files.
+ 477 
+ 478 ### CUPS
+ 479 
+ 480 CUPS, [Common UNIX Printing System](http://www.cups.org) header files are
+ 481 required on all platforms, except Windows. Often these files are provided by
+ 482 your operating system.
+ 483 
+ 484   * To install on an apt-based Linux, try running `sudo apt-get install
+ 485     libcups2-dev`.
+ 486   * To install on an rpm-based Linux, try running `sudo yum install
+ 487     cups-devel`.
+ 488   * To install on Alpine Linux, try running `sudo apk add cups-dev`.
+ 489 
+ 490 Use `--with-cups=&lt;path&gt;` if `configure` does not properly locate your CUPS
+ 491 files.
+ 492 
+ 493 ### X11
+ 494 
+ 495 Certain [X11](http://www.x.org/) libraries and include files are required on
+ 496 Linux.
+ 497 
+ 498   * To install on an apt-based Linux, try running `sudo apt-get install
+ 499     libx11-dev libxext-dev libxrender-dev libxrandr-dev libxtst-dev libxt-dev`.
+ 500   * To install on an rpm-based Linux, try running `sudo yum install
+ 501     libXtst-devel libXt-devel libXrender-devel libXrandr-devel libXi-devel`.
+ 502   * To install on Alpine Linux, try running `sudo apk add libx11-dev
+ 503     libxext-dev libxrender-dev libxrandr-dev libxtst-dev libxt-dev`.
+ 504 
+ 505 Use `--with-x=&lt;path&gt;` if `configure` does not properly locate your X11 files.
+ 506 
+ 507 ### ALSA
+ 508 
+ 509 ALSA, [Advanced Linux Sound Architecture](https://www.alsa-project.org/) is
+ 510 required on Linux. At least version 0.9.1 of ALSA is required.
+ 511 
+ 512   * To install on an apt-based Linux, try running `sudo apt-get install
+ 513     libasound2-dev`.
+ 514   * To install on an rpm-based Linux, try running `sudo yum install
+ 515     alsa-lib-devel`.
+ 516   * To install on Alpine Linux, try running `sudo apk add alsa-lib-dev`.
+ 517 
+ 518 Use `--with-alsa=&lt;path&gt;` if `configure` does not properly locate your ALSA
+ 519 files.
+ 520 
+ 521 ### libffi
+ 522 
+ 523 libffi, the [Portable Foreign Function Interface Library](
+ 524 http://sourceware.org/libffi) is required when building the Zero version of
+ 525 Hotspot.
+ 526 
+ 527   * To install on an apt-based Linux, try running `sudo apt-get install
+ 528     libffi-dev`.
+ 529   * To install on an rpm-based Linux, try running `sudo yum install
+ 530     libffi-devel`.
+ 531   * To install on Alpine Linux, try running `sudo apk add libffi-dev`.
+ 532 
+ 533 Use `--with-libffi=&lt;path&gt;` if `configure` does not properly locate your libffi
+ 534 files.
+ 535 
+ 536 ## Build Tools Requirements
+ 537 
+ 538 ### Autoconf
+ 539 
+ 540 The JDK requires [Autoconf](http://www.gnu.org/software/autoconf) on all
+ 541 platforms. At least version 2.69 is required.
+ 542 
+ 543   * To install on an apt-based Linux, try running `sudo apt-get install
+ 544     autoconf`.
+ 545   * To install on an rpm-based Linux, try running `sudo yum install
+ 546     autoconf`.
+ 547   * To install on Alpine Linux, try running `sudo apk add autoconf`.
+ 548   * To install on macOS, try running `brew install autoconf`.
+ 549   * To install on Windows, try running `&lt;path to Cygwin setup&gt;/setup-x86_64 -q
+ 550     -P autoconf`.
+ 551 
+ 552 If `configure` has problems locating your installation of autoconf, you can
+ 553 specify it using the `AUTOCONF` environment variable, like this:
+ 554 
+ 555 ```
+ 556 AUTOCONF=&lt;path to autoconf&gt; configure ...
+ 557 ```
+ 558 
+ 559 ### GNU Make
+ 560 
+ 561 The JDK requires [GNU Make](http://www.gnu.org/software/make). No other flavors
+ 562 of make are supported.
+ 563 
+ 564 At least version 3.81 of GNU Make must be used. For distributions supporting
+ 565 GNU Make 4.0 or above, we strongly recommend it. GNU Make 4.0 contains useful
+ 566 functionality to handle parallel building (supported by `--with-output-sync`)
+ 567 and speed and stability improvements.
+ 568 
+ 569 Note that `configure` locates and verifies a properly functioning version of
+ 570 `make` and stores the path to this `make` binary in the configuration. If you
+ 571 start a build using `make` on the command line, you will be using the version
+ 572 of make found first in your `PATH`, and not necessarily the one stored in the
+ 573 configuration. This initial make will be used as &quot;bootstrap make&quot;, and in a
+ 574 second stage, the make located by `configure` will be called. Normally, this
+ 575 will present no issues, but if you have a very old `make`, or a non-GNU Make
+ 576 `make` in your path, this might cause issues.
+ 577 
+ 578 If you want to override the default make found by `configure`, use the `MAKE`
+ 579 configure variable, e.g. `configure MAKE=/opt/gnu/make`.
+ 580 
+ 581 ### GNU Bash
+ 582 
+ 583 The JDK requires [GNU Bash](http://www.gnu.org/software/bash). No other shells
+ 584 are supported.
+ 585 
+ 586 At least version 3.2 of GNU Bash must be used.
+ 587 
+ 588 ## Running Configure
+ 589 
+ 590 To build the JDK, you need a &quot;configuration&quot;, which consists of a directory
+ 591 where to store the build output, coupled with information about the platform,
+ 592 the specific build machine, and choices that affect how the JDK is built.
+ 593 
+ 594 The configuration is created by the `configure` script. The basic invocation of
+ 595 the `configure` script looks like this:
+ 596 
+ 597 ```
+ 598 bash configure [options]
+ 599 ```
+ 600 
+ 601 This will create an output directory containing the configuration and setup an
+ 602 area for the build result. This directory typically looks like
+ 603 `build/linux-x64-server-release`, but the actual name depends on your specific
+ 604 configuration. (It can also be set directly, see [Using Multiple
+ 605 Configurations](#using-multiple-configurations)). This directory is referred to
+ 606 as `$BUILD` in this documentation.
+ 607 
+ 608 `configure` will try to figure out what system you are running on and where all
+ 609 necessary build components are. If you have all prerequisites for building
+ 610 installed, it should find everything. If it fails to detect any component
+ 611 automatically, it will exit and inform you about the problem.
+ 612 
+ 613 Some command line examples:
+ 614 
+ 615   * Create a 32-bit build for Windows with FreeType2 in `C:\freetype-i586`:
+ 616     ```
+ 617     bash configure --with-freetype=/cygdrive/c/freetype-i586 --with-target-bits=32
+ 618     ```
+ 619 
+ 620   * Create a debug build with the `server` JVM and DTrace enabled:
+ 621     ```
+ 622     bash configure --enable-debug --with-jvm-variants=server --enable-dtrace
+ 623     ```
+ 624 
+ 625 ### Common Configure Arguments
+ 626 
+ 627 Here follows some of the most common and important `configure` argument.
+ 628 
+ 629 To get up-to-date information on *all* available `configure` argument, please
+ 630 run:
+ 631 ```
+ 632 bash configure --help
+ 633 ```
+ 634 
+ 635 (Note that this help text also include general autoconf options, like
+ 636 `--dvidir`, that is not relevant to the JDK. To list only JDK-specific
+ 637 features, use `bash configure --help=short` instead.)
+ 638 
+ 639 #### Configure Arguments for Tailoring the Build
+ 640 
+ 641   * `--enable-debug` - Set the debug level to `fastdebug` (this is a shorthand
+ 642     for `--with-debug-level=fastdebug`)
+ 643   * `--with-debug-level=&lt;level&gt;` - Set the debug level, which can be `release`,
+ 644     `fastdebug`, `slowdebug` or `optimized`. Default is `release`. `optimized`
+ 645     is variant of `release` with additional Hotspot debug code.
+ 646   * `--with-native-debug-symbols=&lt;method&gt;` - Specify if and how native debug
+ 647     symbols should be built. Available methods are `none`, `internal`,
+ 648     `external`, `zipped`. Default behavior depends on platform. See [Native
+ 649     Debug Symbols](#native-debug-symbols) for more details.
+ 650   * `--with-version-string=&lt;string&gt;` - Specify the version string this build
+ 651     will be identified with.
+ 652   * `--with-version-&lt;part&gt;=&lt;value&gt;` - A group of options, where `&lt;part&gt;` can be
+ 653     any of `pre`, `opt`, `build`, `major`, `minor`, `security` or `patch`. Use
+ 654     these options to modify just the corresponding part of the version string
+ 655     from the default, or the value provided by `--with-version-string`.
+ 656   * `--with-jvm-variants=&lt;variant&gt;[,&lt;variant&gt;...]` - Build the specified variant
+ 657     (or variants) of Hotspot. Valid variants are: `server`, `client`,
+ 658     `minimal`, `core`, `zero`, `custom`. Note that not all
+ 659     variants are possible to combine in a single build.
+ 660   * `--enable-jvm-feature-&lt;feature&gt;` or `--disable-jvm-feature-&lt;feature&gt;` -
+ 661     Include (or exclude) `&lt;feature&gt;` as a JVM feature in Hotspot. You can also
+ 662     specify a list of features to be enabled, separated by space or comma, as
+ 663     `--with-jvm-features=&lt;feature&gt;[,&lt;feature&gt;...]`. If you prefix `&lt;feature&gt;`
+ 664     with a `-`, it will be disabled. These options will modify the default list
+ 665     of features for the JVM variant(s) you are building. For the `custom` JVM
+ 666     variant, the default list is empty. A complete list of valid JVM features
+ 667     can be found using `bash configure --help`.
+ 668   * `--with-target-bits=&lt;bits&gt;` - Create a target binary suitable for running
+ 669     on a `&lt;bits&gt;` platform. Use this to create 32-bit output on a 64-bit build
+ 670     platform, instead of doing a full cross-compile. (This is known as a
+ 671     *reduced* build.)
+ 672 
+ 673 On Linux, BSD and AIX, it is possible to override where Java by default
+ 674 searches for runtime/JNI libraries. This can be useful in situations where
+ 675 there is a special shared directory for system JNI libraries. This setting
+ 676 can in turn be overridden at runtime by setting the `java.library.path` property.
+ 677 
+ 678   * `--with-jni-libpath=&lt;path&gt;` - Use the specified path as a default
+ 679   when searching for runtime libraries.
+ 680 
+ 681 #### Configure Arguments for Native Compilation
+ 682 
+ 683   * `--with-devkit=&lt;path&gt;` - Use this devkit for compilers, tools and resources
+ 684   * `--with-sysroot=&lt;path&gt;` - Use this directory as sysroot
+ 685   * `--with-extra-path=&lt;path&gt;[;&lt;path&gt;]` - Prepend these directories to the
+ 686     default path when searching for all kinds of binaries
+ 687   * `--with-toolchain-path=&lt;path&gt;[;&lt;path&gt;]` - Prepend these directories when
+ 688     searching for toolchain binaries (compilers etc)
+ 689   * `--with-extra-cflags=&lt;flags&gt;` - Append these flags when compiling JDK C
+ 690     files
+ 691   * `--with-extra-cxxflags=&lt;flags&gt;` - Append these flags when compiling JDK C++
+ 692     files
+ 693   * `--with-extra-ldflags=&lt;flags&gt;` - Append these flags when linking JDK
+ 694     libraries
+ 695 
+ 696 #### Configure Arguments for External Dependencies
+ 697 
+ 698   * `--with-boot-jdk=&lt;path&gt;` - Set the path to the [Boot JDK](
+ 699     #boot-jdk-requirements)
+ 700   * `--with-freetype=&lt;path&gt;` - Set the path to [FreeType](#freetype)
+ 701   * `--with-cups=&lt;path&gt;` - Set the path to [CUPS](#cups)
+ 702   * `--with-x=&lt;path&gt;` - Set the path to [X11](#x11)
+ 703   * `--with-alsa=&lt;path&gt;` - Set the path to [ALSA](#alsa)
+ 704   * `--with-libffi=&lt;path&gt;` - Set the path to [libffi](#libffi)
+ 705   * `--with-jtreg=&lt;path&gt;` - Set the path to JTReg. See [Running Tests](
+ 706     #running-tests)
+ 707 
+ 708 Certain third-party libraries used by the JDK (libjpeg, giflib, libpng, lcms
+ 709 and zlib) are included in the JDK repository. The default behavior of the
+ 710 JDK build is to use the included (&quot;bundled&quot;) versions of libjpeg, giflib,
+ 711 libpng and lcms.
+ 712 For zlib, the system lib (if present) is used except on Windows and AIX.
+ 713 However the bundled libraries may be replaced by an external version.
+ 714 To do so, specify `system` as the `&lt;source&gt;` option in these arguments.
+ 715 (The default is `bundled`).
+ 716 
+ 717   * `--with-libjpeg=&lt;source&gt;` - Use the specified source for libjpeg
+ 718   * `--with-giflib=&lt;source&gt;` - Use the specified source for giflib
+ 719   * `--with-libpng=&lt;source&gt;` - Use the specified source for libpng
+ 720   * `--with-lcms=&lt;source&gt;` - Use the specified source for lcms
+ 721   * `--with-zlib=&lt;source&gt;` - Use the specified source for zlib
+ 722 
+ 723 On Linux, it is possible to select either static or dynamic linking of the C++
+ 724 runtime. The default is static linking, with dynamic linking as fallback if the
+ 725 static library is not found.
+ 726 
+ 727   * `--with-stdc++lib=&lt;method&gt;` - Use the specified method (`static`, `dynamic`
+ 728     or `default`) for linking the C++ runtime.
+ 729 
+ 730 ### Configure Control Variables
+ 731 
+ 732 It is possible to control certain aspects of `configure` by overriding the
+ 733 value of `configure` variables, either on the command line or in the
+ 734 environment.
+ 735 
+ 736 Normally, this is **not recommended**. If used improperly, it can lead to a
+ 737 broken configuration. Unless you&#39;re well versed in the build system, this is
+ 738 hard to use properly. Therefore, `configure` will print a warning if this is
+ 739 detected.
+ 740 
+ 741 However, there are a few `configure` variables, known as *control variables*
+ 742 that are supposed to be overridden on the command line. These are variables that
+ 743 describe the location of tools needed by the build, like `MAKE` or `GREP`. If
+ 744 any such variable is specified, `configure` will use that value instead of
+ 745 trying to autodetect the tool. For instance, `bash configure
+ 746 MAKE=/opt/gnumake4.0/bin/make`.
+ 747 
+ 748 If a configure argument exists, use that instead, e.g. use `--with-jtreg`
+ 749 instead of setting `JTREGEXE`.
+ 750 
+ 751 Also note that, despite what autoconf claims, setting `CFLAGS` will not
+ 752 accomplish anything. Instead use `--with-extra-cflags` (and similar for
+ 753 `cxxflags` and `ldflags`).
+ 754 
+ 755 ## Running Make
+ 756 
+ 757 When you have a proper configuration, all you need to do to build the JDK is to
+ 758 run `make`. (But see the warning at [GNU Make](#gnu-make) about running the
+ 759 correct version of make.)
+ 760 
+ 761 When running `make` without any arguments, the default target is used, which is
+ 762 the same as running `make default` or `make jdk`. This will build a minimal (or
+ 763 roughly minimal) set of compiled output (known as an &quot;exploded image&quot;) needed
+ 764 for a developer to actually execute the newly built JDK. The idea is that in an
+ 765 incremental development fashion, when doing a normal make, you should only
+ 766 spend time recompiling what&#39;s changed (making it purely incremental) and only
+ 767 do the work that&#39;s needed to actually run and test your code.
+ 768 
+ 769 The output of the exploded image resides in `$BUILD/jdk`. You can test the
+ 770 newly built JDK like this: `$BUILD/jdk/bin/java -version`.
+ 771 
+ 772 ### Common Make Targets
+ 773 
+ 774 Apart from the default target, here are some common make targets:
+ 775 
+ 776   * `hotspot` - Build all of hotspot (but only hotspot)
+ 777   * `hotspot-&lt;variant&gt;` - Build just the specified jvm variant
+ 778   * `images` or `product-images` - Build the JDK image
+ 779   * `docs` or `docs-image` - Build the documentation image
+ 780   * `test-image` - Build the test image
+ 781   * `all` or `all-images` - Build all images (product, docs and test)
+ 782   * `bootcycle-images` - Build images twice, second time with newly built JDK
+ 783     (good for testing)
+ 784   * `clean` - Remove all files generated by make, but not those generated by
+ 785     configure
+ 786   * `dist-clean` - Remove all files, including configuration
+ 787 
+ 788 Run `make help` to get an up-to-date list of important make targets and make
+ 789 control variables.
+ 790 
+ 791 It is possible to build just a single module, a single phase, or a single phase
+ 792 of a single module, by creating make targets according to these followin
+ 793 patterns. A phase can be either of `gensrc`, `gendata`, `copy`, `java`,
+ 794 `launchers`, or `libs`. See [Using Fine-Grained Make Targets](
+ 795 #using-fine-grained-make-targets) for more details about this functionality.
+ 796 
+ 797   * `&lt;phase&gt;` - Build the specified phase and everything it depends on
+ 798   * `&lt;module&gt;` - Build the specified module and everything it depends on
+ 799   * `&lt;module&gt;-&lt;phase&gt;` - Compile the specified phase for the specified module
+ 800     and everything it depends on
+ 801 
+ 802 Similarly, it is possible to clean just a part of the build by creating make
+ 803 targets according to these patterns:
+ 804 
+ 805   * `clean-&lt;outputdir&gt;` - Remove the subdir in the output dir with the name
+ 806   * `clean-&lt;phase&gt;` - Remove all build results related to a certain build
+ 807     phase
+ 808   * `clean-&lt;module&gt;` - Remove all build results related to a certain module
+ 809   * `clean-&lt;module&gt;-&lt;phase&gt;` - Remove all build results related to a certain
+ 810     module and phase
+ 811 
+ 812 ### Make Control Variables
+ 813 
+ 814 It is possible to control `make` behavior by overriding the value of `make`
+ 815 variables, either on the command line or in the environment.
+ 816 
+ 817 Normally, this is **not recommended**. If used improperly, it can lead to a
+ 818 broken build. Unless you&#39;re well versed in the build system, this is hard to
+ 819 use properly. Therefore, `make` will print a warning if this is detected.
+ 820 
+ 821 However, there are a few `make` variables, known as *control variables* that
+ 822 are supposed to be overridden on the command line. These make up the &quot;make time&quot;
+ 823 configuration, as opposed to the &quot;configure time&quot; configuration.
+ 824 
+ 825 #### General Make Control Variables
+ 826 
+ 827   * `JOBS` - Specify the number of jobs to build with. See [Build
+ 828     Performance](#build-performance).
+ 829   * `LOG` - Specify the logging level and functionality. See [Checking the
+ 830     Build Log File](#checking-the-build-log-file)
+ 831   * `CONF` and `CONF_NAME` - Selecting the configuration(s) to use. See [Using
+ 832     Multiple Configurations](#using-multiple-configurations)
+ 833 
+ 834 #### Test Make Control Variables
+ 835 
+ 836 These make control variables only make sense when running tests. Please see
+ 837 **Testing the JDK** ([html](testing.html), [markdown](testing.md)) for details.
+ 838 
+ 839   * `TEST`
+ 840   * `TEST_JOBS`
+ 841   * `JTREG`
+ 842   * `GTEST`
+ 843 
+ 844 #### Advanced Make Control Variables
+ 845 
+ 846 These advanced make control variables can be potentially unsafe. See [Hints and
+ 847 Suggestions for Advanced Users](#hints-and-suggestions-for-advanced-users) and
+ 848 [Understanding the Build System](#understanding-the-build-system) for details.
+ 849 
+ 850   * `SPEC`
+ 851   * `CONF_CHECK`
+ 852   * `COMPARE_BUILD`
+ 853   * `JDK_FILTER`
+ 854   * `SPEC_FILTER`
+ 855 
+ 856 ## Running Tests
+ 857 
+ 858 Most of the JDK tests are using the [JTReg](http://openjdk.org/jtreg)
+ 859 test framework. Make sure that your configuration knows where to find your
+ 860 installation of JTReg. If this is not picked up automatically, use the
+ 861 `--with-jtreg=&lt;path to jtreg home&gt;` option to point to the JTReg framework.
+ 862 Note that this option should point to the JTReg home, i.e. the top directory,
+ 863 containing `lib/jtreg.jar` etc.
+ 864 
+ 865 The [Adoption Group](https://wiki.openjdk.org/display/Adoption) provides
+ 866 recent builds of jtreg [here](
+ 867 https://ci.adoptopenjdk.net/view/Dependencies/job/dependency_pipeline/lastSuccessfulBuild/artifact/jtreg/).
+ 868 Download the latest `.tar.gz` file, unpack it, and point `--with-jtreg` to the
+ 869 `jtreg` directory that you just unpacked.
+ 870 
+ 871 Building of Hotspot Gtest suite requires the source code of Google
+ 872 Test framework.  The top directory, which contains both `googletest`
+ 873 and `googlemock` directories, should be specified via `--with-gtest`.
+ 874 The minimum supported version of Google Test is 1.13.0, whose source
+ 875 code can be obtained:
+ 876 
+ 877  * by downloading and unpacking the source bundle from [here](https://github.com/google/googletest/releases/tag/v1.13.0)
+ 878  * or by checking out `v1.13.0` tag of `googletest` project: `git clone -b v1.13.0 https://github.com/google/googletest`
+ 879 
+ 880 To execute the most basic tests (tier 1), use:
+ 881 ```
+ 882 make run-test-tier1
+ 883 ```
+ 884 
+ 885 For more details on how to run tests, please see **Testing the JDK**
+ 886 ([html](testing.html), [markdown](testing.md)).
+ 887 
+ 888 ## Signing
+ 889 
+ 890 ### macOS
+ 891 
+ 892 Modern versions of macOS require applications to be signed and notarizied before
+ 893 distribution. See Apple&#39;s documentation for more background on what this means
+ 894 and how it works. To help support this, the JDK build can be configured to
+ 895 automatically sign all native binaries, and the JDK bundle, with all the options
+ 896 needed for successful notarization, as well as all the entitlements required by
+ 897 the JDK. To enable `hardened` signing, use configure parameter
+ 898 `--with-macosx-codesign=hardened` and configure the signing identity you wish to
+ 899 use with `--with-macosx-codesign-identity=&lt;identity&gt;`. The identity refers to a
+ 900 signing identity from Apple that needs to be preinstalled on the build host.
+ 901 
+ 902 When not signing for distribution with the hardened option, the JDK build will
+ 903 still attempt to perform `adhoc` signing to add the special entitlement
+ 904 `com.apple.security.get-task-allow` to each binary. This entitlement is required
+ 905 to be able to dump core files from a process. Note that adding this entitlement
+ 906 makes the build invalid for notarization, so it is only added when signing in
+ 907 `debug` mode. To explicitly enable this kind of adhoc signing, use configure
+ 908 parameter `--with-macosx-codesign=debug`. It will be enabled by default in most
+ 909 cases.
+ 910 
+ 911 It&#39;s also possible to completely disable any explicit codesign operations done
+ 912 by the JDK build using the configure parameter `--without-macosx-codesign`.
+ 913 The exact behavior then depends on the architecture. For macOS on x64, it (at
+ 914 least at the time of this writing) results in completely unsigned binaries that
+ 915 should still work fine for development and debugging purposes. On aarch64, the
+ 916 Xcode linker will apply a default &quot;adhoc&quot; signing, without any entitlements.
+ 917 Such a build does not allow dumping core files.
+ 918 
+ 919 The default mode &quot;auto&quot; will try for `hardened` signing if the debug level is
+ 920 `release` and either the default identity or the specified identity is valid.
+ 921 If hardened isn&#39;t possible, then `debug` signing is chosen if it works. If
+ 922 nothing works, the codesign build step is disabled.
+ 923 
+ 924 ## Cross-compiling
+ 925 
+ 926 Cross-compiling means using one platform (the *build* platform) to generate
+ 927 output that can ran on another platform (the *target* platform).
+ 928 
+ 929 The typical reason for cross-compiling is that the build is performed on a more
+ 930 powerful desktop computer, but the resulting binaries will be able to run on a
+ 931 different, typically low-performing system. Most of the complications that
+ 932 arise when building for embedded is due to this separation of *build* and
+ 933 *target* systems.
+ 934 
+ 935 This requires a more complex setup and build procedure. This section assumes
+ 936 you are familiar with cross-compiling in general, and will only deal with the
+ 937 particularities of cross-compiling the JDK. If you are new to cross-compiling,
+ 938 please see the [external links at Wikipedia](
+ 939 https://en.wikipedia.org/wiki/Cross_compiler#External_links) for a good start
+ 940 on reading materials.
+ 941 
+ 942 Cross-compiling the JDK requires you to be able to build both for the build
+ 943 platform and for the target platform. The reason for the former is that we need
+ 944 to build and execute tools during the build process, both native tools and Java
+ 945 tools.
+ 946 
+ 947 If all you want to do is to compile a 32-bit version, for the same OS, on a
+ 948 64-bit machine, consider using `--with-target-bits=32` instead of doing a
+ 949 full-blown cross-compilation. (While this surely is possible, it&#39;s a lot more
+ 950 work and will take much longer to build.)
+ 951 
+ 952 ### Cross compiling the easy way with OpenJDK devkits
+ 953 
+ 954 The OpenJDK build system provides out-of-the box support for creating and using
+ 955 so called devkits. A `devkit` is basically a collection of a cross-compiling
+ 956 toolchain and a sysroot environment which can easily be used together with the
+ 957 `--with-devkit` configure option to cross compile the OpenJDK. On Linux/x86_64,
+ 958 the following command:
+ 959 ```
+ 960 bash configure --with-devkit=&lt;devkit-path&gt; --openjdk-target=ppc64-linux-gnu &amp;&amp; make
+ 961 ```
+ 962 
+ 963 will configure and build OpenJDK for Linux/ppc64 assuming that `&lt;devkit-path&gt;`
+ 964 points to a Linux/x86_64 to Linux/ppc64 devkit.
+ 965 
+ 966 Devkits can be created from the `make/devkit` directory by executing:
+ 967 ```
+ 968 make [ TARGETS=&quot;&lt;TARGET_TRIPLET&gt;+&quot; ] [ BASE_OS=&lt;OS&gt; ] [ BASE_OS_VERSION=&lt;VER&gt; ]
+ 969 ```
+ 970 
+ 971 where `TARGETS` contains one or more `TARGET_TRIPLET`s of the form
+ 972 described in [section 3.4 of the GNU Autobook](
+ 973 https://sourceware.org/autobook/autobook/autobook_17.html). If no
+ 974 targets are given, a native toolchain for the current platform will be
+ 975 created. Currently, at least the following targets are known to work:
+ 976 
+ 977  Supported devkit targets
+ 978  -------------------------
+ 979  x86_64-linux-gnu
+ 980  aarch64-linux-gnu
+ 981  arm-linux-gnueabihf
+ 982  ppc64-linux-gnu
+ 983  ppc64le-linux-gnu
+ 984  s390x-linux-gnu
+ 985 
+ 986 `BASE_OS` must be one of &quot;OEL6&quot; for Oracle Enterprise Linux 6 or
+ 987 &quot;Fedora&quot; (if not specified &quot;OEL6&quot; will be the default). If the base OS
+ 988 is &quot;Fedora&quot; the corresponding Fedora release can be specified with the
+ 989 help of the `BASE_OS_VERSION` option (with &quot;27&quot; as default version).
+ 990 If the build is successful, the new devkits can be found in the
+ 991 `build/devkit/result` subdirectory:
+ 992 ```
+ 993 cd make/devkit
+ 994 make TARGETS=&quot;ppc64le-linux-gnu aarch64-linux-gnu&quot; BASE_OS=Fedora BASE_OS_VERSION=21
+ 995 ls -1 ../../build/devkit/result/
+ 996 x86_64-linux-gnu-to-aarch64-linux-gnu
+ 997 x86_64-linux-gnu-to-ppc64le-linux-gnu
+ 998 ```
+ 999 
+1000 Notice that devkits are not only useful for targeting different build
+1001 platforms. Because they contain the full build dependencies for a
+1002 system (i.e. compiler and root file system), they can easily be used
+1003 to build well-known, reliable and reproducible build environments. You
+1004 can for example create and use a devkit with GCC 7.3 and a Fedora 12
+1005 sysroot environment (with glibc 2.11) on Ubuntu 14.04 (which doesn&#39;t
+1006 have GCC 7.3 by default) to produce OpenJDK binaries which will run on
+1007 all Linux systems with runtime libraries newer than the ones from
+1008 Fedora 12 (e.g. Ubuntu 16.04, SLES 11 or RHEL 6).
+1009 
+1010 ### Boot JDK and Build JDK
+1011 
+1012 When cross-compiling, make sure you use a boot JDK that runs on the *build*
+1013 system, and not on the *target* system.
+1014 
+1015 To be able to build, we need a &quot;Build JDK&quot;, which is a JDK built from the
+1016 current sources (that is, the same as the end result of the entire build
+1017 process), but able to run on the *build* system, and not the *target* system.
+1018 (In contrast, the Boot JDK should be from an older release, e.g. JDK 8 when
+1019 building JDK 9.)
+1020 
+1021 The build process will create a minimal Build JDK for you, as part of building.
+1022 To speed up the build, you can use `--with-build-jdk` to `configure` to point
+1023 to a pre-built Build JDK. Please note that the build result is unpredictable,
+1024 and can possibly break in subtle ways, if the Build JDK does not **exactly**
+1025 match the current sources.
+1026 
+1027 ### Specifying the Target Platform
+1028 
+1029 You *must* specify the target platform when cross-compiling. Doing so will also
+1030 automatically turn the build into a cross-compiling mode. The simplest way to
+1031 do this is to use the `--openjdk-target` argument, e.g.
+1032 `--openjdk-target=arm-linux-gnueabihf`. or `--openjdk-target=aarch64-oe-linux`.
+1033 This will automatically set the `--host` and `--target` options for
+1034 autoconf, which can otherwise be confusing. (In autoconf terminology, the
+1035 &quot;target&quot; is known as &quot;host&quot;, and &quot;target&quot; is used for building a Canadian
+1036 cross-compiler.)
+1037 
+1038 If `--build` has not been explicitly passed to configure, `--openjdk-target`
+1039 will autodetect the build platform and internally set the flag automatically,
+1040 otherwise the platform that was explicitly passed to `--build` will be used
+1041 instead.
+1042 
+1043 ### Toolchain Considerations
+1044 
+1045 You will need two copies of your toolchain, one which generates output that can
+1046 run on the target system (the normal, or *target*, toolchain), and one that
+1047 generates output that can run on the build system (the *build* toolchain). Note
+1048 that cross-compiling is only supported for gcc at the time being. The gcc
+1049 standard is to prefix cross-compiling toolchains with the target denominator.
+1050 If you follow this standard, `configure` is likely to pick up the toolchain
+1051 correctly.
+1052 
+1053 The *build* toolchain will be autodetected just the same way the normal
+1054 *build*/*target* toolchain will be autodetected when not cross-compiling. If
+1055 this is not what you want, or if the autodetection fails, you can specify a
+1056 devkit containing the *build* toolchain using `--with-build-devkit` to
+1057 `configure`, or by giving `BUILD_CC` and `BUILD_CXX` arguments.
+1058 
+1059 It is often helpful to locate the cross-compilation tools, headers and
+1060 libraries in a separate directory, outside the normal path, and point out that
+1061 directory to `configure`. Do this by setting the sysroot (`--with-sysroot`) and
+1062 appending the directory when searching for cross-compilations tools
+1063 (`--with-toolchain-path`). As a compact form, you can also use `--with-devkit`
+1064 to point to a single directory, if it is correctly setup. (See `basics.m4` for
+1065 details.)
+1066 
+1067 ### Native Libraries
+1068 
+1069 You will need copies of external native libraries for the *target* system,
+1070 present on the *build* machine while building.
+1071 
+1072 Take care not to replace the *build* system&#39;s version of these libraries by
+1073 mistake, since that can render the *build* machine unusable.
+1074 
+1075 Make sure that the libraries you point to (ALSA, X11, etc) are for the
+1076 *target*, not the *build*, platform.
+1077 
+1078 #### ALSA
+1079 
+1080 You will need alsa libraries suitable for your *target* system. For most cases,
+1081 using Debian&#39;s pre-built libraries work fine.
+1082 
+1083 Note that alsa is needed even if you only want to build a headless JDK.
+1084 
+1085   * Go to [Debian Package Search](https://www.debian.org/distrib/packages) and
+1086     search for the `libasound2` and `libasound2-dev` packages for your *target*
+1087     system. Download them to /tmp.
+1088 
+1089   * Install the libraries into the cross-compilation toolchain. For instance:
+1090 ```
+1091 cd /tools/gcc-linaro-arm-linux-gnueabihf-raspbian-2012.09-20120921_linux/arm-linux-gnueabihf/libc
+1092 dpkg-deb -x /tmp/libasound2_1.0.25-4_armhf.deb .
+1093 dpkg-deb -x /tmp/libasound2-dev_1.0.25-4_armhf.deb .
+1094 ```
+1095 
+1096   * If alsa is not properly detected by `configure`, you can point it out by
+1097     `--with-alsa`.
+1098 
+1099 #### X11
+1100 
+1101 You will need X11 libraries suitable for your *target* system. For most cases,
+1102 using Debian&#39;s pre-built libraries work fine.
+1103 
+1104 Note that X11 is needed even if you only want to build a headless JDK.
+1105 
+1106   * Go to [Debian Package Search](https://www.debian.org/distrib/packages),
+1107     search for the following packages for your *target* system, and download them
+1108     to /tmp/target-x11:
+1109       * libxi
+1110       * libxi-dev
+1111       * x11proto-core-dev
+1112       * x11proto-input-dev
+1113       * x11proto-kb-dev
+1114       * x11proto-render-dev
+1115       * x11proto-xext-dev
+1116       * libice-dev
+1117       * libxrender
+1118       * libxrender-dev
+1119       * libxrandr-dev
+1120       * libsm-dev
+1121       * libxt-dev
+1122       * libx11
+1123       * libx11-dev
+1124       * libxtst
+1125       * libxtst-dev
+1126       * libxext
+1127       * libxext-dev
+1128 
+1129   * Install the libraries into the cross-compilation toolchain. For instance:
+1130     ```
+1131     cd /tools/gcc-linaro-arm-linux-gnueabihf-raspbian-2012.09-20120921_linux/arm-linux-gnueabihf/libc/usr
+1132     mkdir X11R6
+1133     cd X11R6
+1134     for deb in /tmp/target-x11/*.deb ; do dpkg-deb -x $deb . ; done
+1135     mv usr/* .
+1136     cd lib
+1137     cp arm-linux-gnueabihf/* .
+1138     ```
+1139 
+1140     You can ignore the following messages. These libraries are not needed to
+1141     successfully complete a full JDK build.
+1142     ```
+1143     cp: cannot stat `arm-linux-gnueabihf/libICE.so&#39;: No such file or directory
+1144     cp: cannot stat `arm-linux-gnueabihf/libSM.so&#39;: No such file or directory
+1145     cp: cannot stat `arm-linux-gnueabihf/libXt.so&#39;: No such file or directory
+1146     ```
+1147 
+1148   * If the X11 libraries are not properly detected by `configure`, you can
+1149     point them out by `--with-x`.
+1150 
+1151 ### Cross compiling with Debian sysroots
+1152 
+1153 Fortunately, you can create sysroots for foreign architectures with tools
+1154 provided by your OS. On Debian/Ubuntu systems, one could use `qemu-deboostrap` to
+1155 create the *target* system chroot, which would have the native libraries and headers
+1156 specific to that *target* system. After that, we can use the cross-compiler on the *build*
+1157 system, pointing into chroot to get the build dependencies right. This allows building
+1158 for foreign architectures with native compilation speed.
+1159 
+1160 For example, cross-compiling to AArch64 from x86_64 could be done like this:
+1161 
+1162   * Install cross-compiler on the *build* system:
+1163     ```
+1164     apt install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
+1165     ```
+1166 
+1167   * Create chroot on the *build* system, configuring it for *target* system:
+1168     ```
+1169     sudo qemu-debootstrap \
+1170       --arch=arm64 \
+1171       --verbose \
+1172       --include=fakeroot,symlinks,build-essential,libx11-dev,libxext-dev,libxrender-dev,libxrandr-dev,libxtst-dev,libxt-dev,libcups2-dev,libfontconfig1-dev,libasound2-dev,libfreetype6-dev,libpng-dev,libffi-dev \
+1173       --resolve-deps \
+1174       buster \
+1175       ~/sysroot-arm64 \
+1176       http://httpredir.debian.org/debian/
+1177     ```
+1178 
+1179   * Make sure the symlinks inside the newly created chroot point to proper locations:
+1180     ```
+1181     sudo chroot ~/sysroot-arm64 symlinks -cr .
+1182     ```
+1183 
+1184   * Configure and build with newly created chroot as sysroot/toolchain-path:
+1185     ```
+1186     sh ./configure \
+1187       --openjdk-target=aarch64-linux-gnu \
+1188       --with-sysroot=~/sysroot-arm64
+1189     make images
+1190     ls build/linux-aarch64-server-release/
+1191     ```
+1192 
+1193 The build does not create new files in that chroot, so it can be reused for multiple builds
+1194 without additional cleanup.
+1195 
+1196 The build system should automatically detect the toolchain paths and dependencies, but sometimes
+1197 it might require a little nudge with:
+1198 
+1199   * Native compilers: override `CC` or `CXX` for `./configure`
+1200 
+1201   * Freetype lib location: override `--with-freetype-lib`, for example `${sysroot}/usr/lib/${target}/`
+1202 
+1203   * Freetype includes location: override `--with-freetype-include` for example `${sysroot}/usr/include/freetype2/`
+1204 
+1205   * X11 libraries location: override `--x-libraries`, for example `${sysroot}/usr/lib/${target}/`
+1206 
+1207 Architectures that are known to successfully cross-compile like this are:
+1208 
+1209   Target        Debian tree  Debian arch   `--openjdk-target=...`   `--with-jvm-variants=...`
+1210   ------------  ------------ ------------- ------------------------ --------------
+1211   x86           buster       i386          i386-linux-gnu           (all)
+1212   arm           buster       armhf         arm-linux-gnueabihf      (all)
+1213   aarch64       buster       arm64         aarch64-linux-gnu        (all)
+1214   ppc64le       buster       ppc64el       powerpc64le-linux-gnu    (all)
+1215   s390x         buster       s390x         s390x-linux-gnu          (all)
+1216   mipsle        buster       mipsel        mipsel-linux-gnu         zero
+1217   mips64le      buster       mips64el      mips64el-linux-gnueabi64 zero
+1218   armel         buster       arm           arm-linux-gnueabi        zero
+1219   ppc           sid          powerpc       powerpc-linux-gnu        zero
+1220   ppc64be       sid          ppc64         powerpc64-linux-gnu      (all)
+1221   m68k          sid          m68k          m68k-linux-gnu           zero
+1222   alpha         sid          alpha         alpha-linux-gnu          zero
+1223   sh4           sid          sh4           sh4-linux-gnu            zero
+1224 
+1225 ### Building for ARM/aarch64
+1226 
+1227 A common cross-compilation target is the ARM CPU. When building for ARM, it is
+1228 useful to set the ABI profile. A number of pre-defined ABI profiles are
+1229 available using `--with-abi-profile`: arm-vfp-sflt, arm-vfp-hflt, arm-sflt,
+1230 armv5-vfp-sflt, armv6-vfp-hflt. Note that soft-float ABIs are no longer
+1231 properly supported by the JDK.
+1232 
+1233 ### Building for musl
+1234 
+1235 Just like it&#39;s possible to cross-compile for a different CPU, it&#39;s possible to
+1236 cross-compile for musl libc on a glibc-based *build* system.
+1237 A devkit suitable for most target CPU architectures can be obtained from
+1238 [musl.cc](https://musl.cc). After installing the required packages in the
+1239 sysroot, configure the build with `--openjdk-target`:
+1240 
+1241 ```
+1242 sh ./configure --with-jvm-variants=server \
+1243 --with-boot-jdk=$BOOT_JDK \
+1244 --with-build-jdk=$BUILD_JDK \
+1245 --openjdk-target=x86_64-unknown-linux-musl \
+1246 --with-devkit=$DEVKIT \
+1247 --with-sysroot=$SYSROOT
+1248 ```
+1249 
+1250 and run `make` normally.
+1251 
+1252 ### Verifying the Build
+1253 
+1254 The build will end up in a directory named like
+1255 `build/linux-arm-normal-server-release`.
+1256 
+1257 Inside this build output directory, the `images/jdk` will contain the newly
+1258 built JDK, for your *target* system.
+1259 
+1260 Copy these folders to your *target* system. Then you can run e.g.
+1261 `images/jdk/bin/java -version`.
+1262 
+1263 ## Build Performance
+1264 
+1265 Building the JDK requires a lot of horsepower. Some of the build tools can be
+1266 adjusted to utilize more or less of resources such as parallel threads and
+1267 memory. The `configure` script analyzes your system and selects reasonable
+1268 values for such options based on your hardware. If you encounter resource
+1269 problems, such as out of memory conditions, you can modify the detected values
+1270 with:
+1271 
+1272   * `--with-num-cores` -- number of cores in the build system, e.g.
+1273     `--with-num-cores=8`.
+1274 
+1275   * `--with-memory-size` -- memory (in MB) available in the build system, e.g.
+1276     `--with-memory-size=1024`
+1277 
+1278 You can also specify directly the number of build jobs to use with
+1279 `--with-jobs=N` to `configure`, or `JOBS=N` to `make`. Do not use the `-j` flag
+1280 to `make`. In most cases it will be ignored by the makefiles, but it can cause
+1281 problems for some make targets.
+1282 
+1283 It might also be necessary to specify the JVM arguments passed to the Boot JDK,
+1284 using e.g. `--with-boot-jdk-jvmargs=&quot;-Xmx8G&quot;`. Doing so will override the
+1285 default JVM arguments passed to the Boot JDK.
+1286 
+1287 At the end of a successful execution of `configure`, you will get a performance
+1288 summary, indicating how well the build will perform. Here you will also get
+1289 performance hints. If you want to build fast, pay attention to those!
+1290 
+1291 If you want to tweak build performance, run with `make LOG=info` to get a build
+1292 time summary at the end of the build process.
+1293 
+1294 ### Disk Speed
+1295 
+1296 If you are using network shares, e.g. via NFS, for your source code, make sure
+1297 the build directory is situated on local disk (e.g. by `ln -s
+1298 /localdisk/jdk-build $JDK-SHARE/build`). The performance penalty is extremely
+1299 high for building on a network share; close to unusable.
+1300 
+1301 Also, make sure that your build tools (including Boot JDK and toolchain) is
+1302 located on a local disk and not a network share.
+1303 
+1304 As has been stressed elsewhere, do use SSD for source code and build directory,
+1305 as well as (if possible) the build tools.
+1306 
+1307 ### Virus Checking
+1308 
+1309 The use of virus checking software, especially on Windows, can *significantly*
+1310 slow down building of the JDK. If possible, turn off such software, or exclude
+1311 the directory containing the JDK source code from on-the-fly checking.
+1312 
+1313 ### Ccache
+1314 
+1315 The JDK build supports building with ccache when using gcc or clang. Using
+1316 ccache can radically speed up compilation of native code if you often rebuild
+1317 the same sources. Your milage may vary however, so we recommend evaluating it
+1318 for yourself. To enable it, make sure it&#39;s on the path and configure with
+1319 `--enable-ccache`.
+1320 
+1321 ### Precompiled Headers
+1322 
+1323 By default, the Hotspot build uses preccompiled headers (PCH) on the toolchains
+1324 were it is properly supported (clang, gcc, and Visual Studio). Normally, this
+1325 speeds up the build process, but in some circumstances, it can actually slow
+1326 things down.
+1327 
+1328 You can experiment by disabling precompiled headers using
+1329 `--disable-precompiled-headers`.
+1330 
+1331 ### Icecc / icecream
+1332 
+1333 [icecc/icecream](http://github.com/icecc/icecream) is a simple way to setup a
+1334 distributed compiler network. If you have multiple machines available for
+1335 building the JDK, you can drastically cut individual build times by utilizing
+1336 it.
+1337 
+1338 To use, setup an icecc network, and install icecc on the build machine. Then
+1339 run `configure` using `--enable-icecc`.
+1340 
+1341 ### Using the javac server
+1342 
+1343 To speed up compilation of Java code, especially during incremental
+1344 compilations, the javac server is automatically enabled in the configuration
+1345 step by default. To explicitly enable or disable the javac server, use either
+1346 `--enable-javac-server` or `--disable-javac-server`.
+1347 
+1348 ### Building the Right Target
+1349 
+1350 Selecting the proper target to build can have dramatic impact on build time.
+1351 For normal usage, `jdk` or the default target is just fine. You only need to
+1352 build `images` for shipping, or if your tests require it.
+1353 
+1354 See also [Using Fine-Grained Make Targets](#using-fine-grained-make-targets) on
+1355 how to build an even smaller subset of the product.
+1356 
+1357 ## Troubleshooting
+1358 
+1359 If your build fails, it can sometimes be difficult to pinpoint the problem or
+1360 find a proper solution.
+1361 
+1362 ### Locating the Source of the Error
+1363 
+1364 When a build fails, it can be hard to pinpoint the actual cause of the error.
+1365 In a typical build process, different parts of the product build in parallel,
+1366 with the output interlaced.
+1367 
+1368 #### Build Failure Summary
+1369 
+1370 To help you, the build system will print a failure summary at the end. It looks
+1371 like this:
+1372 
+1373 ```
+1374 ERROR: Build failed for target &#39;hotspot&#39; in configuration &#39;linux-x64&#39; (exit code 2)
+1375 
+1376 === Output from failing command(s) repeated here ===
+1377 * For target hotspot_variant-server_libjvm_objs_psMemoryPool.o:
+1378 /localhome/git/jdk-sandbox/hotspot/src/share/vm/services/psMemoryPool.cpp:1:1: error: &#39;failhere&#39; does not name a type
+1379    ... (rest of output omitted)
+1380 
+1381 * All command lines available in /localhome/git/jdk-sandbox/build/linux-x64/make-support/failure-logs.
+1382 === End of repeated output ===
+1383 
+1384 === Make failed targets repeated here ===
+1385 lib/CompileJvm.gmk:207: recipe for target &#39;/localhome/git/jdk-sandbox/build/linux-x64/hotspot/variant-server/libjvm/objs/psMemoryPool.o&#39; failed
+1386 make/Main.gmk:263: recipe for target &#39;hotspot-server-libs&#39; failed
+1387 === End of repeated output ===
+1388 
+1389 Hint: Try searching the build log for the name of the first failed target.
+1390 Hint: If caused by a warning, try configure --disable-warnings-as-errors.
+1391 ```
+1392 
+1393 Let&#39;s break it down! First, the selected configuration, and the top-level
+1394 target you entered on the command line that caused the failure is printed.
+1395 
+1396 Then, between the `Output from failing command(s) repeated here` and `End of
+1397 repeated output` the first lines of output (stdout and stderr) from the actual
+1398 failing command is repeated. In most cases, this is the error message that
+1399 caused the build to fail. If multiple commands were failing (this can happen in
+1400 a parallel build), output from all failed commands will be printed here.
+1401 
+1402 The path to the `failure-logs` directory is printed. In this file you will find
+1403 a `&lt;target&gt;.log` file that contains the output from this command in its
+1404 entirety, and also a `&lt;target&gt;.cmd`, which contain the complete command line
+1405 used for running this command. You can re-run the failing command by executing
+1406 `. &lt;path to failure-logs&gt;/&lt;target&gt;.cmd` in your shell.
+1407 
+1408 Another way to trace the failure is to follow the chain of make targets, from
+1409 top-level targets to individual file targets. Between `Make failed targets
+1410 repeated here` and `End of repeated output` the output from make showing this
+1411 chain is repeated. The first failed recipe will typically contain the full path
+1412 to the file in question that failed to compile. Following lines will show a
+1413 trace of make targets why we ended up trying to compile that file.
+1414 
+1415 Finally, some hints are given on how to locate the error in the complete log.
+1416 In this example, we would try searching the log file for &quot;`psMemoryPool.o`&quot;.
+1417 Another way to quickly locate make errors in the log is to search for &quot;`]
+1418 Error`&quot; or &quot;`***`&quot;.
+1419 
+1420 Note that the build failure summary will only help you if the issue was a
+1421 compilation failure or similar. If the problem is more esoteric, or is due to
+1422 errors in the build machinery, you will likely get empty output logs, and `No
+1423 indication of failed target found` instead of the make target chain.
+1424 
+1425 #### Checking the Build Log File
+1426 
+1427 The output (stdout and stderr) from the latest build is always stored in
+1428 `$BUILD/build.log`. The previous build log is stored as `build.log.old`. This
+1429 means that it is not necessary to redirect the build output yourself if you
+1430 want to process it.
+1431 
+1432 You can increase the verbosity of the log file, by the `LOG` control variable
+1433 to `make`. If you want to see the command lines used in compilations, use
+1434 `LOG=cmdlines`. To increase the general verbosity, use `LOG=info`, `LOG=debug`
+1435 or `LOG=trace`. Both of these can be combined with `cmdlines`, e.g.
+1436 `LOG=info,cmdlines`. The `debug` log level will show most shell commands
+1437 executed by make, and `trace` will show all. Beware that both these log levels
+1438 will produce a massive build log!
+1439 
+1440 ### Fixing Unexpected Build Failures
+1441 
+1442 Most of the time, the build will fail due to incorrect changes in the source
+1443 code.
+1444 
+1445 Sometimes the build can fail with no apparent changes that have caused the
+1446 failure. If this is the first time you are building the JDK on this particular
+1447 computer, and the build fails, the problem is likely with your build
+1448 environment. But even if you have previously built the JDK with success, and it
+1449 now fails, your build environment might have changed (perhaps due to OS
+1450 upgrades or similar). But most likely, such failures are due to problems with
+1451 the incremental rebuild.
+1452 
+1453 #### Problems with the Build Environment
+1454 
+1455 Make sure your configuration is correct. Re-run `configure`, and look for any
+1456 warnings. Warnings that appear in the middle of the `configure` output is also
+1457 repeated at the end, after the summary. The entire log is stored in
+1458 `$BUILD/configure.log`.
+1459 
+1460 Verify that the summary at the end looks correct. Are you indeed using the Boot
+1461 JDK and native toolchain that you expect?
+1462 
+1463 By default, the JDK has a strict approach where warnings from the compiler is
+1464 considered errors which fail the build. For very new or very old compiler
+1465 versions, this can trigger new classes of warnings, which thus fails the build.
+1466 Run `configure` with `--disable-warnings-as-errors` to turn of this behavior.
+1467 (The warnings will still show, but not make the build fail.)
+1468 
+1469 #### Problems with Incremental Rebuilds
+1470 
+1471 Incremental rebuilds mean that when you modify part of the product, only the
+1472 affected parts get rebuilt. While this works great in most cases, and
+1473 significantly speed up the development process, from time to time complex
+1474 interdependencies will result in an incorrect build result. This is the most
+1475 common cause for unexpected build problems.
+1476 
+1477 Here are a suggested list of things to try if you are having unexpected build
+1478 problems. Each step requires more time than the one before, so try them in
+1479 order. Most issues will be solved at step 1 or 2.
+1480 
+1481  1. Make sure your repository is up-to-date
+1482 
+1483     Run `git pull origin master` to make sure you have the latest changes.
+1484 
+1485  2. Clean build results
+1486 
+1487     The simplest way to fix incremental rebuild issues is to run `make clean`.
+1488     This will remove all build results, but not the configuration or any build
+1489     system support artifacts. In most cases, this will solve build errors
+1490     resulting from incremental build mismatches.
+1491 
+1492  3. Completely clean the build directory.
+1493 
+1494     If this does not work, the next step is to run `make dist-clean`, or
+1495     removing the build output directory (`$BUILD`). This will clean all
+1496     generated output, including your configuration. You will need to re-run
+1497     `configure` after this step. A good idea is to run `make
+1498     print-configuration` before running `make dist-clean`, as this will print
+1499     your current `configure` command line. Here&#39;s a way to do this:
+1500 
+1501     ```
+1502     make print-configuration &gt; current-configuration
+1503     make dist-clean
+1504     bash configure $(cat current-configuration)
+1505     make
+1506     ```
+1507 
+1508  4. Re-clone the Git repository
+1509 
+1510     Sometimes the Git repository gets in a state that causes the product
+1511     to be un-buildable. In such a case, the simplest solution is often the
+1512     &quot;sledgehammer approach&quot;: delete the entire repository, and re-clone it.
+1513     If you have local changes, save them first to a different location using
+1514     `git format-patch`.
+1515 
+1516 ### Specific Build Issues
+1517 
+1518 #### Clock Skew
+1519 
+1520 If you get an error message like this:
+1521 ```
+1522 File &#39;xxx&#39; has modification time in the future.
+1523 Clock skew detected. Your build may be incomplete.
+1524 ```
+1525 then the clock on your build machine is out of sync with the timestamps on the
+1526 source files. Other errors, apparently unrelated but in fact caused by the
+1527 clock skew, can occur along with the clock skew warnings. These secondary
+1528 errors may tend to obscure the fact that the true root cause of the problem is
+1529 an out-of-sync clock.
+1530 
+1531 If you see these warnings, reset the clock on the build machine, run `make
+1532 clean` and restart the build.
+1533 
+1534 #### Out of Memory Errors
+1535 
+1536 On Windows, you might get error messages like this:
+1537 ```
+1538 fatal error - couldn&#39;t allocate heap
+1539 cannot create ... Permission denied
+1540 spawn failed
+1541 ```
+1542 This can be a sign of a Cygwin problem. See the information about solving
+1543 problems in the [Cygwin](#cygwin) section. Rebooting the computer might help
+1544 temporarily.
+1545 
+1546 #### Spaces in Path
+1547 
+1548 On Windows, when configuring, `fixpath.sh` may report that some directory
+1549 names have spaces. Usually, it assumes those directories have
+1550 [short paths](https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-8dot3name).
+1551 You can run `fsutil file setshortname` in `cmd` on certain directories, such as
+1552 `Microsoft Visual Studio` or `Windows Kits`, to assign arbitrary short paths so
+1553 `configure` can access them.
+1554 
+1555 ### Getting Help
+1556 
+1557 If none of the suggestions in this document helps you, or if you find what you
+1558 believe is a bug in the build system, please contact the Build Group by sending
+1559 a mail to [build-dev@openjdk.org](mailto:build-dev@openjdk.org).
+1560 Please include the relevant parts of the configure and/or build log.
+1561 
+1562 If you need general help or advice about developing for the JDK, you can also
+1563 contact the Adoption Group. See the section on [Contributing to OpenJDK](
+1564 #contributing-to-openjdk) for more information.
+1565 
+1566 ## Reproducible Builds
+1567 
+1568 Build reproducibility is the property of getting exactly the same bits out when
+1569 building, every time, independent on who builds the product, or where. This is
+1570 for many reasons a harder goal than it initially appears, but it is an important
+1571 goal, for security reasons and others. Please see [Reproducible Builds](
+1572 https://reproducible-builds.org) for more information about the background and
+1573 reasons for reproducible builds.
+1574 
+1575 Currently, it is not possible to build OpenJDK fully reproducibly, but getting
+1576 there is an ongoing effort.
+1577 
+1578 An absolute prerequisite for building reproducible is to speficy a fixed build
+1579 time, since time stamps are embedded in many file formats. This is done by
+1580 setting the `SOURCE_DATE_EPOCH` environment variable, which is an [industry
+1581 standard]( https://reproducible-builds.org/docs/source-date-epoch/), that many
+1582 tools, such as gcc, recognize, and use in place of the current time when
+1583 generating output.
+1584 
+1585 To generate reproducible builds, you must set `SOURCE_DATE_EPOCH` before running
+1586 `configure`. The value in `SOURCE_DATE_EPOCH` will be stored in the
+1587 configuration, and used by `make`. Setting `SOURCE_DATE_EPOCH` before running
+1588 `make` will have no effect on the build.
+1589 
+1590 You must also make sure your build does not rely on `configure`&#39;s default adhoc
+1591 version strings. Default adhoc version strings `OPT` segment include user name
+1592 and source directory. You can either override just the `OPT` segment using
+1593 `--with-version-opt=&lt;any fixed string&gt;`, or you can specify the entire version
+1594 string using `--with-version-string=&lt;your version&gt;`.
+1595 
+1596 This is a typical example of how to build the JDK in a reproducible way:
+1597 
+1598 ```
+1599 export SOURCE_DATE_EPOCH=946684800
+1600 bash configure --with-version-opt=adhoc
+1601 make
+1602 ```
+1603 
+1604 Note that regardless if you specify a source date for `configure` or not, the
+1605 JDK build system will set `SOURCE_DATE_EPOCH` for all build tools when building.
+1606 If `--with-source-date` has the value `current` (which is the default unless
+1607 `SOURCE_DATE_EPOCH` is found by in the environment by `configure`), the source
+1608 date value will be determined at configure time.
+1609 
+1610 There are several aspects of reproducible builds that can be individually
+1611 adjusted by `configure` arguments. If any of these are given, they will override
+1612 the value derived from `SOURCE_DATE_EPOCH`. These arguments are:
+1613 
+1614  * `--with-source-date`
+1615 
+1616     This option controls how the JDK build sets `SOURCE_DATE_EPOCH` when
+1617     building. It can be set to a value describing a date, either an epoch based
+1618     timestamp as an integer, or a valid ISO-8601 date.
+1619 
+1620     It can also be set to one of the special values `current`, `updated` or
+1621     `version`. `current` means that the time of running `configure` will be
+1622     used. `version` will use the nominal release date for the current JDK
+1623     version. `updated`, which means that `SOURCE_DATE_EPOCH` will be set to the
+1624     current time each time you are running `make`. All choices, except for
+1625     `updated`, will set a fixed value for the source date timestamp.
+1626 
+1627     When `SOURCE_DATE_EPOCH` is set, the default value for `--with-source-date`
+1628     will be the value given by `SOURCE_DATE_EPOCH`. Otherwise, the default value
+1629     is `current`.
+1630 
+1631  * `--with-hotspot-build-time`
+1632 
+1633     This option controls the build time string that will be included in the
+1634     hotspot library (`libjvm.so` or `jvm.dll`). When the source date is fixed
+1635     (e.g. by setting `SOURCE_DATE_EPOCH`), the default value for
+1636     `--with-hotspot-build-time` will be an ISO 8601 representation of that time
+1637     stamp. Otherwise the default value will be the current time when building
+1638     hotspot.
+1639 
+1640  * `--with-copyright-year`
+1641 
+1642     This option controls the copyright year in some generated text files. When
+1643     the source date is fixed (e.g. by setting `SOURCE_DATE_EPOCH`), the default
+1644     value for `--with-copyright-year` will be the year of that time stamp.
+1645     Otherwise the default is the current year at the time of running configure.
+1646     This can be overridden by `--with-copyright-year=&lt;year&gt;`.
+1647 
+1648  * `--enable-reproducible-build`
+1649 
+1650     This option controls some additional behavior needed to make the build
+1651     reproducible. When the source date is fixed (e.g. by setting
+1652     `SOURCE_DATE_EPOCH`), this flag will be turned on by default. Otherwise, the
+1653     value is determined by heuristics. If it is explicitly turned off, the build
+1654     might not be reproducible.
+1655 
+1656 ## Hints and Suggestions for Advanced Users
+1657 
+1658 ### Bash Completion
+1659 
+1660 The `configure` and `make` commands tries to play nice with bash command-line
+1661 completion (using `&lt;tab&gt;` or `&lt;tab&gt;&lt;tab&gt;`). To use this functionality, make
+1662 sure you enable completion in your `~/.bashrc` (see instructions for bash in
+1663 your operating system).
+1664 
+1665 Make completion will work out of the box, and will complete valid make targets.
+1666 For instance, typing `make jdk-i&lt;tab&gt;` will complete to `make jdk-image`.
+1667 
+1668 The `configure` script can get completion for options, but for this to work you
+1669 need to help `bash` on the way. The standard way of running the script, `bash
+1670 configure`, will not be understood by bash completion. You need `configure` to
+1671 be the command to run. One way to achieve this is to add a simple helper script
+1672 to your path:
+1673 
+1674 ```
+1675 cat &lt;&lt; EOT &gt; /tmp/configure
+1676 #!/bin/bash
+1677 if [ \$(pwd) = \$(cd \$(dirname \$0); pwd) ] ; then
+1678   echo &gt;&amp;2 &quot;Abort: Trying to call configure helper recursively&quot;
+1679   exit 1
+1680 fi
+1681 
+1682 bash \$PWD/configure &quot;\$@&quot;
+1683 EOT
+1684 chmod +x /tmp/configure
+1685 sudo mv /tmp/configure /usr/local/bin
+1686 ```
+1687 
+1688 Now `configure --en&lt;tab&gt;-dt&lt;tab&gt;` will result in `configure --enable-dtrace`.
+1689 
+1690 ### Using Multiple Configurations
+1691 
+1692 You can have multiple configurations for a single source repository. When you
+1693 create a new configuration, run `configure --with-conf-name=&lt;name&gt;` to create a
+1694 configuration with the name `&lt;name&gt;`. Alternatively, you can create a directory
+1695 under `build` and run `configure` from there, e.g. `mkdir build/&lt;name&gt; &amp;&amp; cd
+1696 build/&lt;name&gt; &amp;&amp; bash ../../configure`.
+1697 
+1698 Then you can build that configuration using `make CONF_NAME=&lt;name&gt;` or `make
+1699 CONF=&lt;pattern&gt;`, where `&lt;pattern&gt;` is a substring matching one or several
+1700 configurations, e.g. `CONF=debug`. The special empty pattern (`CONF=`) will
+1701 match *all* available configuration, so `make CONF= hotspot` will build the
+1702 `hotspot` target for all configurations. Alternatively, you can execute `make`
+1703 in the configuration directory, e.g. `cd build/&lt;name&gt; &amp;&amp; make`.
+1704 
+1705 ### Handling Reconfigurations
+1706 
+1707 If you update the repository and part of the configure script has changed, the
+1708 build system will force you to re-run `configure`.
+1709 
+1710 Most of the time, you will be fine by running `configure` again with the same
+1711 arguments as the last time, which can easily be performed by `make
+1712 reconfigure`. To simplify this, you can use the `CONF_CHECK` make control
+1713 variable, either as `make CONF_CHECK=auto`, or by setting an environment
+1714 variable. For instance, if you add `export CONF_CHECK=auto` to your `.bashrc`
+1715 file, `make` will always run `reconfigure` automatically whenever the configure
+1716 script has changed.
+1717 
+1718 You can also use `CONF_CHECK=ignore` to skip the check for a needed configure
+1719 update. This might speed up the build, but comes at the risk of an incorrect
+1720 build result. This is only recommended if you know what you&#39;re doing.
+1721 
+1722 From time to time, you will also need to modify the command line to `configure`
+1723 due to changes. Use `make print-configuration` to show the command line used
+1724 for your current configuration.
+1725 
+1726 ### Using Fine-Grained Make Targets
+1727 
+1728 The default behavior for make is to create consistent and correct output, at
+1729 the expense of build speed, if necessary.
+1730 
+1731 If you are prepared to take some risk of an incorrect build, and know enough of
+1732 the system to understand how things build and interact, you can speed up the
+1733 build process considerably by instructing make to only build a portion of the
+1734 product.
+1735 
+1736 #### Building Individual Modules
+1737 
+1738 The safe way to use fine-grained make targets is to use the module specific
+1739 make targets. All source code in the JDK is organized so it belongs to a
+1740 module, e.g. `java.base` or `jdk.jdwp.agent`. You can build only a specific
+1741 module, by giving it as make target: `make jdk.jdwp.agent`. If the specified
+1742 module depends on other modules (e.g. `java.base`), those modules will be built
+1743 first.
+1744 
+1745 You can also specify a set of modules, just as you can always specify a set of
+1746 make targets: `make jdk.crypto.cryptoki jdk.crypto.ec jdk.crypto.mscapi`
+1747 
+1748 #### Building Individual Module Phases
+1749 
+1750 The build process for each module is divided into separate phases. Not all
+1751 modules need all phases. Which are needed depends on what kind of source code
+1752 and other artifact the module consists of. The phases are:
+1753 
+1754   * `gensrc` (Generate source code to compile)
+1755   * `gendata` (Generate non-source code artifacts)
+1756   * `copy` (Copy resource artifacts)
+1757   * `java` (Compile Java code)
+1758   * `launchers` (Compile native executables)
+1759   * `libs` (Compile native libraries)
+1760 
+1761 You can build only a single phase for a module by using the notation
+1762 `$MODULE-$PHASE`. For instance, to build the `gensrc` phase for `java.base`,
+1763 use `make java.base-gensrc`.
+1764 
+1765 Note that some phases may depend on others, e.g. `java` depends on `gensrc` (if
+1766 present). Make will build all needed prerequisites before building the
+1767 requested phase.
+1768 
+1769 #### Skipping the Dependency Check
+1770 
+1771 When using an iterative development style with frequent quick rebuilds, the
+1772 dependency check made by make can take up a significant portion of the time
+1773 spent on the rebuild. In such cases, it can be useful to bypass the dependency
+1774 check in make.
+1775 
+1776 &gt; **Note that if used incorrectly, this can lead to a broken build!**
+1777 
+1778 To achieve this, append `-only` to the build target. For instance, `make
+1779 jdk.jdwp.agent-java-only` will *only* build the `java` phase of the
+1780 `jdk.jdwp.agent` module. If the required dependencies are not present, the
+1781 build can fail. On the other hand, the execution time measures in milliseconds.
+1782 
+1783 A useful pattern is to build the first time normally (e.g. `make
+1784 jdk.jdwp.agent`) and then on subsequent builds, use the `-only` make target.
+1785 
+1786 #### Rebuilding Part of java.base (JDK\_FILTER)
+1787 
+1788 If you are modifying files in `java.base`, which is the by far largest module
+1789 in the JDK, then you need to rebuild all those files whenever a single file has
+1790 changed. (This inefficiency will hopefully be addressed in JDK 10.)
+1791 
+1792 As a hack, you can use the make control variable `JDK_FILTER` to specify a
+1793 pattern that will be used to limit the set of files being recompiled. For
+1794 instance, `make java.base JDK_FILTER=javax/crypto` (or, to combine methods,
+1795 `make java.base-java-only JDK_FILTER=javax/crypto`) will limit the compilation
+1796 to files in the `javax.crypto` package.
+1797 
+1798 ## Understanding the Build System
+1799 
+1800 This section will give you a more technical description on the details of the
+1801 build system.
+1802 
+1803 ### Configurations
+1804 
+1805 The build system expects to find one or more configuration. These are
+1806 technically defined by the `spec.gmk` in a subdirectory to the `build`
+1807 subdirectory. The `spec.gmk` file is generated by `configure`, and contains in
+1808 principle the configuration (directly or by files included by `spec.gmk`).
+1809 
+1810 You can, in fact, select a configuration to build by pointing to the `spec.gmk`
+1811 file with the `SPEC` make control variable, e.g. `make SPEC=$BUILD/spec.gmk`.
+1812 While this is not the recommended way to call `make` as a user, it is what is
+1813 used under the hood by the build system.
+1814 
+1815 ### Build Output Structure
+1816 
+1817 The build output for a configuration will end up in `build/&lt;configuration
+1818 name&gt;`, which we refer to as `$BUILD` in this document. The `$BUILD` directory
+1819 contains the following important directories:
+1820 
+1821 ```
+1822 buildtools/
+1823 configure-support/
+1824 hotspot/
+1825 images/
+1826 jdk/
+1827 make-support/
+1828 support/
+1829 test-results/
+1830 test-support/
+1831 ```
+1832 
+1833 This is what they are used for:
+1834 
+1835   * `images`: This is the directory were the output of the `*-image` make
+1836     targets end up. For instance, `make jdk-image` ends up in `images/jdk`.
+1837 
+1838   * `jdk`: This is the &quot;exploded image&quot;. After `make jdk`, you will be able to
+1839     launch the newly built JDK by running `$BUILD/jdk/bin/java`.
+1840 
+1841   * `test-results`: This directory contains the results from running tests.
+1842 
+1843   * `support`: This is an area for intermediate files needed during the build,
+1844     e.g. generated source code, object files and class files. Some noteworthy
+1845     directories in `support` is `gensrc`, which contains the generated source
+1846     code, and the `modules_*` directories, which contains the files in a
+1847     per-module hierarchy that will later be collapsed into the `jdk` directory
+1848     of the exploded image.
+1849 
+1850   * `buildtools`: This is an area for tools compiled for the build platform
+1851     that are used during the rest of the build.
+1852 
+1853   * `hotspot`: This is an area for intermediate files needed when building
+1854     hotspot.
+1855 
+1856   * `configure-support`, `make-support` and `test-support`: These directories
+1857     contain files that are needed by the build system for `configure`, `make`
+1858     and for running tests.
+1859 
+1860 ### Fixpath
+1861 
+1862 Windows path typically look like `C:\User\foo`, while Unix paths look like
+1863 `/home/foo`. Tools with roots from Unix often experience issues related to this
+1864 mismatch when running on Windows.
+1865 
+1866 In the JDK build, we always use Unix paths internally, and only just before
+1867 calling a tool that does not understand Unix paths do we convert them to
+1868 Windows paths.
+1869 
+1870 This conversion is done by the `fixpath` tool, which is a small wrapper that
+1871 modifies unix-style paths to Windows-style paths in command lines. Fixpath is
+1872 compiled automatically by `configure`.
+1873 
+1874 ### Native Debug Symbols
+1875 
+1876 Native libraries and executables can have debug symbol (and other debug
+1877 information) associated with them. How this works is very much platform
+1878 dependent, but a common problem is that debug symbol information takes a lot of
+1879 disk space, but is rarely needed by the end user.
+1880 
+1881 The JDK supports different methods on how to handle debug symbols. The
+1882 method used is selected by `--with-native-debug-symbols`, and available methods
+1883 are `none`, `internal`, `external`, `zipped`.
+1884 
+1885   * `none` means that no debug symbols will be generated during the build.
+1886 
+1887   * `internal` means that debug symbols will be generated during the build, and
+1888     they will be stored in the generated binary.
+1889 
+1890   * `external` means that debug symbols will be generated during the build, and
+1891     after the compilation, they will be moved into a separate `.debuginfo` file.
+1892     (This was previously known as FDS, Full Debug Symbols).
+1893 
+1894   * `zipped` is like `external`, but the .debuginfo file will also be zipped
+1895     into a `.diz` file.
+1896 
+1897 When building for distribution, `zipped` is a good solution. Binaries built
+1898 with `internal` is suitable for use by developers, since they facilitate
+1899 debugging, but should be stripped before distributed to end users.
+1900 
+1901 ### Autoconf Details
+1902 
+1903 The `configure` script is based on the autoconf framework, but in some details
+1904 deviate from a normal autoconf `configure` script.
+1905 
+1906 The `configure` script in the top level directory of the JDK is just a thin
+1907 wrapper that calls `make/autoconf/configure`. This in turn will run `autoconf`
+1908 to create the runnable (generated) configure script, as
+1909 `.build/generated-configure.sh`. Apart from being responsible for the
+1910 generation of the runnable script, the `configure` script also provides
+1911 functionality that is not easily expressed in the normal Autoconf framework. As
+1912 part of this functionality, the generated script is called.
+1913 
+1914 The build system will detect if the Autoconf source files have changed, and
+1915 will trigger a regeneration of the generated script if needed. You can also
+1916 manually request such an update by `bash configure autogen`.
+1917 
+1918 In previous versions of the JDK, the generated script was checked in at
+1919 `make/autoconf/generated-configure.sh`. This is no longer the case.
+1920 
+1921 ### Developing the Build System Itself
+1922 
+1923 This section contains a few remarks about how to develop for the build system
+1924 itself. It is not relevant if you are only making changes in the product source
+1925 code.
+1926 
+1927 While technically using `make`, the make source files of the JDK does not
+1928 resemble most other Makefiles. Instead of listing specific targets and actions
+1929 (perhaps using patterns), the basic modus operandi is to call a high-level
+1930 function (or properly, macro) from the API in `make/common`. For instance, to
+1931 compile all classes in the `jdk.internal.foo` package in the `jdk.foo` module,
+1932 a call like this would be made:
+1933 
+1934 ```
+1935 $(eval $(call SetupJavaCompilation, BUILD_FOO_CLASSES, \
+1936     SETUP := GENERATE_OLDBYTECODE, \
+1937     SRC := $(TOPDIR)/src/jkd.foo/share/classes, \
+1938     INCLUDES := jdk/internal/foo, \
+1939     BIN := $(SUPPORT_OUTPUTDIR)/foo_classes, \
+1940 ))
+1941 ```
+1942 
+1943 By encapsulating and expressing the high-level knowledge of *what* should be
+1944 done, rather than *how* it should be done (as is normal in Makefiles), we can
+1945 build a much more powerful and flexible build system.
+1946 
+1947 Correct dependency tracking is paramount. Sloppy dependency tracking will lead
+1948 to improper parallelization, or worse, race conditions.
+1949 
+1950 To test for/debug race conditions, try running `make JOBS=1` and `make
+1951 JOBS=100` and see if it makes any difference. (It shouldn&#39;t).
+1952 
+1953 To compare the output of two different builds and see if, and how, they differ,
+1954 run `$BUILD1/compare.sh -o $BUILD2`, where `$BUILD1` and `$BUILD2` are the two
+1955 builds you want to compare.
+1956 
+1957 To automatically build two consecutive versions and compare them, use
+1958 `COMPARE_BUILD`. The value of `COMPARE_BUILD` is a set of variable=value
+1959 assignments, like this:
+1960 ```
+1961 make COMPARE_BUILD=CONF=--enable-new-hotspot-feature:MAKE=hotspot
+1962 ```
+1963 See `make/InitSupport.gmk` for details on how to use `COMPARE_BUILD`.
+1964 
+1965 To analyze build performance, run with `LOG=trace` and check `$BUILD/build-trace-time.log`.
+1966 Use `JOBS=1` to avoid parallelism.
+1967 
+1968 Please check that you adhere to the [Code Conventions for the Build System](
+1969 http://openjdk.org/groups/build/doc/code-conventions.html) before
+1970 submitting patches.
+1971 
+1972 ## Contributing to the JDK
+1973 
+1974 So, now you&#39;ve built your JDK, and made your first patch, and want to
+1975 contribute it back to the OpenJDK Community.
+1976 
+1977 First of all: Thank you! We gladly welcome your contribution.
+1978 However, please bear in mind that the JDK is a massive project, and we must ask
+1979 you to follow our rules and guidelines to be able to accept your contribution.
+1980 
+1981 The official place to start is the [&#39;How to contribute&#39; page](
+1982 http://openjdk.org/contribute/). There is also an official (but somewhat
+1983 outdated and skimpy on details) [Developer&#39;s Guide](
+1984 http://openjdk.org/guide/).
+1985 
+1986 If this seems overwhelming to you, the Adoption Group is there to help you! A
+1987 good place to start is their [&#39;New Contributor&#39; page](
+1988 https://wiki.openjdk.org/display/Adoption/New+Contributor), or start
+1989 reading the comprehensive [Getting Started Kit](
+1990 https://adoptopenjdk.gitbooks.io/adoptopenjdk-getting-started-kit/en/). The
+1991 Adoption Group will also happily answer any questions you have about
+1992 contributing. Contact them by [mail](
+1993 http://mail.openjdk.org/mailman/listinfo/adoption-discuss) or [IRC](
+1994 http://openjdk.org/irc/).
+1995 
+1996 ## Editing this document
+1997 
+1998 If you want to contribute changes to this document, edit `doc/building.md` and
+1999 then run `make update-build-docs` to generate the same changes in
+2000 `doc/building.html`.
+2001 
+2002 ---
+2003 # Override styles from the base CSS file that are not ideal for this document.
+2004 header-includes:
+2005  - &#39;&lt;style type=&quot;text/css&quot;&gt;pre, code, tt { color: #1d6ae5; }&lt;/style&gt;&#39;
+2006 ---
+    </pre>
+  </body>
+</html>
