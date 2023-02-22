@@ -4,7 +4,8 @@ JDK Enhancement Proposals, and patches in case we don't have an author space at 
 
 ## Proposals
 
-1. [Stack Allocation (webrev)](https://microsoft.github.io/openjdk-proposals/stack_allocation/webrev/)
+1. [Stack Allocation](./stack_allocation/Stack_Allocation_JEP.md) [(webrev)](https://microsoft.github.io/openjdk-proposals/stack_allocation/webrev/)
+1. [Deprecate the Windows x86-32 port](./deprecate_32_bit/Deprecate_32-bit_Proposal_JEP.md) [(webrev)](https://microsoft.github.io/openjdk-proposals/deprecate_32_bit/webrev/)
 
 ## Notes
 Files will be held here on a temporary basis.
