@@ -22,6 +22,7 @@ Non-Goals
 ---------
 
 1. It is not a goal of this JEP to change the status of the affected port in any prior release. The earliest release to which this JEP could be targeted is JDK 21.
+1. It is not a goal of this JEP to deprecate any other 32-bit port.
 
 Description
 -----------
