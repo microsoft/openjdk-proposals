@@ -60,12 +60,6 @@ $
 
 The error/warning will be issued when configuring a build for Windows x86-32.
 
-A proposed [webrev][webrev] is available showing the 3 changes (total 22 lines) to the following files:
-
-- `doc/building.html`
-- `doc/building.md`
-- `make/autoconf/platform.m4`
-
 Alternatives
 ------------
 
