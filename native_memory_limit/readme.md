@@ -11,7 +11,7 @@ Allow the JVM to calculate its heap size as a subtraction of a user-defined nati
 Non-Goals
 ---------
 
-The JVM shall not calculate what a reserved native memory amount may look like. This is user input.
+The JVM will not guess what a native memory limit may look like. The value is either `-1` (default), or `user input`.
 
 Success Metrics
 ---------------
@@ -44,18 +44,20 @@ Description
 
 This JEP introduces two new flags:
 
-  -XX:MaxNativeMemory=<input>
-  -XX:NativeMemoryLimitPolicy=<none|enforced>
+    -XX:MaxNativeMemory=<input>
+    -XX:NativeMemoryLimitPolicy=<none|warn|enforced>
 
 Whereas `<input>` for memory amount follows the same formatting as other memory-related parameters, such as `-Xmx`. Examples: `10m`, `50m`, `1g`. This parameter, if not present, defaults to zero, and the JVM ergonomics shall estimate heap size as per existing implementation-specific heuristics.
 
-The second flag allows the user to control what to do if the JVM does consume more native memory than its limit. If there is a limit set, the default value is `enforced`. If not, then `none`.
+The second flag allows the user to control what the JVM shall do if it does consume more native memory than its limit. If there is a limit set, the default value is `enforced`. If not, then `none`. If the value is `warn`, the JVM will output a warning whenever consumption is above the limit; in the case of the elastic metaspace cleanup reduces consumption to below limit, and then it rises again above limit, another warning will be printed out.
 
 The limit, if set, shall be readable through the `java.lang.management.MemoryMXBean` object:
 
     memoryMXBean.getNonHeapMemoryUsage().getMax()
 
 Combined with `-XX:NativeMemoryTracking` at development time -- or more specifically integration testing phase, or a QA/pre-prod environment -- where developers may identify a reasonable value as a starting point, it shall be more straightforward to do resource planning and memory allocation to JVM processes in production upon first-time deployments.
+
+The limit may not be `zero`.
 
 Alternatives
 ------------
