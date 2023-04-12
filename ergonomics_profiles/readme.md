@@ -105,19 +105,17 @@ The user may override the calculation with the parameter `-XX:ActiveProcessorCou
 Description
 -----------
 
-We propose to add a new ergonomics mode, called `dedicated`, which will be the default mode for the JVM under certain conditions, while turned off for most traditional environments. This mode will be activated by the presence of the flag `-XX:+UseDedicatedErgonomics`.
+We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `balanced`, and adding a second profile called `dedicated`, which will be the default mode for the JVM under certain conditions, while turned off for most traditional environments. New profiles may be added in the future.
 
 **_Selecting a profile_**
 
-This JEP proposes, at this moment, only two profiles: `balanced` and `dedicated`. New profiles may be added in the future.
+The `dedicated` ergonomics profile may be turned on with the flag `-XX:+UseDedicatedErgonomics`. It will be turned on by default if the JVM believes it is running in a dedicated environment (e.g. containers, cloud VMs).
 
-The `dedicated` ergonomics profile may be turned on with the flag `-XX:+UseDedicatedErgonomics`. It will be turned on by default if the JVM believes it is running in a dedicated environment (e.g. containers). 
+The `balanced` ergonomics profile is the default profile, and it is what the HotSpot JVM offers today. It will be the default profile for the JVM when the flag `-XX:+UseDedicatedErgonomics` is not present. The flag `-XX:+UseBalancedErgonomics` will be added for consistency and to allow the user to explicitly select the `balanced` profile.
 
-The `balanced` ergonomics profile is the default profile, and it is what the HotSpot JVM offers today. It will be the default profile for the JVM when the flag `-XX:+UseDedicatedErgonomics` is not present.
+If multiple profiles are selected using the JVM flag, the JVM will exit with the error _"Multiple ergonomics profiles selected"_.
 
-The flag `-XX:+UseBalancedErgonomics` will be added to allow the user to explicitly select the `balanced` profile. The first occurrence of an ergonomics profile selection will be the one that is used, and the JVM will ignore subsequent profile selection flags.
-
-The presence of the environment variable `JVM_ERGONOMICS_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not one of the above, the JVM will ignore the environment variable and use a default profile selection. This environment variable overrides an explicit JVM ergonomics profile selection done with a JVM flag.
+The presence of the environment variable `JVM_ERGONOMICS_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable first, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not a valid profile, the JVM will exit with _"Invalid ergonomics profile"_ error. This environment variable overrides an explicit JVM ergonomics profile selection by a JVM flag.
 
 **_Balanced profile_**
 
@@ -127,7 +125,7 @@ The `balanced` profile is what the HotSpot JVM does today.
 
 The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment with the assumption that the environment is dedicated to the JVM.
 
-This profile will maximize heap size allocation, optimize garbage collector selection on a larger set of options, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
+This profile will maximize heap size allocation, optimize garbage collector selection with a larger set of options and considerations, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
 
 **_Identify selected profile_**
 
