@@ -139,7 +139,7 @@ The `balanced` profile is what the HotSpot JVM does today.
 
 The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment with the assumption that the environment is dedicated to the JVM.
 
-This profile will maximize heap size allocation, garbage collector selection, active processor counting, garbage collector threads, native memory sizing, and other JVM thread pools.
+This profile will maximize heap size allocation, optimize garbage collector selection on a larger set of options, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
 
 **_Identify selected profile_**
 
