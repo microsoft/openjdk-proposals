@@ -129,7 +129,7 @@ The `balanced` ergonomics profile is the default profile, and it is what the Hot
 
 The flag `-XX:+UseBalancedErgonomics` will be added to allow the user to explicitly select the `balanced` profile. The first occurrence of an ergonomics profile selection will be the one that is used, and the JVM will ignore subsequent profile selection flags.
 
-The presence of the environment variable `JVM_ERGO_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not one of the above, the JVM will ignore the environment variable and use a default profile selection. This environment variable overrides an explicit JVM ergonomics profile selection done with a JVM flag.
+The presence of the environment variable `JVM_ERGONOMICS_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not one of the above, the JVM will ignore the environment variable and use a default profile selection. This environment variable overrides an explicit JVM ergonomics profile selection done with a JVM flag.
 
 **_Balanced profile_**
 
