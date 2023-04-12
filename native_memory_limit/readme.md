@@ -1,7 +1,7 @@
 Summary
 -------
 
-Introduce a new JVM flag to set a limit on the amount of native memory the JVM shall use, and therefore size its heap automatically, compared to the amount of available memory in a system dedicated to the JVM.
+Introduce a new JVM flag to set a limit on the amount of native memory the JVM shall use.
 
 Goals
 -----
@@ -30,22 +30,52 @@ This JEP allows the user to reverse the heap size calculation by letting it expa
 Description
 -----------
 
-This JEP introduces two new flags:
+This JEP introduces the following new flags:
 
     -XX:MaxNativeMemory=<input>
     -XX:NativeMemoryLimitPolicy=<none|warn|enforced>
+    -XX:+UseAutoHeapSizing
+    -XX:NativeMemorySafeMargin=<input>
 
 **_Set a native memory limit_**
 
-The `<input>` for memory amount follows the same formatting as other memory-related parameters, such as `-Xmx`. Examples: `10m`, `50m`, `1g`. This parameter, if not present, defaults to `-1`, and the JVM ergonomics shall estimate heap size as per existing heuristics.
+The `<input>` for the amount follows the same formatting as other memory-related parameters, such as `-Xmx`. Examples: `10m`, `50m`, `1g`. This parameter, if not present, defaults to `-1`, and the JVM ergonomics shall estimate heap size as per existing heuristics.
 
 **_Set a policy for limit enforcement_**
 
-The second flag allows the user to control what the JVM shall do if it does consume more native memory than its limit. If there is a limit set, the default value is `warn`. If not set, then `none`. If the value is `warn`, the JVM will output a warning whenever consumption goes above the limit. If the limit is set and the policy is `enforced`, and the consumption goes above the limit, the JVM must exit with an `OutOfMemoryError`.
+This flag allows the user to control what the JVM shall do if it does consume more native memory than its limit. 
 
-The limit must be `-1` or greater than `4MB`, the current limit of the root chunk size in the metaspace. Otherwise, the JVM launcher must fail.
+    -XX:NativeMemoryLimitPolicy=none
+
+If there is no native memory limit set, the default value is `none`.
+
+    -XX:NativeMemoryLimitPolicy=warn
+
+If the memory limit is set, the default value is `warn`. In this policy, the JVM will output a warning whenever consumption goes above the limit. 
+
+    -XX:NativeMemoryLimitPolicy=enforced
+
+If the limit is set and the policy is `enforced`, and the consumption goes above the limit, the JVM must exit with an `OutOfMemoryError`.
+
+**_Valid native memory limits_**
+
+The limit must be `-1` (no limit applied) or greater than or equal to `4MB`, which is the current limit of the root chunk size in the Metaspace. Otherwise, the JVM launcher must fail with _Invalid native memory limit_.
 
 There is no effect if the policy is `enforced` or `warn`, and the limit is `-1`.
+
+**_Native memory safe margin_**
+
+A safe margin of a minimum of `4MB` and up to `2%` of the total memory expected by the JVM, with a maximum of `256MB`, shall be subtracted from the total amount of available memory, and the result be observed by the JVM as the hard environment memory limit. This is to account for any other memory consumption, and to avoid the JVM from exiting with an `OutOfMemoryError` too soon.
+
+The safe magin may be manually configured, in absolute amount, with the following flag:
+
+    -XX:NativeMemorySafeMargin=<input>
+
+This value is only used if a valid Native Memory Limit is set and auto heap sizing is enabled.
+
+**_Auto heap sizing_**
+
+If the flag `-XX:+UseAutoHeapSizing` is set along with a valid Native Memory limit, the heap will be calculated automatically based on the total amount of available memory, minus the native memory limit and a safe margin.
 
 **_Reading the native memory limit_**
 
@@ -60,18 +90,6 @@ var limit = var.getMax();
 **_Estimate native memory consumption_**
 
 Combined with `-XX:NativeMemoryTracking` at development/test phase -- developers may identify a reasonable value as a starting point, and it shall be more straightforward to do resource planning and memory allocation to JVM processes in production upon first-time deployments.
-
-**_Safe margin_**
-
-A safe margin of a minimum of `4MB` and up to `2%` of the total memory expected by the JVM, with a maximum of `256MB`, shall be subtracted from the total amount of available memory, and the result be observed by the JVM as the hard environment memory limit. This is to account for any other memory consumption, and to avoid the JVM from exiting with an `OutOfMemoryError` too soon.
-
-The safe margin may be disabled with the following flag:
-
-    -XX:-UseNativeMemorySafeMargin
-
-The safe magin may be manually configured, in absolute amount, with the following flag:
-
-    -XX:NativeMemorySafeMargin=<input>
 
 Alternatives
 ------------
