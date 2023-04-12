@@ -109,17 +109,17 @@ We propose to add the concept of Ergonomics Profiles, while naming the existing 
 
 **_Selecting a profile_**
 
-The `dedicated` ergonomics profile may be turned on with the flag `-XX:+UseDedicatedErgonomics`. It will be turned on by default if the JVM believes it is running in a dedicated environment (e.g. containers, cloud VMs).
+To select a profile, we propose a new flag:
 
-The `balanced` ergonomics profile is the default profile, and it is what the HotSpot JVM offers today. It will be the default profile for the JVM when the flag `-XX:+UseDedicatedErgonomics` is not present. The flag `-XX:+UseBalancedErgonomics` will be added for consistency and to allow the user to explicitly select the `balanced` profile.
+    -XX:ErgonomicsProfile=<balanced|dedicated>
 
-If multiple profiles are selected using the JVM flag, the JVM will exit with the error _"Multiple ergonomics profiles selected"_.
+The `dedicated` ergonomics profile will be turned on by default if the JVM believes it is running in a dedicated environment (e.g. containers, cloud VMs). The `balanced` ergonomics profile is the default profile otherwise, and it is what the HotSpot JVM offers today. 
 
-The presence of the environment variable `JVM_ERGONOMICS_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable first, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not a valid profile, the JVM will exit with _"Invalid ergonomics profile"_ error. This environment variable overrides an explicit JVM ergonomics profile selection by a JVM flag.
+Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`.
 
 **_Balanced profile_**
 
-The `balanced` profile is what the HotSpot JVM does today.
+The `balanced` profile is what the HotSpot JVM does today in terms of default ergonomics.
 
 **_Dedicated profile_**
 
@@ -129,7 +129,17 @@ This profile will maximize heap size allocation, optimize garbage collector sele
 
 **_Identify selected profile_**
 
-(Optional/Proposal) The profile selection may be obtained programmatically by the inclusion of the following method in `java.management.RuntimeMXBean`:
+_Option 1_
+
+The profile selection may be obtained programmatically by reading the property `java.vm.ergonomics.profile`:
+
+```java
+var ergonomicsProfile = System.getProperty("java.vm.ergonomics.profile");
+```
+
+_Option 2_
+
+The profile selection may be obtained programmatically by the inclusion of the following method in `java.management.RuntimeMXBean`:
 
     String getJvmErgonomicsProfile()
 
