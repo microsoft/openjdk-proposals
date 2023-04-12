@@ -147,7 +147,7 @@ This profile will maximize heap size allocation, garbage collector selection, ac
 
     String getJvmErgonomicsProfile()
 
-To allow the backporting of this feature, the value may also be obtained through the `MBeanServerConnection.getAttribute` method in previous versions:
+To allow the backporting of this feature, the value may also be obtained through the `MBeanServerConnection.getAttribute` method:
 
 ```java
 MBeanServerConnection mbs = ...
