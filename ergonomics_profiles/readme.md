@@ -105,18 +105,6 @@ The user may override the calculation with the parameter `-XX:ActiveProcessorCou
 Description
 -----------
 
-// REQUIRED -- Describe the enhancement in detail: Both what it is and,
-// to the extent understood, how you intend to implement it.  Summarize,
-// at a high level, all of the interfaces you expect to modify or extend,
-// including Java APIs, command-line switches, library/JVM interfaces,
-// and file formats.  Explain how failures in applications using this
-// enhancement will be diagnosed, both during development and in
-// production.  Describe any open design issues.
-//
-// This section will evolve over time as the work progresses, ultimately
-// becoming the authoritative high-level description of the end result.
-// Include hyperlinks to additional documents as required.
-
 We propose to add a new ergonomics mode, called `dedicated`, which will be the default mode for the JVM under certain conditions, while turned off for most traditional environments. This mode will be activated by the presence of the flag `-XX:+UseDedicatedErgonomics`.
 
 **_Selecting a profile_**
