@@ -133,13 +133,28 @@ The presence of the environment variable `JVM_ERGONOMICS_PROFILE` may also selec
 
 **_Balanced profile_**
 
-The balanced is what the HotSpot JVM does today.
+The `balanced` profile is what the HotSpot JVM does today.
 
 **_Dedicated profile_**
 
-The dedicated profile will contain different heuristics aimed at maximizing resource consumption in the environment with the assumption that the environment is dedicated to the JVM.
+The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment with the assumption that the environment is dedicated to the JVM.
 
 This profile will maximize heap size allocation, garbage collector selection, active processor counting, garbage collector threads, native memory sizing, and other JVM thread pools.
+
+**_Identify selected profile_**
+
+(Optional/Proposal) The profile selection may be obtained programmatically by the inclusion of the following method in `java.management.RuntimeMXBean`:
+
+    String getJvmErgonomicsProfile()
+
+To allow the backporting of this feature, the value may also be obtained through the `MBeanServerConnection.getAttribute` method in previous versions:
+
+```java
+MBeanServerConnection mbs = ...
+
+var oname = new ObjectName(ManagementFactory.RUNTIME_MXBEAN_NAME);
+var ergonomicsProfile = mbs.getAttribute(oname, "JvmErgonomicsProfile");
+```
 
 Alternatives
 ------------
