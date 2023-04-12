@@ -64,10 +64,6 @@ It is possible to observe that these amounts don't adequately map to the intende
 
 Further on, it is likely that the JVM does not need to reclaim heap memory as often as it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial and minimum heap size the same as maximum heap size. This shall hint to the garbage collector to delay, or act more lazily, on the action of cleaning and reclaiming heap.
 
-**_Native Memory_**
-
-With the inclusion of Elastic Metaspace (JEP 387), it is safer to assume that Native Memory consumption will have reduced growth during the course of execution of a Java application. While the selection of a Garbage Collector certainly impacts Native Memory consumption, GC tuning is an exercise that is best left to the user, as it is highly dependent on the application and its workload. The JVM will still select a GC based on heuristics, and should take into consideration that native memory consumption will happen, and account for that.
-
 **Garbage Collector**
 
 The garbage collector selection happens only among two: Serial GC and G1GC, based on the amount of active processors seen by the JVM, and the amount of available memory, with a slightly different way of defining GC thread pool:
@@ -105,7 +101,7 @@ The user may override the calculation with the parameter `-XX:ActiveProcessorCou
 Description
 -----------
 
-We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `balanced`, and adding a second profile called `dedicated`, which will be the default mode for the JVM under certain conditions, while turned off for most traditional environments. New profiles may be added in the future.
+We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `balanced`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
 
 **_Selecting a profile_**
 
@@ -113,9 +109,13 @@ To select a profile, we propose a new flag:
 
     -XX:ErgonomicsProfile=<balanced|dedicated>
 
-The `dedicated` ergonomics profile will be turned on by default if the JVM believes it is running in a dedicated environment (e.g. containers, cloud VMs). The `balanced` ergonomics profile is the default profile otherwise, and it is what the HotSpot JVM offers today. 
-
 Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`.
+
+**_Default profile selection_**
+
+The `balanced` ergonomics profile will be selected by default. 
+
+If the JVM beleives it is running in a dedicated environment (e.g., containers) then the `dedicated` profile will be activated.
 
 **_Balanced profile_**
 
@@ -126,6 +126,14 @@ The `balanced` profile is what the HotSpot JVM does today in terms of default er
 The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment with the assumption that the environment is dedicated to the JVM.
 
 This profile will maximize heap size allocation, optimize garbage collector selection with a larger set of options and considerations, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
+
+The table below describes what the `dedicated` profile will set for the JVM:
+
+* GC selection: TBD
+* Default heap size: TBD
+* Active processor counting: TBD
+* GC threads: TBD
+* Thread pools: TBD
 
 **_Identify selected profile_**
 
