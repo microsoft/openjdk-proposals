@@ -62,7 +62,7 @@ The initial heap size also varies. The table below describes the current heurist
 
 It is possible to observe that these amounts don't adequately map to the intended resource plan of dedicated environments, where the user may have already considered to allocate e.g. 4GB of memory to the JVM, and expect it to use 4GB of memory. The JVM will instead use, in this example, 1GB of memory, and the user will have to manually tune the JVM to use the expected amount of memory.
 
-Further on, it is likely that the JVM does not need to reclaim heap memory as often as it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial and minimum heap size the same as maximum heap size. This will increase the chances of the JVM to be able to use the full amount of memory allocated to it.
+Further on, it is likely that the JVM does not need to reclaim heap memory as often as it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial and minimum heap size the same as maximum heap size. This shall hint to the garbage collector to delay, or act more lazily, on the action of cleaning and reclaiming heap.
 
 **_Native Memory_**
 
@@ -127,9 +127,9 @@ The `dedicated` ergonomics profile may be turned on with the flag `-XX:+UseDedic
 
 The `balanced` ergonomics profile is the default profile, and it is what the HotSpot JVM offers today. It will be the default profile for the JVM when the flag `-XX:+UseDedicatedErgonomics` is not present.
 
-The flag `-XX:+UseBalancedErgonomics` will be added to allow the user to explicitly select the `balanced` profile. The first occurrence of an ergonomics profile selection will be the one that is used, and the JVM will ignore any subsequent profile selection flags.
+The flag `-XX:+UseBalancedErgonomics` will be added to allow the user to explicitly select the `balanced` profile. The first occurrence of an ergonomics profile selection will be the one that is used, and the JVM will ignore subsequent profile selection flags.
 
-The presence of the environment variable `JVM_ERGO_PROFILE` may also indicate the default profile selection. The JVM will check for the presence of this environment variable, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not one of the above, the JVM will ignore the environment variable and use the default profile selection. This environment variable overrides an explicit JVM ergonomics profile selection done with a JVM flag.
+The presence of the environment variable `JVM_ERGO_PROFILE` may also select the profile. The JVM will check for the presence of this environment variable, and if it is present, it will use the value of the variable to select the profile. The value of the variable must be one of the following: `balanced`, `dedicated`. If the value is not one of the above, the JVM will ignore the environment variable and use a default profile selection. This environment variable overrides an explicit JVM ergonomics profile selection done with a JVM flag.
 
 **_Balanced profile_**
 
