@@ -62,7 +62,7 @@ The initial heap size also varies. The table below describes the current heurist
 
 It is possible to observe that these amounts don't adequately map to the intended resource plan of dedicated environments, where the user may have already considered to allocate e.g. 4GB of memory to the JVM, and expect it to use 4GB of memory. The JVM will instead use, in this example, 1GB of memory, and the user will have to manually tune the JVM to use the expected amount of memory.
 
-Further on, it is likely that the JVM does not need to reclaim heap memory as often as it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial and minimum heap size the same as maximum heap size. This shall hint to the garbage collector to delay, or act more lazily, on the action of cleaning and reclaiming heap.
+Further on, it is likely that the JVM does not need to reclaim heap memory as soon as it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial heap size the same as maximum heap size, while having a fair minimum heap size for other memory pools consumption (e.g. native memory). This shall hint to the garbage collector to delay, or act more lazily, on the action of cleaning and reclaiming heap.
 
 **Garbage Collector**
 
