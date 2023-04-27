@@ -25,7 +25,9 @@ No specific success metrics needed.
 Motivation
 ----------
 
-The default ergonomics were designed to be balanced, and fair with other processes running on a shared environment, such as a bare metal server or a large virtual machine. On a study done by an APM vendor (New Relic), it was identified that more than 60% of monitored JVMs in production are running inside environments with dedicated resources such as containers. A large set of those were running without explicit JVM tuning flags, and therefore the JVM was running with default ergonomics, traditionally aimed at shared environments.
+The default JVM ergonomics were designed to be balanced, with the understanding that it would share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
+
+On a study done by an APM vendor (New Relic), it was identified that more than 60% of monitored JVMs in production are running inside environments with resources dedicated to the JVM (i.e., In containers), as opposed to being shared. A large percentage of those JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics that are traditionally aimed at shared environments.
 
 With these existing default ergonomics, much of the resources (memory and CPUs) intended for the JVM in a dedicated environment, are not fully in use and the system ends up wasting resources. Users then, resort to horizontal scaling to address performance issues even before addressing resource planning for the JVM and its tuning, to which in turn leads to even more resource waste.
 
