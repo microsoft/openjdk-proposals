@@ -15,7 +15,7 @@ Goals
 Non-Goals
 ---------
 
-It is not a goal of this JEP to ensure applications' performance will be significantly improved when running under the `dedicated` profile.
+It is not a goal of this JEP to ensure applications' performance will be improved when running under the `dedicated` profile.
 
 Success Metrics
 ---------------
