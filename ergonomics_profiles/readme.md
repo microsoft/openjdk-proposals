@@ -33,7 +33,7 @@ With the existing 'shared' default ergonomics, memory and CPU resources are not 
 
 By maximizing resource consumption on environments where there are dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meeting the resource consumption (footprint) expected by the user.
 
-The default ergonomics at present times are:
+Currently, the default ergonomics are:
 
 **Memory Allocation**
 
