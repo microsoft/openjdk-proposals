@@ -9,7 +9,7 @@ Goals
 1. Introduce the concept of ergonomics profiles.
 1. Introduce a new flag to select an ergonomic profile.
 1. Define existing heuristics and ergonomics as `balanced`.
-1. Introduce a `dedicated` profile designed for systems with dedicated resources not expected to be shared with other processes.
+1. Introduce a `dedicated` profile designed for systems where the JVM is effectively the only process using resources, e.g. In a canonical container deployment scenario.
 1. Automatically select `dedicated` when the JVM believes the system is dedicated to it.
 
 Non-Goals
