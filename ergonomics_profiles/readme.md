@@ -1,14 +1,14 @@
 Summary
 -------
 
-Introduce ergonomics profiles and add a `balanced` option, for the existing heuristics, and a `dedicated` option for when the JVM is running on systems with dedicated resources for the one JVM process.
+Introduce a new JVM feature for Ergonomics Profiles, with a `shared` profile for the existing heuristics and a `dedicated` option for when the JVM is running on systems with dedicated resources for the one JVM process.
 
 Goals
 -----
 
 1. Introduce the concept of ergonomics profiles.
 1. Introduce a new flag to select an ergonomic profile.
-1. Define existing heuristics and ergonomics as `balanced`.
+1. Define existing heuristics and ergonomics as `shared`.
 1. Introduce a `dedicated` profile designed for systems where the JVM is effectively the only process using resources, e.g. In a canonical container deployment scenario.
 1. Automatically select the `dedicated` profile when the JVM believes system resources are dedicated to it.
 
@@ -25,7 +25,7 @@ No specific success metrics needed.
 Motivation
 ----------
 
-The default JVM ergonomics were designed to be balanced, with the understanding that it would share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
+The default JVM ergonomics were designed to be balanced with shared resources, with the understanding that it would share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
 
 On a study done by an APM vendor (New Relic), it was identified that more than 60% of monitored JVMs in production are running inside environments with resources dedicated to the JVM (i.e., In containers), as opposed to being shared. A large percentage of those JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics that are traditionally aimed at shared environments.
 
@@ -103,25 +103,25 @@ The user may override the calculation with the parameter `-XX:ActiveProcessorCou
 Description
 -----------
 
-We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `balanced`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
+We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `shared`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
 
 **_Selecting a profile_**
 
 To select a profile, we propose a new flag:
 
-    -XX:ErgonomicsProfile=<balanced|dedicated>
+    -XX:ErgonomicsProfile=<shared|dedicated>
 
 Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`.
 
 **_Default profile selection_**
 
-The `balanced` ergonomics profile will be selected by default. 
+The `shared` ergonomics profile will be selected by default. 
 
 If the JVM beleives it is running in a dedicated environment (e.g., containers) then the `dedicated` profile will be activated.
 
-**_Balanced profile_**
+**_Shared profile_**
 
-The `balanced` profile is what the HotSpot JVM does today in terms of default ergonomics.
+The `shared` profile is what the HotSpot JVM does today in terms of default ergonomics.
 
 **_Dedicated profile_**
 
@@ -139,21 +139,17 @@ The table below describes what the `dedicated` profile will set for the JVM:
 
 **_Identify selected profile_**
 
-_Option 1_
-
 The profile selection may be obtained programmatically by reading the property `java.vm.ergonomics.profile`:
 
 ```java
 var ergonomicsProfile = System.getProperty("java.vm.ergonomics.profile");
 ```
 
-_Option 2_
-
-The profile selection may be obtained programmatically by the inclusion of the following method in `java.management.RuntimeMXBean`:
+The profile selection may also be obtained programmatically through JMX by the inclusion of the following method in `java.management.RuntimeMXBean`:
 
     String getJvmErgonomicsProfile()
 
-To allow the backporting of this feature, the value may also be obtained through the `MBeanServerConnection.getAttribute` method:
+To allow the backporting of this feature to older versions of OpenJDK, the value may also be obtained through the `MBeanServerConnection.getAttribute` method:
 
 ```java
 MBeanServerConnection mbs = ...
@@ -177,12 +173,21 @@ Testing
 Risks and Assumptions
 ---------------------
 
-// Describe any risks or assumptions that must be considered along with
-// this proposal.  Could any plausible events derail this work, or even
-// render it unnecessary?  If you have mitigation plans for the known
-// risks then please describe them.
+None at this time.
 
 Dependencies
 ------------
 
-No dependencies identified at the moment.
+List of related issues, in no particular order, that may have to be addressed before this JEP, or that this JEP may have address as part of its implementation:
+
+1. [JDK-8261242: [Linux] OSContainer::is_containerized() returns true when run outside a container](https://bugs.openjdk.org/browse/JDK-8261242)
+1. [JDK-8302744: Refactor Hotspot container detection code](https://bugs.openjdk.org/browse/JDK-8302744)
+1. [JDK-8264482: container info misleads on non-container environment](https://bugs.openjdk.org/browse/JDK-8264482)
+1. [JDK-8285277: Improve container support for memory limits](https://bugs.openjdk.org/browse/JDK-8285277)
+1. [JDK-8292742: Remove container support method cpu_share()](https://bugs.openjdk.org/browse/JDK-8292742)
+1. [JDK-8284900: Check InitialHeapSize and container memory limits before startup](https://bugs.openjdk.org/browse/JDK-8284900)
+1. [JDK-8278492: Confusion about parameter -XX:MinRAMPercentage](https://bugs.openjdk.org/browse/JDK-8278492)
+1. [JDK-8287185: Consolidate HotSpot and JDK tests for CgroupSubsystemFactory](https://bugs.openjdk.org/browse/JDK-8287185)
+1. [JDK-8078703: Ensure that GC's use of processor count is correct](https://bugs.openjdk.org/browse/JDK-8078703)
+1. [JDK-8286991: Hotspot container subsystem unaware of VM moving cgroups](https://bugs.openjdk.org/browse/JDK-8286991)
+1. [JDK-8286212: Cgroup v1 initialization causes NPE on some systems](https://bugs.openjdk.org/browse/JDK-8286212)
