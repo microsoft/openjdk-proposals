@@ -98,7 +98,7 @@ CPU allocation is the most challenging aspect of ergonomics, as the consequences
 * Server: 1 “active processor” for each CPU
 * Cgroups-based counting on cpu_quota/cpu_period
 
-The user may override the calculation with the parameter `-XX:ActiveProcessorCount=<n>`. In practice, developers tend to not use this, and will expect the JVM to size itself accordingly. But a JVM running with a single observed "active processor" may still run multiple threads in parallel. Although they will consume the allowed CPU time much faster, in some applications this is negligible, as the application may be having significant wait times on IO operations to finish.
+The user may override the calculation with the parameter `-XX:ActiveProcessorCount=<n>`. In practice, developers tend not to refrain from using this and will expect the JVM to size itself accordingly. But a JVM with a single observed "active processor" may still run multiple threads in parallel. Although they will consume the allowed CPU time much faster, this is negligible in some applications, as the application may have significant wait times for IO operations to finish.
 
 Description
 -----------
