@@ -103,7 +103,7 @@ The user may override the calculation with the parameter `-XX:ActiveProcessorCou
 Description
 -----------
 
-We propose to add the concept of Ergonomics Profiles, while naming the existing default ergonomics as `shared`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
+We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
 
 **_Selecting a profile_**
 
