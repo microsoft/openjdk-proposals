@@ -161,7 +161,7 @@ var ergonomicsProfile = mbs.getAttribute(oname, "JvmErgonomicsProfile");
 Alternatives
 ------------
 
-At this moment, the only alternative to this proposal is by manualling tuning the JVM. This exercise is very often complex, difficult, and time consuming for Java developers.
+Currently, the only alternative to this proposal is manually tuning the JVM. This exercise is often complex, challenging, and time-consuming for Java developers.
 
 Testing
 -------
