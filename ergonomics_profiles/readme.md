@@ -20,7 +20,7 @@ This JEP does not aim to ensure applications' performance will be improved when 
 Success Metrics
 ---------------
 
-No specific success metrics needed.
+No specific success metrics are needed.
 
 Motivation
 ----------
