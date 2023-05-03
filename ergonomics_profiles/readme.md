@@ -149,7 +149,7 @@ The profile selection may also be obtained programmatically through JMX by the i
 
     String getJvmErgonomicsProfile()
 
-To allow the backporting of this feature to older versions of OpenJDK, the value may also be obtained through the `MBeanServerConnection.getAttribute` method:
+The value may also be obtained through the `MBeanServerConnection.getAttribute` method to allow the backporting of this feature to older versions of OpenJDK:
 
 ```java
 MBeanServerConnection mbs = ...
