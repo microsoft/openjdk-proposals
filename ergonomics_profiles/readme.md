@@ -31,7 +31,7 @@ A study done by an APM vendor (New Relic) identified that more than 60% of monit
 
 With the existing 'shared' default ergonomics, the JVM does not fully utilize memory and CPU resources, and the system wastes resources. Users then resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This, in turn, leads to even more resource waste.
 
-By maximizing resource consumption on environments where there are dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meeting the resource consumption (footprint) expected by the user.
+By maximizing resource consumption in environments with dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meet the resource consumption (footprint) expected by the user.
 
 Currently, the default ergonomics are:
 
