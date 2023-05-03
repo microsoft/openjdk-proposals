@@ -93,7 +93,7 @@ The CPU allocation, in most systems, is about CPU time instead of the CPU count.
 
 In systems where CPU time is managed with limits, the JVM will often be at risk of suffering from _CPU throttling_, and it must be careful to not exaggerate on the number of threads it creates, otherwise the application will be impacted even further.
 
-CPU allocation is the most challenging aspect of ergonomics, as the consequences are unpredictable without knowing what workload the JVM is running, and what it will actually need. Currently, the JVM calculates the number of active processors with the following check:
+CPU allocation is the most challenging aspect of ergonomics, as the consequences are unpredictable without knowing what workload the JVM is running and what it will actually need. Currently, the JVM calculates the number of active processors with the following check:
 
 * Server: 1 “active processor” for each CPU
 * Cgroups-based counting on cpu_quota/cpu_period
