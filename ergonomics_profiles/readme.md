@@ -25,7 +25,7 @@ No specific success metrics are needed.
 Motivation
 ----------
 
-The default JVM ergonomics were designed to be balanced with shared resources, with the understanding that it would share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
+The default JVM ergonomics were designed to share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
 
 A study done by an APM vendor (New Relic) identified that more than 60% of monitored JVMs in production are running inside environments with resources dedicated to the JVM (i.e., In containers) instead of being shared. Many of those JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics that are traditionally aimed at shared environments.
 
