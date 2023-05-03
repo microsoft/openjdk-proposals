@@ -85,7 +85,7 @@ _**GC threads**_
 | G1 GC     | 1-8        | max((ParallelGCThreads+2)/4, 1) | ceil(#CPUs)            |
 | G1 GC     | \>8        | max((ParallelGCThreads+2)/4, 1) | 8 + (#CPUs-8) \* (5/8) |
 
-Which GC is used by the application will impact on the amount of native memory consumed by the JVM, as well as impact throughput and latency.
+Which GC is used by the application will impact the amount of native memory consumed by the JVM, as well as impact throughput and latency.
 
 **CPU allocation**
 
