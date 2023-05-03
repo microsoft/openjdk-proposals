@@ -68,7 +68,7 @@ Further on, it is likely that the JVM can reclaim heap memory later than it does
 
 **Garbage Collector**
 
-The garbage collector selection happens only among two: Serial GC and G1GC, based on the amount of active processors seen by the JVM, and the amount of available memory, with a slightly different way of defining GC thread pool:
+The garbage collector selection happens only among two: Serial GC and G1GC, based on the number of active processors seen by the JVM, and the amount of available memory, with a slightly different way of defining the GC thread pool:
 
 **_GC selection_**
 
