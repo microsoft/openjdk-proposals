@@ -117,7 +117,7 @@ Users may also select a profile by setting this flag in the environment variable
 
 The `shared` ergonomics profile will be selected by default. 
 
-If the JVM beleives it is running in a dedicated environment (e.g., containers) then the `dedicated` profile will be activated.
+If the JVM believes it is running in a dedicated environment (e.g., containers) then the `dedicated` profile will be activated.
 
 **_Shared profile_**
 
