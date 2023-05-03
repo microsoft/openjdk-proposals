@@ -121,7 +121,7 @@ If the JVM believes it is running in a dedicated environment (e.g., containers) 
 
 **_Shared profile_**
 
-The `shared` profile is what the HotSpot JVM does today in terms of default ergonomics.
+The `shared` profile is what the HotSpot JVM does today regarding default ergonomics.
 
 **_Dedicated profile_**
 
