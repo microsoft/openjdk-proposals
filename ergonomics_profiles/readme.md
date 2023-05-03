@@ -127,7 +127,7 @@ The `shared` profile is what the HotSpot JVM does today regarding default ergono
 
 The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment, assuming that the environment is dedicated to the JVM.
 
-This profile will maximize heap size allocation, optimize garbage collector selection with a larger set of options and considerations, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
+This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
 
 The table below describes what the `dedicated` profile will set for the JVM:
 
