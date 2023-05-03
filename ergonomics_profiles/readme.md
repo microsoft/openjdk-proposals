@@ -89,7 +89,7 @@ Which GC is used by the application will impact the amount of native memory cons
 
 **CPU allocation**
 
-The CPU allocation, in most systems, is about CPU time rather CPU count. This is especially true in container-based environments. The JVM will expose the number of _active processors_ throught the API `Runtime.getRuntime().availableProcessors()`, which in turn is used by the JVM itself to size internal thread pools, and then read by 3rd-party frameworks and libraries to size their own thread pools.
+The CPU allocation, in most systems, is about CPU time instead of the CPU count. This is especially true in container-based environments. The JVM will expose the number of _active processors_ through the API `Runtime.getRuntime().availableProcessors()`, which in turn is used by the JVM itself to size internal thread pools and then read by 3rd-party frameworks and libraries to size their thread pools.
 
 In systems where CPU time is managed with limits, the JVM will often be at risk of suffering from _CPU throttling_, and it must be careful to not exaggerate on the number of threads it creates, otherwise the application will be impacted even further.
 
