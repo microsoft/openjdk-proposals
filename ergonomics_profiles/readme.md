@@ -131,11 +131,19 @@ This profile will maximize heap size allocation, optimize garbage collector sele
 
 The table below describes what the `dedicated` profile will set for the JVM:
 
-* GC selection: TBD
-* Default heap size: TBD
-* Active processor counting: TBD
-* GC threads: TBD
-* Thread pools: TBD
+* GC selection: see below
+* Default heap size: 75%
+* Active processor counting: unchanged
+* GC threads: unchanged
+* Thread pools: unchanged
+
+**_Selecting a garbage collector in dedicated profile_**
+
+| Memory     | Processors | GC selected |
+| ---------- | ---------- | ----------- |
+| \>2048 MB  | \>1        | G1          |
+| \<=2048 MB | \>1        | ParallelGC  |
+| Any        | 1          | Serial      |
 
 **_Identify selected profile_**
 
