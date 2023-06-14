@@ -141,6 +141,7 @@ The table below describes what the `dedicated` profile will set for the JVM:
 
 | Memory     | Processors | GC selected |
 | ---------- | ---------- | ----------- |
+| \>=32 GB   | \>1        | ZGC         |
 | \>2048 MB  | \>1        | G1          |
 | \<=2048 MB | \>1        | ParallelGC  |
 | Any        | 1          | Serial      |
