@@ -129,6 +129,8 @@ The table below describes what the `dedicated` profile will set for the JVM:
 
 **_Default maximum heap size_**
 
+We progressively grow the heap size percentage based on the available memory, so that we reduce waste on memory reserved for off-heap (native) operations. This is an estimate that native memory usage is done at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage was to be the same, there would be progressive waste. Users are still encouraged to monitor and observe memory consumption and adjust heap size allocation accordingly.
+
 | Memory      | Heap size |
 | ----------- | --------- |
 | >= 16  GB   | 90%       |
