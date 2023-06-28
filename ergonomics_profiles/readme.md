@@ -75,15 +75,17 @@ The default garbage collector selection happens only among two: Serial GC and G1
 | \>=1792 MB | \>1        | G1          |
 | Otherwise  |            | Serial      |
 
+Which GC is used by the application will impact the amount of native memory consumed by the JVM, as well as impact throughput and latency of the application.
+
 _**GC threads**_
+
+For reference, we document here the current implementation detail of GC threads ergonomically configured by the JVM.
 
 | GC        | \# of CPUs | ConcGCThreads                   | ParallelGCThreads      |
 | --------- | ---------- | ------------------------------- | ---------------------- |
 | Serial GC | any        | 0                               | 0                      |
 | G1 GC     | 1-8        | max((ParallelGCThreads+2)/4, 1) | ceil(#CPUs)            |
 | G1 GC     | \>8        | max((ParallelGCThreads+2)/4, 1) | 8 + (#CPUs-8) \* (5/8) |
-
-Which GC is used by the application will impact the amount of native memory consumed by the JVM, as well as impact throughput and latency of the application.
 
 Description
 -----------
