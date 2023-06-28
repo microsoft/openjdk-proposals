@@ -27,9 +27,7 @@ Motivation
 
 The default JVM ergonomics were designed to share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
 
-A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs are running inside environments with resources dedicated to the JVM (i.e., in containers) instead of being shared. Many of those JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics that are traditionally aimed at shared environments.
-
-With the existing 'shared' default ergonomics, the JVM does not fully utilize memory and CPU resources, and the system wastes resources. Users then resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This, in turn, leads to even more resource waste.
+A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs are running inside environments with resources dedicated to the JVM (i.e., in containers) instead of being shared. Many of those JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics that are traditionally aimed at shared environments. With the existing 'shared' default ergonomics, the JVM does not fully utilize the memory available in such dedicated environments, and the system wastes resources. Users then resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This, in turn, leads to even more resource waste, both in terms of computing resources and engineering resources (hours spent tuning/scaling).
 
 By maximizing resource consumption in environments with dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meet the resource consumption (footprint) expected by the user.
 
@@ -62,13 +60,13 @@ The initial heap size also varies. The table below describes the current heurist
 |------------------|--------------|
 | 64 MB – 8192 MB  | 8 MB         |
 
-It is possible to observe that these amounts don't adequately map to the intended resource plan of dedicated environments. The user may have already considered allocating, e.g., 4GB of memory to the JVM and expect it to use 4GB of memory. In this example, the JVM will instead use 1GB of memory, and the user will have to manually tune the JVM to use the expected amount of memory.
+It is possible to observe that these amounts don't adequately map to the intended resource plan of dedicated environments. The user may have already considered allocating, e.g., 4GB of memory to the environment and expect the JVM to use nearly 4GB of memory. In this example, the JVM will instead use 1GB of memory by default (25%), and the user will have to manually tune the JVM to allocate the expected amount of memory for the heap.
 
-Further on, it is likely that the JVM can reclaim heap memory later than it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial heap size as maximum heap size, while having a suitable minimum heap size for other memory pools consumption (e.g. native memory). This shall signal to the garbage collector to delay, or act more lazily, on the action of cleaning and reclaiming heap.
+Further on, it is likely that the JVM can reclaim heap memory later than it does in shared environments, as the JVM is the only process running on the system. This means that the JVM may set the initial heap size closer to maximum heap size, while having a suitable minimum heap size for other memory pools consumption (e.g. native memory). This shall signal to the garbage collector to delay, or act more lazily, on reclaiming heap.
 
 **Garbage Collector**
 
-The garbage collector selection happens only among two: Serial GC and G1GC, based on the number of active processors seen by the JVM, and the amount of available memory, with a slightly different way of defining the GC thread pool:
+The default garbage collector selection happens only among two: Serial GC and G1 GC, based on the number of active processors seen by the JVM, and the amount of available memory, with a slightly different way of defining the GC thread pool:
 
 **_GC selection_**
 
@@ -85,29 +83,16 @@ _**GC threads**_
 | G1 GC     | 1-8        | max((ParallelGCThreads+2)/4, 1) | ceil(#CPUs)            |
 | G1 GC     | \>8        | max((ParallelGCThreads+2)/4, 1) | 8 + (#CPUs-8) \* (5/8) |
 
-Which GC is used by the application will impact the amount of native memory consumed by the JVM, as well as impact throughput and latency.
-
-**CPU allocation**
-
-The CPU allocation, in most systems, is about CPU time instead of the CPU count. This is especially true in container-based environments. The JVM will expose the number of _active processors_ through the API `Runtime.getRuntime().availableProcessors()`, which in turn is used by the JVM itself to size internal thread pools and then read by 3rd-party frameworks and libraries to size their thread pools.
-
-In systems where CPU time is managed with limits, the JVM will often be at risk of suffering from _CPU throttling_, and it must be careful not to exaggerate the number of threads it creates. Otherwise, the application will be impacted even further.
-
-CPU allocation is the most challenging aspect of ergonomics, as the consequences are unpredictable without knowing what workload the JVM is running and what it will actually need. Currently, the JVM calculates the number of active processors with the following check:
-
-* Server: 1 “active processor” for each CPU
-* Cgroups-based counting on cpu_quota/cpu_period
-
-The user may override the calculation with the parameter `-XX:ActiveProcessorCount=<n>`. In practice, developers tend not to refrain from using this and will expect the JVM to size itself accordingly. But a JVM with a single observed "active processor" may still run multiple threads in parallel. Although they will consume the allowed CPU time much faster, this is negligible in some applications, as the application may have significant wait times for IO operations to finish.
+Which GC is used by the application will impact the amount of native memory consumed by the JVM, as well as impact throughput and latency of the application.
 
 Description
 -----------
 
-We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it. New profiles may be added in the future.
+We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared`, and adding a second profile called `dedicated` for when the JVM is to run under environments with resources dedicated to it.
 
 **_Selecting a profile_**
 
-To select a profile, we propose a new flag:
+To select a profile, this JEP proposes a new flag:
 
     -XX:ErgonomicsProfile=<shared|dedicated>
 
@@ -115,9 +100,7 @@ Users may also select a profile by setting this flag in the environment variable
 
 **_Default profile selection_**
 
-The `shared` ergonomics profile will be selected by default. 
-
-If the JVM believes it is running in a dedicated environment (e.g., containers) then the `dedicated` profile will be activated.
+The `shared` ergonomics profile will be selected by default, unless when the JVM believes it is running in a dedicated environment (e.g., containers). In this case the `dedicated` profile will be activated.
 
 **_Shared profile_**
 
@@ -125,28 +108,36 @@ The `shared` profile is what the HotSpot JVM does today regarding default ergono
 
 **_Dedicated profile_**
 
-The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment, assuming that the environment is dedicated to the JVM.
-
-This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, vary the active processor counting, set different values for garbage collector threads, more aggressively size native memory expectation, and size internal JVM thread pools accordingly.
+The `dedicated` profile will contain different heuristics aimed at maximizing resource consumption in the environment, assuming that the environment is dedicated to the JVM. This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, and more aggressively estimate native memory expectation.
 
 The table below describes what the `dedicated` profile will set for the JVM:
 
 * GC selection: see below
-* Default heap size: 75%
-* Active processor counting: unchanged
+* Default maximum heap size: see below
+* Default initial heap size: 50%
+* Default minimum heap size: 25%
 * GC threads: unchanged
-* Thread pools: unchanged
 
 **_Selecting a garbage collector in dedicated profile_**
 
 | Memory     | Processors | GC selected |
 | ---------- | ---------- | ----------- |
-| \>=32 GB   | \>1        | ZGC         |
+| \>=16 GB   | \>1        | ZGC         |
 | \>2048 MB  | \>1        | G1          |
 | \<=2048 MB | \>1        | ParallelGC  |
 | Any        | 1          | Serial      |
 
-**_Identify selected profile_**
+**_Default maximum heap size_**
+
+| Memory      | Heap size |
+| ----------- | --------- |
+| >= 16  GB   | 90%       |
+| >= 6   GB   | 85%       |
+| >= 4   GB   | 80%       |
+| >= 0.5 GB   | 75%       |
+| <  0.5 GB   | 50%       |
+
+**_API to identify selected profile_**
 
 The profile selection may be obtained programmatically by reading the property `java.vm.ergonomics.profile`:
 
@@ -158,7 +149,7 @@ The profile selection may also be obtained programmatically through JMX by the i
 
     String getJvmErgonomicsProfile()
 
-The value may also be obtained through the `MBeanServerConnection.getAttribute` method to allow the backporting of this feature to older versions of OpenJDK:
+The value may also be obtained through the `MBeanServerConnection.getAttribute` method, with name `JvmErgonomicsProfile`, to allow the backporting of this feature to older versions of OpenJDK:
 
 ```java
 MBeanServerConnection mbs = ...
@@ -179,6 +170,13 @@ Testing
 // to validate this enhancement, beyond the usual mandatory unit tests?
 // Be sure to list any special platform or hardware requirements.
 
+Tests will be provided to ensure the right profile selection on expected environments: 
+
+ 1. Execution in a VM shall select the `shared` profile
+ 1. Execution in a container shall select `dedicated` profile
+
+Other tests will be provided to validate the heuristics of the `dedicated` profile.
+
 Risks and Assumptions
 ---------------------
 
@@ -187,7 +185,7 @@ None at this time.
 Dependencies
 ------------
 
-List of related issues, in no particular order, that may have to be addressed before this JEP or that this JEP may have to address as part of its implementation:
+List of related issues, in no particular order, that may be addressed for, or due to, this JEP:
 
 1. [JDK-8261242: \[Linux\] OSContainer::is_containerized() returns true when run outside a container](https://bugs.openjdk.org/browse/JDK-8261242)
 1. [JDK-8302744: Refactor Hotspot container detection code](https://bugs.openjdk.org/browse/JDK-8302744)
