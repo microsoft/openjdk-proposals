@@ -14,7 +14,7 @@ Introduce a new JVM feature for Ergonomics Profiles, with a `shared` profile for
 
 ## Non-Goals
 
-This JEP does not aim to ensure that applications' performance will be improved when running under the `dedicated` profile.
+This JEP does not aim to increase performance of applications when running under the `dedicated` profile.
 
 ## Success Metrics
 
