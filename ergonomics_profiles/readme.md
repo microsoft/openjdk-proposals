@@ -22,13 +22,13 @@ No specific success metrics are needed.
 
 ## Motivation
 
-The design of default JVM ergonomics was for environments where the JVM had to share resources with other processes (e.g., a data store) running on a shared environment, such as a bare metal server or a large virtual machine.
+The original design of default JVM ergonomics and heuristics was aimed at traditional bare metal servers or large virtual machine environments where the JVM had to share resources with other processes (e.g., a data store) running on that same environment. Today, more than half of Cloud based JVM workloads are running in dedicated environments.
 
-A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs are running inside environments with resources dedicated to the JVM (i.e., in containers) instead of being shared. Many JVMs with dedicated resources ran without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. With the existing 'shared' default ergonomics, the JVM does not fully utilize the memory available in such dedicated environments, and the system wastes resources. Users then resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This premature move to horizontal scaling, in turn, leads to even more resource waste, both in terms of computing resources and engineering resources (hours spent tuning/scaling).
+A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs were running inside environments with resources dedicated to the JVM (i.e., in containers). Many of these JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. Under this condition, the JVM does not utilize most of the memory available, and the workload wastes resources. Users then tend to resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This premature move to horizontal scaling, in turn, leads to more resource waste, both in terms of computing resources and engineering resources with hours spent in monitoring, configuring, and operationalizing the deployments, followed by manual tuning).
 
-By maximizing resource consumption in environments with dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meet the resource consumption (footprint) expected by the user.
+With an increase, by default, of resource consumption in environments with dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meet the resource consumption (footprint) expected by the user.
 
-Currently, the default ergonomics are:
+Currently, the default ergonomics of the HotSpot JVM are:
 
 ### Memory Allocation
 
@@ -57,9 +57,9 @@ The initial heap size also varies. The table below describes the current heurist
 |------------------|--------------|
 | 64 MB – 8192 MB  | 8 MB         |
 
-It is possible to observe that these amounts don't adequately map to the intended resource plan of dedicated environments. The user may have already considered allocating, e.g., 4GB of memory to the environment and expect the JVM to use nearly 4GB of memory. In this example, the JVM will instead use 1GB of memory by default (25%), and the user will have to manually tune the JVM to allocate the expected amount of memory for the heap.
+We can observe that these amounts don't adequately map to the intended resource plan of dedicated environments. The user may have already considered allocating, e.g., 4GB of memory to the environment and expect the JVM to use _nearly_ 4GB of memory. In this example, the JVM will instead use only 1GB of memory by default (25%) for its heap, and the user will have to manually tune the JVM if they want to ensure larger heap.
 
-Further on, it is likely that the JVM can reclaim heap memory later than it does in shared environments, as the JVM is the only process running on the system. Knowing it is the only process, this means that the JVM may set the initial heap size closer to the maximum heap size while having a suitable minimum heap size for other memory pools consumption (e.g., native memory).
+Furthermore, it is likely that the JVM can reclaim heap memory later than it does in shared environments, as the JVM is the only process running on such environment. Knowing it is the only or primary process, this means that the JVM may set the initial heap size closer to the maximum heap size while having a suitable minimum heap size for other memory pools (e.g., native memory).
 
 ### Garbage Collector
 
@@ -86,7 +86,7 @@ We document the current implementation detail of GC threads ergonomically config
 
 ## Description
 
-We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared` and adding a second profile called `dedicated` for when the JVM is to run under environments with dedicated resources.
+We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared` and adding a second profile called `dedicated` for when the JVM is to run on environments with dedicated resources, such as, but not limited to, containers.
 
 **_Selecting a profile_**
 
@@ -96,19 +96,19 @@ To select a profile, this JEP proposes a new flag:
 -XX:ErgonomicsProfile=<shared|dedicated>
 ```
 
-Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`.
+Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`. This will be useful for VM templates meant for dedicated JVM-based applications.
 
 **_Default profile selection_**
 
-The `shared` ergonomics profile will be selected by default unless the JVM believes it is running in a dedicated environment (e.g., containers). The JVM will activate the `dedicated` profile in this case.
+The `shared` ergonomics profile will be selected by default unless the JVM believes it is running in a dedicated environment (e.g., containers, cgroups, zones). The JVM will activate the `dedicated` profile in this case.
 
 **_Shared profile_**
 
-The `shared` profile is what the HotSpot JVM does today regarding default ergonomics.
+The `shared` profile represents the heuristics that the HotSpot JVM uses today.
 
 **_Dedicated profile_**
 
- Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to maximize resource consumption. This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, and more aggressively estimate native memory expectations.
+ Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to maximize resource consumption. This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, and more aggressively estimate native memory consumption.
 
 The table below describes what the `dedicated` profile will set for the JVM:
 
@@ -122,22 +122,22 @@ The table below describes what the `dedicated` profile will set for the JVM:
 
 | Memory     | Processors | GC selected |
 | ---------- | ---------- | ----------- |
-| \>=16 GB   | \>1        | ZGC         |
-| \>2048 MB  | \>1        | G1          |
-| \<=2048 MB | \>1        | ParallelGC  |
 | Any        | 1          | Serial      |
+| \<=2048 MB | \>1        | ParallelGC  |
+| \>2048 MB  | \>1        | G1          |
+| \>=16 GB   | \>1        | ZGC         |
 
 **_Default maximum heap size_**
 
-We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for off-heap (native) operations. This heap size percentage growth is an estimate that native memory usage is done at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would exist. Users are still encouraged to monitor and observe memory consumption and adjust heap size allocation accordingly.
+We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for off-heap (native) operations. This heap size percentage growth is an estimate that native memory usage is required at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would exist. Users are still encouraged to monitor and observe memory consumption and adjust heap size allocation accordingly.
 
 | Memory      | Heap size |
 | ----------- | --------- |
-| >= 16  GB   | 90%       |
-| >= 6   GB   | 85%       |
-| >= 4   GB   | 80%       |
-| >= 0.5 GB   | 75%       |
 | <  0.5 GB   | 50%       |
+| >= 0.5 GB   | 75%       |
+| >= 4   GB   | 80%       |
+| >= 6   GB   | 85%       |
+| >= 16  GB   | 90%       |
 
 **_API to identify selected profile_**
 
