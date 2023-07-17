@@ -88,7 +88,7 @@ We document the current implementation detail of GC threads ergonomically config
 
 We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared` and adding a second profile called `dedicated` for when the JVM is to run on environments with dedicated resources, such as, but not limited to, containers.
 
-**_Selecting a profile_**
+### Selecting a profile
 
 To select a profile, this JEP proposes a new flag:
 
@@ -98,15 +98,15 @@ To select a profile, this JEP proposes a new flag:
 
 Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`. This will be useful for VM templates meant for dedicated JVM-based applications.
 
-**_Default profile selection_**
+### Default profile selection
 
 The `shared` ergonomics profile will be selected by default unless the JVM believes it is running in a dedicated environment (e.g., containers, cgroups, zones). The JVM will activate the `dedicated` profile in this case.
 
-**_Shared profile_**
+### Shared profile
 
 The `shared` profile represents the heuristics that the HotSpot JVM uses today.
 
-**_Dedicated profile_**
+### Dedicated profile
 
  Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to maximize resource consumption. This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, and more aggressively estimate native memory consumption.
 
@@ -118,7 +118,7 @@ The table below describes what the `dedicated` profile will set for the JVM:
 * Default minimum heap size: 25%
 * GC threads: unchanged
 
-**_Selecting a garbage collector in dedicated profile_**
+#### Selecting a garbage collector in dedicated profile
 
 | Memory     | Processors | GC selected |
 | ---------- | ---------- | ----------- |
@@ -127,7 +127,7 @@ The table below describes what the `dedicated` profile will set for the JVM:
 | \>2048 MB  | \>1        | G1          |
 | \>=16 GB   | \>1        | ZGC         |
 
-**_Default maximum heap size_**
+#### Default maximum heap size
 
 We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for off-heap (native) operations. This heap size percentage growth is an estimate that native memory usage is required at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would exist. Users are still encouraged to monitor and observe memory consumption and adjust heap size allocation accordingly.
 
@@ -139,7 +139,7 @@ We progressively grow the heap size percentage based on the available memory to 
 | >= 6   GB   | 85%       |
 | >= 16  GB   | 90%       |
 
-**_API to identify selected profile_**
+### API to identify selected profile
 
 An application can obtain the profile selection programmatically by reading the property `java.vm.ergonomics.profile`:
 
