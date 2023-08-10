@@ -1,5 +1,7 @@
 # Ergonomics Profiles
 
+Ongoing PR: https://github.com/microsoft/openjdk-jdk/pull/9
+
 ## Summary
 
 Introduce a new JVM feature for Ergonomics Profiles, with a `shared` profile for the existing heuristics and a `dedicated` option for when the JVM is running on systems with dedicated resources for the one JVM process.
