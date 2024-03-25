@@ -39,7 +39,7 @@ Non-Goals
 Motivation
 ----------
 
-Building on the rationale of JEP 449, which deprecated the Windows 32-bit installer, this proposal recognizes the continued decline in the use and necessity of 32-bit Java applications on Windows.
+Building on the rationale of JEP 449, which deprecated the Windows 32-bit support, this proposal recognizes the continued decline in the use and necessity of 32-bit Java applications on Windows.
 The computing industry has largely transitioned to 64-bit architectures, making the maintenance of a 32-bit JVM for Windows increasingly impractical and resource-intensive. 
 By removing this support, OpenJDK can allocate more resources towards innovations and improvements that benefit the broader community.
 
@@ -54,7 +54,7 @@ The execution of this proposal will involve:
 Reference
 ---------
 
-This proposal is inspired by and builds upon [JEP 449](https://openjdk.org/jeps/449), which deprecated the 32-bit Windows installer of OpenJDK.
+This proposal is inspired by and builds upon [JEP 449](https://openjdk.org/jeps/449), which deprecated the 32-bit Windows support from the OpenJDK.
 
 Risks and Assumptions
 ---------------------
