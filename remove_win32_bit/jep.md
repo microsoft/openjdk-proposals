@@ -21,7 +21,7 @@ Summary
 
 Following the deprecation of Windows 32-bit support in JEP 449, this proposal takes the next step by completely removing Windows 32-bit support from OpenJDK. 
 This decision acknowledges the evolving landscape of computing, where 64-bit systems have become predominant. 
-The removal of 32-bit support will streamline development and focus resources on enhancing the performance and security of OpenJDK on modern architectures.
+The removal of Windows 32-bit support will streamline development and focus resources on enhancing the performance and security of OpenJDK on modern architectures.
 
 Goals
 -----
