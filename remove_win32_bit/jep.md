@@ -1,19 +1,33 @@
 # JEP NNN: Removal of Windows 32-bit Support
 
 _Author_ Bruno Borges & George Adams
+
 _Owner_ Bruno Borges
+
 _Type_ Feature
+
 _Scope_ Implementation
+
 _Status_ Draft
+
 _Release_ 23
+
 _Component_ hotspot / other
+
 _Discussion_ jdk dash dev at openjdk dot org
+
 _Effort_ ?
+
 _Duration_ ?
+
 _Reviewed by_ Magnus Ihse Bursie
+
 _Endorsed by_ Magnus Ihse Bursie
+
 _Created_ <date>
+
 _Updated_ <date>
+
 _Issue_ <issue#>
 
 Summary
