@@ -11,8 +11,9 @@ Introduce a new JVM feature for Ergonomics Profiles, with a `shared` profile for
 1. Introduce the concept of ergonomics profiles.
 1. Introduce a new flag to select an ergonomic profile.
 1. Define existing heuristics and ergonomics as `shared`.
-1. Introduce a `dedicated` profile designed for systems where the JVM is the dominant process using resources, e.g., in a canonical container deployment scenario.
-1. Automatically select the `dedicated` profile when the JVM believes the system has dedicated resources to it.
+1. Introduce a `dedicated` profile designed for systems where the JVM is the dominant process using the allocated resources, e.g., in a canonical container deployment scenario.
+1. Introduce an `auto` mode to automatically select between `dedicated` and `shared`.
+1. Expose the selected Garbage Collector's name and the selected Ergonomics Profile through RuntimeMXBean.
 
 ## Non-Goals
 
@@ -24,11 +25,11 @@ No specific success metrics are needed.
 
 ## Motivation
 
-The original design of default JVM ergonomics and heuristics was aimed at traditional bare metal servers or large virtual machine environments where the JVM had to share resources with other processes (e.g., a data store) running on that same environment. Today, more than half of Cloud based JVM workloads are running in dedicated environments.
+The original design of default JVM ergonomics and heuristics was aimed at traditional bare metal servers or large virtual machine environments where the JVM shares resources with other processes (e.g., a data store). Today, more than half of Cloud based JVM workloads are running in dedicated environments such as containers.
 
-A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs were running inside environments with resources dedicated to the JVM (i.e., in containers). Many of these JVMs with dedicated resources were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. Under this condition, the JVM does not utilize most of the memory available, and the workload wastes resources. Users then tend to resort to horizontal scaling to address performance issues before addressing resource planning for the JVM (and its tuning). This premature move to horizontal scaling, in turn, leads to more resource waste, both in terms of computing resources and engineering resources with hours spent in monitoring, configuring, and operationalizing the deployments, followed by manual tuning).
+A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs were running inside dedicated environments. Many of these JVMs were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. Under this condition, the JVM does not utilize most of the memory available, and the workload doesn't take advantage of available resources, primarily memory. With underuse of available resources, application developers and operators tend to apply horizontal scaling to address performance issues. This premature move to horizontal scaling, in turn, leads to more resource waste, both in terms of computing resources and engineering resources.
 
-With an increase, by default, of resource consumption in environments with dedicated resources for the JVM process, the JVM has more opportunities to improve throughput and latency, or at the least, meet the resource consumption (footprint) expected by the user.
+With an increase, by default, of resource consumption in environments with dedicated resources for the JVM process, the JVM will have more opportunities to behave adequately according to available resources, or at the very least meet the resource consumption (footprint) expected by the user.
 
 Currently, the default ergonomics of the HotSpot JVM are:
 
@@ -88,21 +89,25 @@ We document the current implementation detail of GC threads ergonomically config
 
 ## Description
 
-We propose adding the concept of Ergonomics Profiles while naming the existing default ergonomics as `shared` and adding a second profile called `dedicated` for when the JVM is to run on environments with dedicated resources, such as, but not limited to, containers.
+This JEP proposes adding the concept of Ergonomics Profiles while naming the existing ergonomics as `shared` and adding a second profile named `dedicated` for when the JVM is aimed at environments with dedicated resources, such as, but not limited to, containers.
 
 ### Selecting a profile
 
 To select a profile, this JEP proposes a new flag:
 
 ```sh
--XX:ErgonomicsProfile=<shared|dedicated>
+-XX:ErgonomicsProfile=<shared|dedicated|auto>
 ```
 
 Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`. This will be useful for VM templates meant for dedicated JVM-based applications.
 
 ### Default profile selection
 
-The `shared` ergonomics profile will be selected by default unless the JVM believes it is running in a dedicated environment (e.g., containers, cgroups, zones). The JVM will activate the `dedicated` profile in this case.
+The `shared` ergonomics profile will be selected by default.
+
+### Auto profile selection
+
+When the the `auto` mode is selected, the JVM will activate the `dedicated` profile in cases it believes the resources are dedicated. This JEP implements support for Linux containers dectection only.
 
 ### Shared profile
 
@@ -141,7 +146,7 @@ We progressively grow the heap size percentage based on the available memory to 
 | >= 6   GB   | 85%       |
 | >= 16  GB   | 90%       |
 
-### API to identify selected profile
+### Changes to RuntimeMXBean
 
 An application can obtain the profile selection programmatically by reading the property `java.vm.ergonomics.profile`:
 
@@ -155,35 +160,14 @@ The profile selection may also be obtained programmatically through JMX by the i
 String getJvmErgonomicsProfile()
 ```
 
-The value may also be obtained through the `MBeanServerConnection.getAttribute` method, with the name `JvmErgonomicsProfile`:
-
+The name of the garbage collector currently running will also be exposed through the RuntimeMXBean:
 ```java
-MBeanServerConnection mBeanServerConnection = ...
-
-var objectName = new ObjectName(ManagementFactory.RUNTIME_MXBEAN_NAME);
-var ergonomicsProfile = mBeanServerConnection.getAttribute(objectName, "JvmErgonomicsProfile");
+String getGCName()
 ```
-
-## Alternatives
-
-Currently, the only alternative to this proposal is manually tuning the JVM. This exercise is often complex, challenging, and time-consuming for Java developers.
 
 ## Testing
 
-// What kinds of test development and execution will be required in order
-// to validate this enhancement beyond the usual mandatory unit tests?
-// Be sure to list any special platform or hardware requirements.
-
-We will provide tests to ensure the correct profile selection on expected environments:
-
- 1. Execution in a VM shall select the `shared` profile
- 1. Execution in a container shall select the `dedicated` profile
-
-We will provide other tests to validate the heuristics of the `dedicated` profile.
-
-## Risks and Assumptions
-
-None at this time.
+This JEP introduces a new JTreg test named `TestErgonomicsProfiles` under `test/hotspot/jtreg/gc/ergonomics`. The tests ensure the correct profile selection, as well as the expected GC selection and heap size `MaxRAMPercentage` allocations.
 
 ## Dependencies
 
