@@ -1,4 +1,4 @@
-# JEP NNN: Removal of Windows 32-bit Support
+# JEP NNN: Remove the Windows 32-bit x86 Port
 
 _Author_ Bruno Borges & George Adams
 
@@ -33,30 +33,29 @@ _Issue_ <issue#>
 Summary
 -------
 
-Following the deprecation of Windows 32-bit support in JEP 449, this proposal takes the next step by completely removing Windows 32-bit support from OpenJDK. 
-This decision acknowledges the evolving landscape of computing, where 64-bit systems have become predominant. 
-The removal of Windows 32-bit support will streamline development and focus resources on enhancing the performance and security of OpenJDK on modern architectures.
+Remove the source code and build support for the Windows 32-bit x86 port. This port was deprecated for removal in JDK 21 with the express intent to remove them in a future release.
 
 Goals
 -----
 
-- To remove all code paths in the code base that apply only to Windows 32-bit.
-- To cease all testing and development efforts targeting the Windows 32-bit platform.
-- To simplify OpenJDK's build and test infrastructure, aligning with current computing standards.
+- To remove all code paths in the code base that apply only to Windows 32-bit x86.
+- To cease all testing and development efforts targeting the Windows 32-bit x86 platform.
+- To simplify JDK's build and test infrastructure, aligning with current computing standards.
 
 Non-Goals
 ---------
 
 - This JEP does not aim to remove or change 32-bit support for any platforms other than Windows.
-- This JEP does not aim to eliminate code or support for Windows 32-bit on previous versions of OpenJDK.
+- This JEP does not aim to eliminate code or support for Windows 32-bit on previous versions of the JDK.
 
 Motivation
 ----------
 
-Building on the rationale of JEP 449, which deprecated the Windows 32-bit support, this proposal recognizes the continued decline in the use and necessity of 32-bit Java applications on Windows.
-The computing industry has largely transitioned to 64-bit architectures, making the maintenance of a 32-bit JVM for Windows increasingly impractical and resource-intensive. 
-This JEP intends to simplify the OpenJDK codebase, removing legacy 32-bit specific code paths, and redirect those efforts towards optimizing and advancing the 64-bit architecture support.
-By removing this support, OpenJDK can allocate more resources towards innovations and improvements that benefit the broader community.
+- Allow contributors in the OpenJDK community to accelerate the development of new features and enhancements that will move the platform forward.
+
+- The implementation of [JEP 436 (Virtual Threads)](https://openjdk.org/jeps/436) for Windows x86-32 falls back to the use of kernel threads and therefore does not bring the expected benefits of Project Loom.
+
+- Windows 10, the last Windows operating system to support 32-bit operation, will reach End of Life in [October 2025](https://learn.microsoft.com/lifecycle/products/windows-10-home-and-pro).
 
 Description
 -----------
@@ -64,28 +63,16 @@ Description
 The execution of this proposal will involve:
 
 1. **Code removal**: Find and remove all code paths in the code base that apply only to Windows 32-bit.
-1. **Build and Test Infrastructure**: Modifications to the OpenJDK build system to remove support for compiling on Windows 32-bit platforms, along with a halt in all testing activities for this architecture.
-1. **Documentation and Communication**: Updates to OpenJDK documentation to reflect the removal of Windows 32-bit support and active communication within the community to ensure a smooth transition for users and developers.
-
-Reference
----------
-
-This proposal is inspired by and builds upon [JEP 449](https://openjdk.org/jeps/449), which deprecated the 32-bit Windows support from the OpenJDK.
+1. **Build and Test Infrastructure**: Modifications to the JDK build system to remove support for compiling on Windows 32-bit platforms, along with a halt in all testing activities for this architecture.
+1. **Documentation and Communication**: Updates to JDK documentation to reflect the removal of Windows 32-bit support and active communication within the community to ensure a smooth transition for users and developers.
 
 Risks and Assumptions
 ---------------------
 
-- **Risk**: There may be a subset of the user base that relies on 32-bit Java applications on Windows. Transition guidance and support by distributions and vendors of OpenJDK binaries will be critical.
+- **Risk**: There may be a subset of the user base that relies on 32-bit Java applications on Windows. This change necessitates that applications running on 32-bit Java on Windows migrate to a 64-bit Java and Windows environment, or remain on legacy versions of the JDK - any version prior to JDK 23 - that still include 32-bit support. Transition guidance and support by distributions and vendors of JDK binaries will be critical.
 - **Assumption**: Most current Java applications and users on Windows can migrate to 64-bit without significant obstacles, minimizing disruption.
 
 Dependencies
 ------------
 
-This JEP is independent of other proposals and is solely focused on the removal of 32-bit support for Windows within OpenJDK.
-
-Impact
-------
-
-- **Compatibility**: This change necessitates that applications running on 32-bit Java on Windows migrate to 64-bit Java or remain on legacy versions of OpenJDK - any version prior to JDK 23 - that still include 32-bit support.
-- **Testing and Development**: Focusing on 64-bit architecture for Windows support will allow for more dedicated testing and development efforts, potentially improving OpenJDK's performance and security on these platforms.
-- **Documentation**: Documentation will be updated to clearly state the removal of support for Windows 32-bit environments.
+This JEP is independent of other proposals and is solely focused on the removal of 32-bit support for Windows from the JDK.
