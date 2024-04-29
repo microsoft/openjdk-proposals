@@ -71,8 +71,3 @@ Risks and Assumptions
 
 - **Risk**: There may be a subset of the user base that relies on 32-bit Java applications on Windows. This change necessitates that applications running on 32-bit Java on Windows migrate to a 64-bit Java and Windows environment, or remain on legacy versions of the JDK - any version prior to JDK 23 - that still include 32-bit support. Transition guidance and support by distributions and vendors of JDK binaries will be critical.
 - **Assumption**: Most current Java applications and users on Windows can migrate to 64-bit without significant obstacles, minimizing disruption.
-
-Dependencies
-------------
-
-This JEP is independent of other proposals and is solely focused on the removal of 32-bit support for Windows from the JDK.
