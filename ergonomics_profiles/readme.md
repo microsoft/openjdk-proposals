@@ -8,20 +8,24 @@ Introduce a new JVM feature named Ergonomics Profiles, with a `shared` profile f
 
 ## Goals
 
-1. Introduce the concept of ergonomics profiles.
-1. Introduce a new flag to select an ergonomic profile.
-1. Define existing heuristics and ergonomics as `shared`.
-1. Introduce a `dedicated` profile designed for systems where the JVM is the dominant process using the allocated resources, e.g., in a canonical container deployment scenario. The purpose of this profile is to utilize most of the resources allocated to the machine/container.
-1. Introduce an `auto` mode to automatically select between `dedicated` and `shared`.
-1. Expose the selected Garbage Collector's name and the selected Ergonomics Profile through RuntimeMXBean.
+Reduce resource waste without requiring manual heap size configuration by:
+
+1. Introducing the concept of ergonomics profiles.
+1. Defining existing heuristics as `shared`, and maintaining it as default.
+1. Defining a new set of heuristics as `dedicated` designed for systems where the JVM is the dominant process using the reserved resources, e.g., in a container deployment scenario.
+1. Defining an `auto` mode to automatically select between `dedicated` and `shared` based on environment characteristics.
 
 ## Non-Goals
 
-This JEP does not aim to increase performance of applications when running under the `dedicated` profile.
+It is not a goal of this effort to:
+
+ - Increase performance of applications when running under the `dedicated` profile.
+ - Change the default ergonomics profile to `dedicated` automatically in dedicated environments i.e. containers.
+ - Remove the existing configurability of heap sizes and GC selection flags.
 
 ## Success Metrics
 
-No specific success metrics are needed.
+The `dedicated` profile, when active, should produce lesser resource waste with no performance regression, for a majority of workloads, compared to traditional heuristics, when running in a dedicated environment. 
 
 ## Motivation
 
@@ -30,6 +34,94 @@ The original design of default JVM ergonomics and heuristics was aimed at tradit
 A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs were running inside dedicated environments. Many of these JVMs were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. Under this condition, the JVM does not utilize most of the memory available. With underuse of available resources, application developers and operators tend to apply horizontal scaling to address performance issues. This premature move to horizontal scaling, in turn, leads to more resource waste, both in terms of computing resources and engineering resources.
 
 By increasing JVM's awareness to more resources available in dedicated environments, the JVM will have more opportunities to behave adequately, or at the very least meet the resource consumption (footprint) expected by the user. On the other hand allocating too much resources to the JVM can be dangerous.
+
+## Description
+
+This JEP proposes adding the concept of Ergonomics Profiles. The existing ergonomics will be under the `shared` profile. A second profile named `dedicated` is for when the JVM is aimed at environments with dedicated resources, such as, but not limited to, containers. A third value, `auto`, may be used to let the JVM select the ergonomic profile based on environment characteristics (e.g. it's running inside a container). The default profile will be `shared`.
+
+### Selecting a profile
+
+To set an ergonomic profile, the user may provide the following flag:
+
+```sh
+-XX:ErgonomicsProfile=<shared|dedicated|auto>
+```
+
+### Default profile
+
+The `shared` ergonomics profile will be selected by default.
+
+### Auto profile selection
+
+When the the `auto` mode is selected, the JVM will activate the `dedicated` profile in cases it believes the resources are dedicated. This JEP proposes support for Linux containers dectection only.
+
+### Shared profile
+
+The `shared` profile represents the heuristics that the HotSpot JVM uses today.
+
+### Dedicated profile
+
+Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to minimize resource waste. This profile will increase heap size allocation compared to `shared`, and expand garbage collector selection to more options and considerations. The table below describes what the `dedicated` profile will set for the JVM:
+
+* GC selection: see below
+* Default maximum heap size: see below
+* Default initial heap size: 50%
+* Default minimum heap size: unchanged
+* GC threads: unchanged
+
+#### Selecting a garbage collector in dedicated profile
+
+| Memory     | Processors | GC selected |
+| ---------- | ---------- | ----------- |
+| Any        | 1          | Serial      |
+| \<=2048 MB | \>1        | ParallelGC  |
+| \>2048 MB  | \>1        | G1          |
+| \>=16 GB   | \>1        | ZGC         |
+
+#### Default initial heap size
+
+The `dedicated` profile will set an `InitialRAMPercentage` at 50%.
+
+#### Default maximum heap size
+
+We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for non-heap operations. This heap size percentage growth is an estimate that native memory usage is required at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would still exist.
+
+| Memory      | Heap size |
+| ----------- | --------- |
+| <  0.5 GB   | 50%       |
+| >= 0.5 GB   | 75%       |
+| >= 4   GB   | 80%       |
+| >= 6   GB   | 85%       |
+| >= 16  GB   | 90%       |
+
+### Changes to RuntimeMXBean
+
+An application can obtain the profile selection programmatically by reading the property `java.vm.ergonomics.profile`:
+
+```java
+var ergonomicsProfile = System.getProperty("java.vm.ergonomics.profile");
+```
+
+The profile selection may also be obtained programmatically through JMX by the inclusion of the following method in `java.management.RuntimeMXBean`:
+
+```java
+String getJvmErgonomicsProfile()
+```
+
+## Testing
+
+This proposal only affects ergonomiocs when `dedicated` profile is active, by either selecting it directly, or by using `auto`.
+This profile will be thoroughly performance tested with a variety of workloads commonly deployed in dedicated environments such as containers, with a variety of memory and CPU settings. 
+
+## Risks and Assumptions
+The `dedicated` profile may not be ideal for certain workloads where non-heap memory is required beyond assumed differences between total available memory and heuristics ergonomically selected.
+For these workloads, manual tuning will still be required.
+
+---- END OF JEP ----
+
+This section is only for documentation purposes.
+
+## Current Ergonomics
 
 Currently, the default ergonomics of the HotSpot JVM are:
 
@@ -87,99 +179,11 @@ We document the current implementation detail of GC threads ergonomically config
 | G1 GC     | 1-8        | max((ParallelGCThreads+2)/4, 1) | ceil(#CPUs)            |
 | G1 GC     | \>8        | max((ParallelGCThreads+2)/4, 1) | 8 + (#CPUs-8) \* (5/8) |
 
-## Description
-
-This JEP proposes adding the concept of Ergonomics Profiles while naming the existing ergonomics as `shared` and adding a second profile named `dedicated` for when the JVM is aimed at environments with dedicated resources, such as, but not limited to, containers.
-
-### Selecting a profile
-
-To select a profile, this JEP proposes a new flag:
-
-```sh
--XX:ErgonomicsProfile=<shared|dedicated|auto>
-```
-
-Users may also select a profile by setting this flag in the environment variable `JAVA_TOOL_OPTIONS`. This will be useful for VM templates meant for dedicated JVM-based applications.
-
-### Default profile selection
-
-The `shared` ergonomics profile will be selected by default.
-
-### Auto profile selection
-
-When the the `auto` mode is selected, the JVM will activate the `dedicated` profile in cases it believes the resources are dedicated. This JEP implements support for Linux containers dectection only.
-
-### Shared profile
-
-The `shared` profile represents the heuristics that the HotSpot JVM uses today.
-
-### Dedicated profile
-
- Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to maximize resource consumption. This profile will maximize heap size allocation, optimize garbage collector selection with a more extensive set of options and considerations, and more aggressively estimate native memory consumption.
-
-The table below describes what the `dedicated` profile will set for the JVM:
-
-* GC selection: see below
-* Default maximum heap size: see below
-* Default initial heap size: 50%
-* Default minimum heap size: 25%
-* GC threads: unchanged
-
-#### Selecting a garbage collector in dedicated profile
-
-| Memory     | Processors | GC selected |
-| ---------- | ---------- | ----------- |
-| Any        | 1          | Serial      |
-| \<=2048 MB | \>1        | ParallelGC  |
-| \>2048 MB  | \>1        | G1          |
-| \>=16 GB   | \>1        | ZGC         |
-
-#### Default maximum heap size
-Memory refers to the physical machine excluding swap space on a physical/virtual machine and the cgroup memory limit in the case of a container. 
-
-#### Default maximum heap size
-
-We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for off-heap (native) operations. This heap size percentage growth is an estimate that native memory usage is required at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would exist. Users are still encouraged to monitor and observe memory consumption and adjust heap size allocation accordingly.
-
-| Memory      | Heap size |
-| ----------- | --------- |
-| <  0.5 GB   | 50%       |
-| >= 0.5 GB   | 75%       |
-| >= 4   GB   | 80%       |
-| >= 6   GB   | 85%       |
-| >= 16  GB   | 90%       |
-
-### Changes to RuntimeMXBean
-
-An application can obtain the profile selection programmatically by reading the property `java.vm.ergonomics.profile`:
-
-```java
-var ergonomicsProfile = System.getProperty("java.vm.ergonomics.profile");
-```
-
-The profile selection may also be obtained programmatically through JMX by the inclusion of the following method in `java.management.RuntimeMXBean`:
-
-```java
-String getJvmErgonomicsProfile()
-```
-
-The name of the garbage collector currently running will also be exposed through the RuntimeMXBean:
-
-```java
-String getGCName()
-```
-
-## Testing
-
-This JEP introduces a new JTreg test named `TestErgonomicsProfiles` under `test/hotspot/jtreg/gc/ergonomics`. The tests ensure the correct profile selection, as well as the expected GC selection and heap size `MaxRAMPercentage` allocations.
-
-## Risks and Assumptions
-Allocating too much memory for the process can cause the container to be killed. The `dedicated` profile, when active, will not override manually tuned settings.
-
 ## Dependencies
 
-We list of related issues, in no particular order, that we may address for, or due to, this JEP:
+List related issues, in no particular order:
 
+1. [JDK-8329758: ZGC: Automatic Heap Sizing](https://bugs.openjdk.org/browse/JDK-8329758)
 1. [JDK-8261242: \[Linux\] OSContainer::is_containerized() returns true when run outside a container](https://bugs.openjdk.org/browse/JDK-8261242)
 1. [JDK-8302744: Refactor Hotspot container detection code](https://bugs.openjdk.org/browse/JDK-8302744)
 1. [JDK-8264482: container info misleads on non-container environment](https://bugs.openjdk.org/browse/JDK-8264482)
