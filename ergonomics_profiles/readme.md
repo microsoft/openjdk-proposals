@@ -110,8 +110,6 @@ String getJvmErgonomicsProfile()
 
 The HotSpot JVM has a concept of Server and Client Class machine model. This concept will be deprected, along with the following flags:
 
-- `-server`
-- `-client`
 - `-XX:+NeverActAsServerClassMachine`
 - `-XX:+AlwaysActAsServerClassMachine`
 
