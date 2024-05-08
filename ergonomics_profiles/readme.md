@@ -106,15 +106,6 @@ The profile selection may also be obtained programmatically through JMX by the i
 String getJvmErgonomicsProfile()
 ```
 
-### Deprecation of Server and Client Class Machine model
-
-The HotSpot JVM has a concept of Server and Client Class machine model. This concept will be deprected, along with the following flags:
-
-- `-XX:+NeverActAsServerClassMachine`
-- `-XX:+AlwaysActAsServerClassMachine`
-
-A warning message will advert the user that these flags will be removed in the future. To achieve the same traditional heuristics as `Client Class Machine`, users will have to ensure the `shared` (default) profile is selected.
-
 ## Testing
 
 This proposal only affects ergonomics heuristics for when `dedicated` profile is active, by either selecting it directly, or by using `auto` mode.
@@ -203,3 +194,8 @@ List related issues, in no particular order:
 1. [JDK-8286991: Hotspot container subsystem unaware of VM moving cgroups](https://bugs.openjdk.org/browse/JDK-8286991)
 1. [JDK-8286212: Cgroup v1 initialization causes NPE on some systems](https://bugs.openjdk.org/browse/JDK-8286212)
 1. [Memory Allocation Table](https://docs.google.com/spreadsheets/d/15OiJ46Xz-Xjdm7brALqHgjdbkLd-C8ghH3bqKMuD9TQ/edit?usp=sharing)
+
+## Server and Client Class Machine
+
+The HotSpot JVM has a concept of Server and Client Class machine model.
+Should this concept be deprecated?
