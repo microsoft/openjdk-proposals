@@ -84,13 +84,13 @@ The `dedicated` profile will set an `InitialRAMPercentage` at 50%.
 
 The heap size percentage progressively grows based on the available memory to reduce waste on memory reserved for non-heap operations. This heap size percentage growth is based on common workloads observed in containers, such as REST-based web applications and microservices. If the percentage were to be the same, progressive waste would still occur.
 
-| Memory      | Heap size |
-| ----------- | --------- |
-| <  0.5 GB   | 50%       |
-| >= 0.5 GB   | 75%       |
-| >= 4   GB   | 80%       |
-| >= 6   GB   | 85%       |
-| >= 16  GB   | 90%       |
+| Memory      | Max Heap size |
+| ----------- | ------------- |
+| <  0.5 GB   | 50%           |
+| >= 0.5 GB   | 75%           |
+| >= 4   GB   | 80%           |
+| >= 6   GB   | 85%           |
+| >= 16  GB   | 90%           |
 
 ### Changes to RuntimeMXBean
 
