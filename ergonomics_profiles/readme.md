@@ -8,20 +8,19 @@ Introduce a new JVM feature named Ergonomics Profiles, with a `shared` profile f
 
 ## Goals
 
-Reduce resource waste without requiring manual heap size configuration by:
+Reduce resource waste on dedicated environmedns while preserving legacy heuristics by:
 
 1. Introducing the concept of ergonomics profiles.
-1. Defining existing heuristics as `shared`, and maintaining it as default.
-1. Defining a new set of heuristics as `dedicated` designed for systems where the JVM is the dominant process using the reserved resources, e.g., in a container deployment scenario.
-1. Defining an `auto` mode to automatically select between `dedicated` and `shared` based on environment characteristics.
+1. Remove code paths, flags, and checks related to Server and Client class machine
+1. Define existing heuristics as `shared`, and maintaining it as default.
+1. Define a new set of heuristics designed for environments where the JVM is expected to be the dominant process, e.g., in a container.
+1. Define an `auto` mode to automatically select between `dedicated` and `shared` based on environment characteristics.
 
 ## Non-Goals
 
-It is not a goal of this effort to:
-
- - Increase performance of applications when running under the `dedicated` profile.
- - Change the default ergonomics profile to `dedicated` automatically in dedicated environments i.e. containers.
- - Remove the existing configurability of heap sizes and GC selection flags.
+ - It is not a goal to guarantee applications' performance improvements when running under the `dedicated` profile.
+ - It is not a goal to automatically change to the `dedicated` profile in environments such as containers.
+ - It is not a goal to remove the configurability of any tuning flags such as heap sizes, GC selection, and others.
 
 ## Success Metrics
 
@@ -29,15 +28,15 @@ The `dedicated` profile, when active, should produce lesser resource waste with 
 
 ## Motivation
 
-The original design of default JVM ergonomics and heuristics was aimed at traditional bare metal servers or large virtual machine environments where the JVM shares resources with other processes (e.g., a data store). Today, more than half of Cloud based JVM workloads are running in dedicated environments such as containers.
+The original design of default JVM ergonomics and heuristics was aimed at traditional bare metal servers or large virtual machine environments where the JVM shares resources with other processes (e.g., a data store). Today, more than half of Cloud based JVM workloads are running in dedicated environments such as containers, followed by a second majority of workloads on virtual machines with a percentage of those being exclusively dedicated to the JVM.
 
 A study in 2023 by New Relic, an APM vendor with access to millions of JVMs in production, identified that more than 70% of their customers' JVMs were running inside dedicated environments. Many of these JVMs were running without explicit JVM tuning flags. Therefore the JVM was running with default ergonomics traditionally aimed at shared environments. Under this condition, the JVM does not utilize most of the memory available. With underuse of available resources, application developers and operators tend to apply horizontal scaling to address performance issues. This premature move to horizontal scaling, in turn, leads to more resource waste, both in terms of computing resources and engineering resources.
 
-By increasing JVM's awareness to more resources available in dedicated environments, the JVM will have more opportunities to behave adequately, or at the very least meet the resource consumption (footprint) expected by the user. On the other hand allocating too much resources to the JVM can be dangerous.
+By increasing JVM's awareness to more resources available in dedicated environments when running without specific configurations other than the `dedicated` ergonomic profile selection, the JVM will have more opportunities to behave adequately, or at the very least meet the resource consumption (footprint) expected by the user. 
 
 ## Description
 
-This JEP proposes adding the concept of Ergonomics Profiles. The existing ergonomics will be under the `shared` profile. A second profile named `dedicated` is for when the JVM is aimed at environments with dedicated resources, such as, but not limited to, containers. A third value, `auto`, may be used to let the JVM select the ergonomic profile based on environment characteristics (e.g. it's running inside a container). The default profile will be `shared`.
+This JEP proposes adding the concept of Ergonomics Profiles. The existing ergonomics will be placed under the `shared` profile. A second profile named `dedicated` is designed for when the JVM is aimed at environments with dedicated resources, such as, but not limited to, Linux containers. A third value, `auto`, may be used to let the JVM select the ergonomic profile based on environment characteristics (e.g. it's running inside a container). The default profile will be `shared`.
 
 ### Selecting a profile
 
@@ -61,7 +60,7 @@ The `shared` profile represents the heuristics that the HotSpot JVM uses today.
 
 ### Dedicated profile
 
-Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to minimize resource waste. This profile will increase heap size allocation compared to `shared`, and expand garbage collector selection to more options and considerations. The table below describes what the `dedicated` profile will set for the JVM:
+Assuming the environment is dedicated to the JVM, the `dedicated` profile will contain different heuristics to minimize resource waste. Two primary characteristics will be adjusted: heap size (initial and maximum) and the garbage collector selected. Heap size allocation will be less conservative compared to `shared`, and garbage collector selection will consider more options. The table below describes what the `dedicated` profile will set for the JVM:
 
 * GC selection: see below
 * Default maximum heap size: see below
@@ -74,9 +73,8 @@ Assuming the environment is dedicated to the JVM, the `dedicated` profile will c
 | Memory     | Processors | GC selected |
 | ---------- | ---------- | ----------- |
 | Any        | 1          | Serial      |
-| \<=2048 MB | \>1        | ParallelGC  |
+| \<=2048 MB | \>1        | Parallel    |
 | \>2048 MB  | \>1        | G1          |
-| \>=16 GB   | \>1        | ZGC         |
 
 #### Default initial heap size
 
@@ -84,7 +82,7 @@ The `dedicated` profile will set an `InitialRAMPercentage` at 50%.
 
 #### Default maximum heap size
 
-We progressively grow the heap size percentage based on the available memory to reduce waste on memory reserved for non-heap operations. This heap size percentage growth is an estimate that native memory usage is required at occasional moments throughout the operation of the JVM for most applications. Otherwise, if the percentage were to be the same, progressive waste would still exist.
+The heap size percentage progressively grows based on the available memory to reduce waste on memory reserved for non-heap operations. This heap size percentage growth is based on common workloads observed in containers, such as REST-based web applications and microservices. If the percentage were to be the same, progressive waste would still occur.
 
 | Memory      | Heap size |
 | ----------- | --------- |
@@ -108,10 +106,21 @@ The profile selection may also be obtained programmatically through JMX by the i
 String getJvmErgonomicsProfile()
 ```
 
+### Deprecation of Server and Client Class Machine model
+
+The HotSpot JVM has a concept of Server and Client Class machine model. This concept will be deprected, along with the following flags:
+
+- `-server`
+- `-client`
+- `-XX:+NeverActAsServerClassMachine`
+- `-XX:+AlwaysActAsServerClassMachine`
+
+A warning message will advert the user that these flags will be removed in the future. To achieve the same traditional heuristics as `Client Class Machine`, users will have to ensure the `shared` (default) profile is selected.
+
 ## Testing
 
-This proposal only affects ergonomiocs when `dedicated` profile is active, by either selecting it directly, or by using `auto`.
-This profile will be thoroughly performance tested with a variety of workloads commonly deployed in dedicated environments such as containers, with a variety of memory and CPU settings. 
+This proposal only affects ergonomics heuristics for when `dedicated` profile is active, by either selecting it directly, or by using `auto` mode.
+This profile will be thoroughly performance tested with a variety of workloads commonly deployed in dedicated environments such as containers, with a variety of memory and CPU settings.
 
 ## Risks and Assumptions
 The `dedicated` profile may not be ideal for certain workloads where non-heap memory is required beyond assumed differences between total available memory and heuristics ergonomically selected.
