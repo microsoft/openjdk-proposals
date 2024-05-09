@@ -11,7 +11,6 @@ Introduce a new JVM feature named Ergonomics Profiles, with a `shared` profile f
 Reduce resource waste on dedicated environments while preserving legacy heuristics by:
 
 1. Introducing the concept of ergonomics profiles.
-1. Remove or deprecate code paths, flags, and checks related to Server and Client class machine
 1. Define existing heuristics as `shared`, and maintaining it as default.
 1. Define a new set of heuristics designed for environments where the JVM is expected to be the dominant process.
 1. Define an `auto` mode to automatically select between `dedicated` and `shared` based on environment characteristics.
