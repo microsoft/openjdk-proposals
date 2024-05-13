@@ -136,7 +136,7 @@ String getJvmErgonomicsProfile()
 
 ## Testing
 
-This proposal only affects ergonomics heuristics for when `dedicated` profile is active, by either selecting it directly, or by using auto selection. This profile will be thoroughly performance tested with a variety of workloads commonly deployed in dedicated environments such as containers, with a variety of memory and CPU settings.
+This proposal only affects ergonomics heuristics for when `dedicated` profile is active. This profile will be thoroughly performance tested with a variety of workloads commonly deployed in dedicated environments such as containers, with a variety of memory and CPU settings.
 
 ## Risks and Assumptions
 The `dedicated` profile may not be ideal for certain workloads where non-heap memory is required beyond assumed differences between total available memory and heuristics ergonomically selected. For these workloads, manual tuning will still be required.
